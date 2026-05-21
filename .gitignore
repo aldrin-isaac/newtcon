@@ -1,0 +1,39 @@
+# Binaries
+/bin/
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Frontend
+/web/node_modules/
+/web/dist/
+/web/.cache/
+/web/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+*.local
+
+# Local dev
+/tmp/
+/scratch/
