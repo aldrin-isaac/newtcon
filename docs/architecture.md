@@ -162,8 +162,14 @@ status, in-flight operation state, reference-count warnings. The Inbox is a
 projection of newtron's current state, not its own state machine.
 
 When the operator acts on a card, the action flows back into the standard
-pipeline (e.g., "Enforce intent" on a drift card triggers a targeted
-`ReplaceAll` via `pkg/newtron`).
+pipeline along the same path as Composer actions: the frontend calls a
+newtcon-server endpoint, the handler delegates to `internal/newtronc`, and
+`newtronc` issues the corresponding HTTP request to newtron-server. For
+example, "Enforce intent" on a drift card is a targeted replace-and-reapply
+operation, surfaced to newtcon over newtron-server's HTTP API and translated
+into a newtcon contract response by `internal/newtronc`. No layer of newtcon
+imports a newtron Go package or invokes a newtron binary; the boundary is
+the same network address used by every other newtcon → newtron interaction.
 
 ### Change Workbench
 
