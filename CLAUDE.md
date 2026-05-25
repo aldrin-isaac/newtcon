@@ -25,8 +25,18 @@ has to manage a SONiC fabric without it must be **more capable** than
 they were when they started. Less capable → newtcon has failed its
 purpose.
 
-**The nine invariants** (see [`docs/operator-philosophy.md`](docs/operator-philosophy.md)
-for the full statement of each):
+**Aesthetic discipline is co-equal with capability.** newtcon must be
+beautiful, elegant, simple at first sight, and powerful one step in.
+A substrate-exposing tool that is ugly, dense, or intimidating cannot
+amplify capability — operators avoid such tools. A beautiful tool
+that is shallow produces another Apstra with better fonts. The tool
+must be both, layered: calm and inviting at first surface, navigably
+deep beneath. The aesthetic litmus test: **does the operator want to
+open this tool?**
+
+**The nine capability invariants** (see [`docs/operator-philosophy.md`](docs/operator-philosophy.md)
+for the full statement of each, plus the aesthetic-discipline demands
+that govern presentation):
 
 1. No black boxes — every automated action is fully inspectable.
 2. Manual-mode parity — anything automation does, the operator can do

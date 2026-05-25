@@ -151,6 +151,87 @@ waits. When outside its competence, it escalates. False confidence is
 worse than no confidence because it teaches the operator to
 over-trust.
 
+## Aesthetic discipline: beautiful, elegant, simple AND powerful
+
+The nine invariants above describe what newtcon must **do**. This section
+describes how it must **feel**. Both are non-negotiable.
+
+A tool that exposes the substrate without aesthetic discipline produces
+an interface that is technically correct but ugly, dense, and
+intimidating. Operators avoid such tools, or use them under duress, and
+the capability amplification this philosophy demands cannot happen
+through a tool the operator dislikes. Substrate exposure is necessary;
+beauty is necessary; neither alone is sufficient.
+
+A tool that is aesthetically refined but shallow produces another
+pretty-but-empty interface — Apstra with better fonts. Beauty without
+substrate exposure produces dependency, not capability. The operator
+enjoys using the tool but does not learn through it.
+
+newtcon must be **both**. The first sight of any surface must be calm,
+inviting, and elegant; depth must be one navigation step away and
+visually delightful when reached.
+
+### What aesthetic discipline demands
+
+- **Typography is load-bearing.** Type choices carry meaning: domain
+  vocabulary in one face, identifiers in another, code in a third.
+  Sizes and weights establish hierarchy without ornament.
+- **Color is semantic, not decorative.** A small palette. Each color
+  has a meaning the operator can name; no decorative use of color
+  anywhere.
+- **Whitespace is generous and intentional.** Information has room to
+  breathe. Density is opt-in, never the default surface.
+- **Motion carries information.** Pipeline stages flow visibly;
+  ChangeSet previews materialize as targets are selected. Motion is
+  never decorative.
+- **Visual hierarchy carries semantic hierarchy.** The most important
+  thing on a screen is the most prominent visually. Substrate is one
+  click away, not in your face.
+- **Density is layered.** Surface view: calm, elegant. One step in:
+  more detail. One step further: full substrate. The operator chooses
+  depth.
+- **Empty states are designed.** Not "no data" but "nothing here yet
+  because [reason]; here is what would appear if [condition]."
+- **Performance is part of aesthetics.** Lag is ugly. Interactions
+  must be immediate; long operations must show their pipeline in
+  motion, not freeze.
+- **Consistency.** A small vocabulary of visual elements, used
+  consistently — just as newtron has a small vocabulary of concepts.
+
+### Simplicity and power
+
+The operator must perceive newtcon as **simple to use, powerful when
+needed**. Not simple OR powerful — both, at the same time, layered.
+
+- **Simple at first sight.** The default surface for any task is the
+  minimum: one input, one output, no clutter. The operator never has
+  to wade through controls to find the one they need.
+- **Powerful one step in.** The full capability is one navigation step
+  away. Power-user shortcuts (keyboard navigation, command palette,
+  structured queries) are present and discoverable but never required
+  to accomplish the basic task.
+- **No "advanced mode" toggle.** Power is layered into the interface,
+  not gated behind a switch. The operator's growing expertise reveals
+  more affordances naturally as they use them.
+
+### The aesthetic litmus test
+
+Alongside the capability litmus test (a year of use must leave the
+operator more capable), apply the aesthetic litmus test:
+
+> **Does the operator want to open this tool?**
+
+If the operator opens newtcon at the start of the day because they look
+forward to using it — because it is calm, elegant, and respects their
+intelligence — the aesthetic discipline is honored. If the operator
+opens newtcon out of obligation, dragging themselves through screens
+they find ugly or noisy, the discipline has failed.
+
+A tool the operator does not want to open cannot amplify capability,
+no matter how many invariants it nominally honors. The capability
+litmus test and the aesthetic litmus test are inseparable.
+
 ## Fractal application: philosophy applies to the team, not just the UI
 
 This philosophy applies to every output of the agent team that builds

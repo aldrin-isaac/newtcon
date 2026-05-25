@@ -160,10 +160,14 @@ newtron's principles even when it looks internally consistent.
 **Adversarial checks (see `.claude/agents/architecture-reviewer.md` for
 the full list):**
 
-1. **Operator-philosophy alignment** — the design makes the operator
-   more capable, not less. Each of the nine invariants relevant to
-   the PR's scope is honored. This check overrides positive results
-   on other checks; a PR that violates the philosophy is rejected.
+1. **Operator-philosophy alignment (capability + aesthetic)** — both
+   litmus tests apply, inseparable. Capability: the design makes the
+   operator more capable, not less; each of the nine invariants
+   relevant to the PR's scope is honored. Aesthetic: the design is
+   calm at first surface, deep one step in, with semantic color and
+   load-bearing typography; the operator wants to open this tool.
+   This check overrides positive results on other checks; a PR that
+   violates either litmus test is rejected.
 2. "Considered alternatives" section present, with at least 2
    non-strawman alternatives.
 3. Assumptions the design takes are identified and defensible.
