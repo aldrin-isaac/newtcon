@@ -8,6 +8,48 @@ section defines a term with precise meaning (e.g., "public API consumption,"
 "design drift"), that definition is binding — it overrides any natural-language
 interpretation of the phrase.
 
+## Operator Philosophy: Intelligent Network, Intelligent Operator
+
+The authoritative document is [`docs/operator-philosophy.md`](docs/operator-philosophy.md).
+This section is a derivative summary.
+
+**The principle:** newtron makes the network intelligent. newtcon
+presents that intelligent network to the operator. The automation
+**must make the operator MORE capable, not less**. An autopilot that
+produces pilots who cannot fly when it fails is a defect; a network
+automation tool that produces operators who cannot operate the network
+manually when the automation fails has the same defect.
+
+**The litmus test:** an operator who uses newtcon for a year and then
+has to manage a SONiC fabric without it must be **more capable** than
+they were when they started. Less capable → newtcon has failed its
+purpose.
+
+**The nine invariants** (see [`docs/operator-philosophy.md`](docs/operator-philosophy.md)
+for the full statement of each):
+
+1. No black boxes — every automated action is fully inspectable.
+2. Manual-mode parity — anything automation does, the operator can do
+   by hand through the same surface.
+3. The substrate is the teaching surface — intent records, projection,
+   drift state, pipeline traces are legible and navigable.
+4. Show before do — every action previews in domain terms before acting.
+5. Why-mode is always available — every UI element navigates to its
+   rationale and governing principle.
+6. Rehearsal mode is real — operators practice manual control in a
+   safe sandbox.
+7. Errors carry the substrate — failures explained at the level the
+   operator would see when doing it manually.
+8. Operator-defined automation — policies are the operator's, visible
+   and editable.
+9. Confidence and limits are explicit — false confidence is worse than
+   no confidence.
+
+**Binding on every design decision.** The Architect cites these in
+every Contract PR. The Architecture Reviewer checks every PR against
+them. When this philosophy and any other principle in this file
+disagree, the philosophy wins.
+
 ## Project Scope
 
 newtcon delivers exactly three operator surfaces, in this order:

@@ -89,15 +89,20 @@ Three antipatterns that this structure avoids by construction:
 or more slices.
 
 **Required reading before every Contract PR:**
-1. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the sections
-   relevant to the change. The Architect must cite specific sections in
-   the PR description ("Newtron principles honored" section).
-2. `../newtron/docs/newtron/unified-pipeline-architecture.md` — confirm
+1. `docs/operator-philosophy.md` — newtcon's foundational philosophy
+   ("intelligent network, intelligent operator"). The Architect must
+   cite the nine invariants applicable to the change in the PR
+   description ("Operator-philosophy invariants honored" section).
+2. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the
+   sections relevant to the change. The Architect must cite specific
+   sections in the PR description ("Newtron principles honored"
+   section).
+3. `../newtron/docs/newtron/unified-pipeline-architecture.md` — confirm
    how the operation traces through Intent → Replay → Render → Deliver
    → Verify.
-3. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md` — current
+4. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md` — current
    newtcon state.
-4. The proposing issue or PR.
+5. The proposing issue or PR.
 
 **Inputs:** the above; the current state of newtcon.
 
@@ -109,6 +114,9 @@ code in the same PR.
 **Mandatory PR description sections (enforced by Architecture Reviewer):**
 - **Considered alternatives** — at least two real alternatives with
   non-strawman reasoning for rejection.
+- **Operator-philosophy invariants honored** — cite which of the nine
+  invariants in `docs/operator-philosophy.md` the design honors and
+  how.
 - **Newtron principles honored** — specific cited sections from
   `DESIGN_PRINCIPLES_NEWTRON.md` that the design operationalizes.
 
@@ -134,29 +142,40 @@ design takes that might not hold, and ways the design drifts from
 newtron's principles even when it looks internally consistent.
 
 **Required reading before every review:**
-1. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the sections
+1. `docs/operator-philosophy.md` — newtcon's foundational philosophy.
+   **You are expected to be deeply familiar with this document and to
+   apply its litmus test and nine invariants to every PR you review.**
+   A PR that violates the philosophy is rejected regardless of how
+   well it passes other checks.
+2. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the sections
    relevant to the PR. **You are expected to be deeply familiar with
    this document.** Approval without grounding in newtron's principles
    is forbidden.
-2. `../newtron/docs/newtron/unified-pipeline-architecture.md`.
-3. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`.
-4. The PR diff and the "Considered alternatives" and "Newtron principles
-   honored" sections of the description.
+3. `../newtron/docs/newtron/unified-pipeline-architecture.md`.
+4. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`.
+5. The PR diff and the three mandatory description sections:
+   "Considered alternatives", "Operator-philosophy invariants
+   honored", "Newtron principles honored".
 
 **Adversarial checks (see `.claude/agents/architecture-reviewer.md` for
 the full list):**
 
-1. "Considered alternatives" section present, with at least 2 non-strawman
-   alternatives.
-2. Assumptions the design takes are identified and defensible.
-3. Simpler design ruled out.
-4. New abstractions justified against existing newtcon / newtron concepts.
-5. No premature flexibility (extension points without concrete present-day
-   need).
-6. Specific newtron-principle sections cited and honored.
-7. newtron's domain vocabulary used (not parallel newtcon-specific
+1. **Operator-philosophy alignment** — the design makes the operator
+   more capable, not less. Each of the nine invariants relevant to
+   the PR's scope is honored. This check overrides positive results
+   on other checks; a PR that violates the philosophy is rejected.
+2. "Considered alternatives" section present, with at least 2
+   non-strawman alternatives.
+3. Assumptions the design takes are identified and defensible.
+4. Simpler design ruled out.
+5. New abstractions justified against existing newtcon / newtron
+   concepts.
+6. No premature flexibility (extension points without concrete
+   present-day need).
+7. Specific newtron-principle sections cited and honored.
+8. newtron's domain vocabulary used (not parallel newtcon-specific
    terminology where newtron's words fit).
-8. Pipeline-trace fields exposed on apply/preview-class endpoints.
+9. Pipeline-trace fields exposed on apply/preview-class endpoints.
 
 **Output:** approve with a comment naming the strongest aspect, OR
 request changes with structured per-check feedback citing newtron

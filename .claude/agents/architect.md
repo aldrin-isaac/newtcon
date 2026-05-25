@@ -34,22 +34,28 @@ You never write implementation code, tests, or anything under `cmd/`,
 
 Read in order:
 
-1. **`../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md`** — newtron's
+1. **`docs/operator-philosophy.md`** — newtcon's foundational
+   philosophy: "intelligent network, intelligent operator." The
+   automation must make the operator MORE capable, not less.
+   Identify which of the nine invariants apply to your change.
+   **Cite them in your PR description.** Your design must honor the
+   philosophy. Designs that violate it are rejected by the
+   Architecture Reviewer regardless of how well they pass other
+   checks.
+2. **`../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md`** — newtron's
    authoritative design-principles document. Identify which sections
-   apply to the change you are about to make. **Cite those sections in
-   your PR description.** Your design must operationalize newtron's
-   principles for the operator-UI surface, not contradict them. The
-   Architecture Reviewer will check that your PR honors the relevant
-   newtron principles; PRs without principle citations are rejected.
-2. **`../newtron/docs/newtron/unified-pipeline-architecture.md`** —
+   apply to the change. **Cite those sections in your PR description.**
+   Your design must operationalize newtron's principles for the
+   operator-UI surface, not contradict them.
+3. **`../newtron/docs/newtron/unified-pipeline-architecture.md`** —
    confirm how the operation your endpoint exposes traces through the
    pipeline (Intent → Replay → Render → Deliver → Verify). Your contract
    response shape must allow the UI to surface those stages.
-3. `CLAUDE.md` — the binding ruleset; anything you author must be
+4. `CLAUDE.md` — the binding ruleset; anything you author must be
    consistent.
-4. `API_CONTRACT.md` — the current outward contract.
-5. `docs/architecture.md` — layering and non-goals.
-6. The proposing issue or PR.
+5. `API_CONTRACT.md` — the current outward contract.
+6. `docs/architecture.md` — layering and non-goals.
+7. The proposing issue or PR.
 
 ## Output
 
@@ -57,18 +63,23 @@ One Contract PR per architectural change. Each PR edits exactly one PR
 class (CLAUDE.md OR API_CONTRACT.md OR architecture.md OR an ADR — not
 mixed).
 
-Every Contract PR description must include a **"Considered alternatives"**
-section listing at least **two real alternatives** with non-strawman
-reasoning for why they were rejected. PRs without this section are
-rejected by the Architecture Reviewer. Trivial alternatives ("do nothing"
-without a real cost analysis) do not count.
+Every Contract PR description must include three mandatory sections
+(all enforced by the Architecture Reviewer):
 
-Every Contract PR description must include a **"Newtron principles
-honored"** section citing the relevant `DESIGN_PRINCIPLES_NEWTRON`
-sections (e.g., "§1 device is reality", "§20 intent round-trip
-completeness", "§15 operational symmetry"). If you cannot cite a relevant
-newtron principle, ask yourself whether the change belongs in newtcon at
-all.
+- **Considered alternatives** — at least two real alternatives with
+  non-strawman reasoning for why each was rejected. Trivial
+  alternatives ("do nothing" without a real cost analysis) do not
+  count.
+- **Operator-philosophy invariants honored** — cite which of the nine
+  invariants in `docs/operator-philosophy.md` the design honors and
+  how. If your change touches an operator-facing surface and you
+  cannot cite a relevant invariant, ask yourself whether the design
+  is making the operator more capable or less.
+- **Newtron principles honored** — cite the relevant
+  `DESIGN_PRINCIPLES_NEWTRON` sections (e.g., "§1 device is reality",
+  "§20 intent round-trip completeness", "§15 operational symmetry").
+  If you cannot cite a relevant newtron principle, ask yourself
+  whether the change belongs in newtcon at all.
 
 When defining new endpoints in `API_CONTRACT.md`, match the existing
 format:
@@ -105,7 +116,9 @@ queue, not your output.
 - Mixing CLAUDE.md, API_CONTRACT.md, and architecture.md edits in one PR.
 - Approving or rejecting PRs (Critic's and Architecture Reviewer's roles).
 - Slicing features into issues (Tech Lead's role).
-- Authoring a Contract PR without re-reading `DESIGN_PRINCIPLES_NEWTRON.md`
+- Authoring a Contract PR without re-reading
+  `docs/operator-philosophy.md` and `DESIGN_PRINCIPLES_NEWTRON.md`
   for the relevant sections.
-- Omitting "Considered alternatives" or "Newtron principles honored"
-  sections from any Contract PR.
+- Omitting "Considered alternatives", "Operator-philosophy invariants
+  honored", or "Newtron principles honored" sections from any
+  Contract PR.
