@@ -255,12 +255,17 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
       "interface": "Ethernet0",
       "applied": true,
       "intent_id": "<opaque>",
+      "operation_id": "<opaque>",
+      "operation_url": "/api/operations/<opaque>",
       "pipeline": {
-        "intent": { "stage": "complete", "at": "..." },
-        "replay": { "stage": "complete", "at": "..." },
-        "render": { "stage": "complete", "at": "..." },
-        "deliver": { "stage": "complete", "at": "..." },
-        "verify": { "stage": "in_progress" }
+        "intent":  { "stage": "complete", "at": "..." },
+        "replay":  { "stage": "complete", "at": "..." },
+        "render":  { "stage": "complete", "at": "..." },
+        "deliver": { "stage": "complete", "at": "..." }
+      },
+      "verify": {
+        "kind": "device_io_assertion",
+        "state": "in_progress"
       }
     }
   ],
@@ -271,9 +276,17 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
 }
 ```
 
-The `verify` stage may complete after the response returns; consumers poll
+`pipeline` is the 4-stage trace defined by
+`unified-pipeline-architecture.md` §2; `verify` is the Device I/O
+assertion defined by §7 and `DESIGN_PRINCIPLES_NEWTRON` §14. Both shapes
+match `GET /api/operations/{operation_id}`; this response is the snapshot
+at apply-return time, and the operations endpoint is the polling
+location for post-deliver verify completion.
+
+The `verify.state` may transition from `in_progress` to `complete` or
+`failed` after the response returns; consumers poll
 [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id) for
-verification completion.
+the terminal verify state.
 
 A stale `preview_id` (expired or already consumed) → 410 Gone with
 `kind: "precondition_failure"`.
@@ -503,23 +516,25 @@ Per-kind `detail` shapes:
   },
   "recommended_resolution": {
     "verb": "reconcile_delta | reconcile_full",
-    "rationale_ref": "unified-pipeline-architecture.md#delta-reconcile"
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#6-delta-reconcile",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#21-reconstruct-dont-record"
+    }
   }
 }
 
 // kind: "convergence_straggler"
 {
   "operation_id": "<opaque>",
-  "pipeline": { /* same shape as GET /api/operations/{operation_id}.pipeline */ },
+  "operation_url": "/api/operations/<opaque>",
+  "pipeline": { /* same shape as GET /api/operations/{operation_id}.pipeline (4 stages) */ },
+  "verify": { /* same shape as GET /api/operations/{operation_id}.verify (Device I/O assertion) */ },
   "intent": {
     "kind": "ApplyService",
     "resource": "Ethernet0",
     "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
     "intent_id": "<opaque>"
-  },
-  "verify_assertion_diff": [
-    { "table": "BGP_NEIGHBOR", "key": "default|10.1.0.1", "field": "asn", "expected": "65002", "actual": "" }
-  ]
+  }
 }
 
 // kind: "partial_operation"
@@ -578,9 +593,22 @@ Per-kind `detail` shapes:
     { "kind": "ApplyService", "resource": "Ethernet0", "at": "2026-05-25T11:02:00Z" }
   ],
   "recommended_mode": "delta",
-  "recommended_mode_rationale": "no drift detected; delta is sufficient (unified-pipeline-architecture.md#delta-reconcile)"
+  "recommended_mode_rationale": {
+    "text": "no drift detected; delta is sufficient",
+    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#6-delta-reconcile",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+  }
 }
 ```
+
+`rationale_ref` and `recommended_mode_rationale` use the same shape
+across the contract: an object with required `substrate` (path-and-
+anchor into newtron substrate docs OR newtcon `docs/`) and required
+`principle` (path-and-anchor into `docs/operator-philosophy.md`,
+`CLAUDE.md`, or `DESIGN_PRINCIPLES_NEWTRON.md`). Operator-philosophy
+invariant #5 ("why-mode is always available") requires both: the
+substrate-level cause AND the governing principle. A string-only
+`rationale_ref` is rejected at contract level.
 
 `available_actions[*].verb` is bounded by the card's kind:
 
@@ -702,7 +730,7 @@ Per-verb `params`:
 | `reconcile_delta` | `{}` |
 | `reconcile_full` | `{ "confirm_disruptive": true }` (required: full reconcile triggers config reload, which is service-affecting; absence → 400) |
 | `rollback_zombie` | `{}` |
-| `clear_zombie` | `{ "confirm_manual_cleanup": true }` (operator asserts CONFIG_DB has been cleaned by hand) |
+| `clear_zombie` | `{ "manual_cleanup": { "confirmed": true, "note": "<required free text describing what was cleaned and how>", "performed_at": "<RFC3339 timestamp of when the operator performed the cleanup>" } }` |
 | `retire_policy` | `{}` (the policy named in the card's `detail.policy.name`) |
 | `acknowledge` | `{}` |
 | `recheck` | `{}` |
@@ -722,7 +750,24 @@ Per-verb `params`:
   "reconcile_mode": "delta | full",
   "drift_resolved_preview": {
     "before": { "missing": 9, "extra": 2, "modified": 3 },
-    "after": { "missing": 0, "extra": 0, "modified": 0 }
+    "after":  { "missing": 0, "extra": 0, "modified": 0 },
+    "entries_resolved": [
+      {
+        "table": "VLAN",
+        "key": "Vlan100",
+        "type": "missing",
+        "expected": { "vlanid": "100" },
+        "actual": {}
+      },
+      {
+        "table": "BGP_NEIGHBOR",
+        "key": "default|10.1.0.1",
+        "type": "modified",
+        "expected": { "asn": "65002" },
+        "actual": { "asn": "65003" }
+      }
+    ],
+    "entries_unresolved": []
   },
   "reference_impact": {
     "created": [],
@@ -734,14 +779,24 @@ Per-verb `params`:
   "disruption": {
     "config_reload": true,
     "bgp_restart": false,
-    "estimated_data_plane_impact": "service-affecting"
+    "estimated_data_plane_impact": "service-affecting",
+    "rationale": [
+      { "input": "config_reload", "value": true,  "contribution": "service-affecting (config_reload restarts SONiC daemons)" },
+      { "input": "bgp_restart",   "value": false, "contribution": "none" },
+      { "input": "verb",          "value": "reconcile_full", "contribution": "service-affecting (full reconcile triggers config reload)" }
+    ]
   },
   "manual_equivalent": {
     "newtron_cli": "newtron switch1 intent reconcile -x --mode delta",
     "newtron_http": {
-      "method": "POST",
-      "path": "/network/default/node/switch1/reconcile?dry_run=false",
-      "body": { "mode": "delta" }
+      "status": "pending_newtron_gap",
+      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/3",
+      "expected_shape": {
+        "method": "POST",
+        "path": "/network/default/node/switch1/reconcile",
+        "query": { "dry_run": "false" },
+        "body": { "mode": "delta" }
+      }
     }
   }
 }
@@ -755,16 +810,62 @@ Field rules:
   `reconcile_mode`, and `drift_resolved_preview` are omitted; `consequence`
   is present instead with the same shape as the dismiss preview's
   `consequence`.
+- `drift_resolved_preview` is REQUIRED on `reconcile_delta` and
+  `reconcile_full` action previews; OPTIONAL on others.
+  `before`/`after` counts (missing/extra/modified) are present for
+  summary display; `entries_resolved: DriftEntry[]` and
+  `entries_unresolved: DriftEntry[]` are REQUIRED and use the same
+  `DriftEntry` schema as `kind: "drift"` card `detail.drift_entries[]`.
+  The operator MUST be able to see WHICH drift entries the verb would
+  resolve and which would remain (operator-philosophy invariants #1
+  "no black boxes" and #4 "show before do" — counts alone do not let
+  the operator inspect the substrate at the decision moment). For
+  delta reconcile, `entries_unresolved` is empty by construction;
+  for partial reconciles or multi-table drift where the operator
+  selected a scope subset, it lists the drift entries the action
+  leaves in place.
 - `manual_equivalent` is REQUIRED on every action preview, including
   no-op verbs. It surfaces the exact newtron CLI and HTTP call the
   operator could issue by hand to achieve the same effect — the
   operator-philosophy invariant #2 (manual-mode parity) is binding,
   not aspirational.
+- `manual_equivalent.newtron_http` is an object with one of two shapes:
+  (a) `{ "status": "available", "method", "path", "query"?, "body"? }`
+  pointing to an endpoint that exists in `newtron/docs/newtron/api.md`
+  today; or (b) `{ "status": "pending_newtron_gap", "gap_issue":
+  "<URL>", "expected_shape": { … } }` for verbs whose newtron HTTP
+  surface does not exist yet and is tracked under the Gap-Handling
+  Protocol (`CLAUDE.md` §Gap-Handling Protocol). The shape MUST be
+  one of these two — silently fabricating an endpoint URL is
+  forbidden. `newtron_cli` always points to the equivalent CLI
+  invocation (the CLI is itself an HTTP client and exposes the gap as
+  a working command path).
+- Per-verb `manual_equivalent.newtron_http.status` today:
+
+  | Verb | `status` | Underlying newtron HTTP |
+  |------|----------|-------------------------|
+  | `reconcile_delta` | `pending_newtron_gap` | newtron#3 |
+  | `reconcile_full` | `pending_newtron_gap` | newtron#3 (composite workflow available as a 3-call sequence but does not match newtcon's single-action contract; see gap issue) |
+  | `rollback_zombie` | `available` | `POST /network/{n}/node/{d}/rollback-zombie` |
+  | `clear_zombie` | `available` | `POST /network/{n}/node/{d}/clear-zombie` |
+  | `retire_policy` | `pending_newtron_gap` | depends on policy-kind-specific reverse op exposure; tracked separately when slice lands |
+  | `acknowledge` | `available` | not applicable; no newtron call (`newtron_http` is `null` for this verb only) |
+  | `recheck` | `available` | re-reads the card's source signals; varies by kind |
+
 - `disruption.estimated_data_plane_impact` is one of `"none"`,
   `"control-plane-only"`, `"service-affecting"`, `"network-affecting"`.
-  newtcon derives this from the verb + reconcile mode + service
-  reference graph; the derivation rules belong in
-  `internal/newtronc/` and are an implementation concern.
+  The verdict is NOT a black box — it MUST be accompanied by a
+  `disruption.rationale` array listing the inputs that produced it
+  (operator-philosophy invariant #1, "no black boxes"). Each rationale
+  entry has the shape:
+
+  ```json
+  { "input": "config_reload", "value": true, "contribution": "service-affecting (config_reload restarts SONiC daemons)" }
+  ```
+
+  The operator must be able to reconstruct the verdict from the
+  rationale array. A rationale array empty of the inputs that justify
+  the verdict is a contract violation.
 
 A drift-guard refusal during preview (newtron refuses to compute the
 ChangeSet because the device has drifted from its declared intents) →
@@ -805,11 +906,15 @@ guarantees per verb:
   "operation_url": "/api/operations/<opaque>",
   "executed": true,
   "pipeline": {
-    "intent":  { "stage": "complete",    "at": "2026-05-25T14:06:01Z" },
-    "replay":  { "stage": "complete",    "at": "2026-05-25T14:06:01Z" },
-    "render":  { "stage": "complete",    "at": "2026-05-25T14:06:01Z" },
-    "deliver": { "stage": "complete",    "at": "2026-05-25T14:06:02Z" },
-    "verify":  { "stage": "in_progress", "at": null }
+    "intent":  { "stage": "complete", "at": "2026-05-25T14:06:01Z" },
+    "replay":  { "stage": "complete", "at": "2026-05-25T14:06:01Z" },
+    "render":  { "stage": "complete", "at": "2026-05-25T14:06:01Z" },
+    "deliver": { "stage": "complete", "at": "2026-05-25T14:06:02Z" }
+  },
+  "verify": {
+    "kind": "device_io_assertion",
+    "state": "in_progress",
+    "started_at": "2026-05-25T14:06:02Z"
   },
   "card_state_after": "resolved | persists | armed_for_recheck"
 }
@@ -825,7 +930,8 @@ guarantees per verb:
   fresh signal state.
 
 For verbs that produce no ChangeSet (`acknowledge`, `clear_zombie`,
-`recheck`), `operation_id`, `operation_url`, and `pipeline` are omitted.
+`recheck`), `operation_id`, `operation_url`, `pipeline`, and `verify` are
+omitted.
 
 A stale `preview_id` → 410 Gone with `kind: "precondition_failure"`.
 
@@ -836,24 +942,61 @@ must re-preview.
 A newtron failure mid-pipeline → 502 with `kind: "internal"` and
 `details` carrying the partial pipeline trace and the newtron error.
 
+For `clear_zombie`, the response includes a `manual_cleanup_record`
+object echoing the `note` and `performed_at` from the request and adding
+`recorded_at` (server-side timestamp when newtcon accepted the clear).
+This record is queryable from the operations endpoint for the
+operation's retention window — the operator's narrative MUST survive
+the action, otherwise `clear_zombie` becomes an undocumented act
+violating operator-philosophy invariant #1 and `DESIGN_PRINCIPLES_NEWTRON`
+§14's substrate-carrying-errors principle.
+
+```json
+{
+  "card_id": "<echoed>",
+  "verb": "clear_zombie",
+  "executed": true,
+  "manual_cleanup_record": {
+    "note": "<from request>",
+    "performed_at": "<from request>",
+    "recorded_at": "2026-05-25T14:06:00Z"
+  },
+  "card_state_after": "resolved"
+}
+```
+
 ## Endpoints — Operations
 
-These endpoints expose the per-operation pipeline trace used by Service
-Composer apply, Inbox card actions, and (later) Change Workbench commit.
-The trace shape is the same regardless of which surface initiated the
-operation — the pipeline is one pipeline
-(`unified-pipeline-architecture.md` §2).
+These endpoints expose the per-operation trace used by Service Composer
+apply, Inbox card actions, and (later) Change Workbench commit. The trace
+shape is the same regardless of which surface initiated the operation —
+the pipeline is one pipeline (`unified-pipeline-architecture.md` §2).
+
+The trace separates two concerns that `unified-pipeline-architecture.md`
+itself separates:
+
+- **Pipeline stages.** §2 defines the pipeline as
+  `Intent → Replay → Render → [Deliver]` — four stages, with `Deliver`
+  conditional on whether the caller commits the ChangeSet.
+- **Verify.** §7 classifies `cs.Verify(n)` as a **Device I/O operation**,
+  not a pipeline stage. It re-reads CONFIG_DB and asserts the ChangeSet
+  landed (`DESIGN_PRINCIPLES_NEWTRON` §14). This is a post-deliver
+  assertion against the device, not a sibling of the build stages.
+
+The contract reflects that split: a `pipeline` object with four stages
+and a separate top-level `verify` object typed as a Device I/O result.
 
 ### `GET /api/operations/{operation_id}`
 
-Return the full per-stage pipeline trace for an in-flight or recently
-completed operation. Idempotent; safe to poll. No newtron-side state is
-mutated.
+Return the full trace for an in-flight or recently completed operation.
+Idempotent; safe to poll. No newtron-side state is mutated.
 
-Operations are retained for at least 30 minutes after the terminal stage
-reaches `complete` or `failed`. Beyond that retention, the operation may
-return 404; consumers that need long-term records consult newtron's
-intent history directly via newtcon's (future) Provenance surface.
+**Operations endpoint retention semantics are NOT yet pinned down**
+(source-of-truth, retention window, eviction policy). Tracked in
+[newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18). This
+contract specifies a minimum behavior (operations retained at least
+30 minutes after terminal-state) sufficient to unblock implementer
+work; the full retention contract lands in a follow-up PR.
 
 **Response 200:**
 ```json
@@ -905,24 +1048,26 @@ intent history directly via newtcon's (future) Provenance surface.
       "lock_acquired_at": "2026-05-25T14:06:01Z",
       "lock_released_at": "2026-05-25T14:06:02Z",
       "save_config_done": true
-    },
-    "verify": {
-      "stage": "complete | in_progress | failed | skipped",
-      "started_at": "2026-05-25T14:06:02Z",
-      "completed_at": "2026-05-25T14:06:03Z",
-      "assertion": {
-        "passed": 14,
-        "failed": 0,
-        "errors": [
-          {
-            "table": "BGP_NEIGHBOR",
-            "key": "default|10.1.0.1",
-            "field": "asn",
-            "expected": "65002",
-            "actual": ""
-          }
-        ]
-      }
+    }
+  },
+  "verify": {
+    "kind": "device_io_assertion",
+    "state": "pending | in_progress | complete | failed | skipped",
+    "started_at": "2026-05-25T14:06:02Z",
+    "completed_at": "2026-05-25T14:06:03Z",
+    "skip_reason": null,
+    "assertion": {
+      "passed": 14,
+      "failed": 0,
+      "errors": [
+        {
+          "table": "BGP_NEIGHBOR",
+          "key": "default|10.1.0.1",
+          "field": "asn",
+          "expected": "65002",
+          "actual": ""
+        }
+      ]
     }
   },
   "terminal": {
@@ -936,26 +1081,44 @@ intent history directly via newtcon's (future) Provenance surface.
 
 Field rules:
 
-- Every stage object has `stage` ∈ `pending | in_progress | complete | failed | skipped`.
-  `pending` stages have null timestamps.
-- `verify.assertion` is present only when `verify.stage == "complete"` or
-  `verify.stage == "failed"`. The shape mirrors newtron's
-  `VerificationResult` (`api.md` §15 Write Result Types): `passed`,
-  `failed`, `errors[]`. `errors[]` is absent when all entries passed.
-  This is `DESIGN_PRINCIPLES_NEWTRON` §14: verify is an assertion against
-  the ChangeSet, not an observation.
-- `intent.intent_record` exposes the NEWTRON_INTENT record that the
+- **Pipeline stages.** Every entry in `pipeline` has `stage` ∈
+  `pending | in_progress | complete | failed | skipped`. `pending` stages
+  have null timestamps. The four stages are exactly those of
+  `unified-pipeline-architecture.md` §2 (`Intent → Replay → Render →
+  [Deliver]`); a `deliver` stage of `skipped` is correct and expected
+  for any operation where the caller did not commit the ChangeSet (e.g.,
+  Replay-only flows).
+- **Verify is a Device I/O operation, not a pipeline stage.** Per
+  `unified-pipeline-architecture.md` §7 ("All device interaction is
+  layered on top of expected state via a transport connection... Verify
+  (`cs.Verify(n)`) … Re-read from Redis, compare against ChangeSet").
+  The top-level `verify` object carries `kind: "device_io_assertion"`
+  to make the classification load-bearing on the contract.
+- **`verify.assertion`** mirrors newtron's `VerificationResult` (`api.md`
+  §15 Write Result Types): `passed`, `failed`, `errors[]`. `errors[]`
+  is absent when all entries passed. Present only when `verify.state ==
+  "complete"` or `verify.state == "failed"`. Per
+  `DESIGN_PRINCIPLES_NEWTRON` §14, verify is an assertion against the
+  ChangeSet — newtron knows what it wrote — so the shape is
+  `expected/actual` per field, never a "verification status" enum that
+  would conflate assertion with cross-device observation.
+- **`verify.skip_reason`** is populated when `verify.state == "skipped"`.
+  Verify is skippable for verbs that wrote no ChangeSet (e.g.,
+  `acknowledge`, `clear_zombie`) or when the caller explicitly opted out
+  (`no_save` / similar newtron flags); operators must be told which.
+- **`intent.intent_record`** exposes the NEWTRON_INTENT record that the
   operation wrote, in the same shape newtron stores it. Per
   `DESIGN_PRINCIPLES_NEWTRON` §1 and §22, the intent record IS the
   decision substrate; the operator must be able to read it directly,
   not via a digest.
-- `terminal.outcome == "partial"` is reserved for multi-target operations
-  initiated by Composer or Workbench; per-node operation traces use
-  `success` or `failure` only.
-- A stage that newtron does not execute for this verb is `skipped`, with
-  `summary` carrying the reason (e.g., `acknowledge` verbs reach this
-  endpoint via the `verb: "Reconcile"` family with `verify: skipped`
-  only when the underlying newtron call explicitly skipped verify).
+- **`terminal.outcome == "partial"`** is reserved for multi-target
+  operations initiated by Composer or Workbench; per-node operation
+  traces use `success` or `failure` only.
+- **Terminal-state derivation.** `terminal.outcome == "success"` requires
+  every `pipeline.*.stage` ∈ `{complete, skipped}` AND `verify.state` ∈
+  `{complete, skipped}` AND (when `verify.state == "complete"`)
+  `verify.assertion.failed == 0`. Any `failed` stage or non-zero
+  `assertion.failed` produces `terminal.outcome == "failure"`.
 
 **Errors:**
 - Unknown or expired `operation_id` → 404 with
