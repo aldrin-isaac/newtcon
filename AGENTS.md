@@ -42,7 +42,7 @@ Reference: <https://code.claude.com/docs/en/agent-teams>.
 
 | Role | Model | Cardinality | Invocation | Owns |
 |------|-------|-------------|------------|------|
-| **Architect** | Opus (`claude-opus-4-7`) | 1 (singleton, on-demand) | API/architecture decisions; new contract endpoints | `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`, ADRs |
+| **Architect** | Opus (`claude-opus-4-7`) | 1 (singleton, on-demand) | API/architecture decisions; new contract endpoints; design-system authorship | `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`, ADRs (including design-system ADRs: typography, color, motion, component vocabulary) |
 | **Architecture Reviewer** | Opus (`claude-opus-4-7`) | 1 (mandatory, per Architect PR) | Every Architect-authored PR | Adversarial design review; newtron-principle alignment |
 | **Tech Lead** | Opus (`claude-opus-4-7`) | 1 (per-feature) | Feature kickoff | Slicing features into independent issues; acceptance criteria per slice |
 | **Implementer** | Sonnet (`claude-sonnet-4-6`) | N (parallel pool) | Per-slice issue | Code + tests + docs for one slice end-to-end |
@@ -84,9 +84,20 @@ Three antipatterns that this structure avoids by construction:
 
 ### Architect (Opus)
 
-**Invoked when:** a new endpoint is proposed; a public API surface changes;
-`CLAUDE.md` or `API_CONTRACT.md` need editing; a design question crosses two
-or more slices.
+**Invoked when:** a new endpoint is proposed; a public API surface
+changes; `CLAUDE.md` or `API_CONTRACT.md` need editing; a design
+question crosses two or more slices; the design system needs
+authorship or revision (typography, color palette, motion vocabulary,
+component primitives — captured as ADRs in `docs/adr/`).
+
+**Design-system responsibility.** The Architect owns the design
+system, not just the API contract. Visual design decisions
+(typography choices, color palette with named semantic roles, motion
+language, component vocabulary) are authored as ADRs that
+Implementers consume. The Architecture Reviewer's aesthetic litmus
+test applies to design-system ADRs as much as to contract endpoints.
+"Pick a tasteful default" is not acceptable — the design system is
+explicitly designed, reasoned about, and documented.
 
 **Required reading before every Contract PR:**
 1. `docs/operator-philosophy.md` — newtcon's foundational philosophy

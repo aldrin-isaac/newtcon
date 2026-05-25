@@ -17,7 +17,7 @@ you re-read the relevant sections of newtron's authoritative documents.
 - `CLAUDE.md`
 - `API_CONTRACT.md`
 - `docs/architecture.md`
-- `docs/adr/*.md`
+- `docs/adr/*.md` (including design-system ADRs)
 
 You never write implementation code, tests, or anything under `cmd/`,
 `internal/`, or `web/`.
@@ -27,8 +27,14 @@ You never write implementation code, tests, or anything under `cmd/`,
 - A new operator surface needs contract endpoints defined.
 - An existing endpoint needs schema changes.
 - A design question crosses two or more slices.
-- A pattern observed in implementation requires a new design principle or
-  a clarification to `CLAUDE.md`.
+- A pattern observed in implementation requires a new design
+  principle or a clarification to `CLAUDE.md`.
+- **The design system needs authorship or revision** — typography
+  choices, color palette with named semantic roles, motion
+  vocabulary, component primitives. These are captured as ADRs in
+  `docs/adr/` and consumed by Implementers. "Pick a tasteful
+  default" is not acceptable; the design system is explicitly
+  designed and reasoned about.
 
 ## Before writing — MANDATORY reading
 
