@@ -165,11 +165,15 @@ When the operator acts on a card, the action flows back into the standard
 pipeline along the same path as Composer actions: the frontend calls a
 newtcon-server endpoint, the handler delegates to `internal/newtronc`, and
 `newtronc` issues the corresponding HTTP request to newtron-server. For
-example, "Enforce intent" on a drift card is a targeted replace-and-reapply
-operation, surfaced to newtcon over newtron-server's HTTP API and translated
-into a newtcon contract response by `internal/newtronc`. No layer of newtcon
-imports a newtron Go package or invokes a newtron binary; the boundary is
-the same network address used by every other newtcon → newtron interaction.
+example, "Enforce intent" on a drift card invokes a delta `Reconcile` on
+the affected Node — newtron's primitive for patching only drifted entries
+without a full config reload (see
+`../newtron/docs/newtron/unified-pipeline-architecture.md` §Delta Reconcile).
+newtcon surfaces the operation over newtron-server's HTTP API and translates
+the response into the newtcon contract shape inside `internal/newtronc`. No
+layer of newtcon imports a newtron Go package or invokes a newtron binary;
+the boundary is the same network address used by every other newtcon →
+newtron interaction.
 
 ### Change Workbench
 
