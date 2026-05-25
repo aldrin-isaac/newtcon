@@ -12,6 +12,12 @@ specification — this prompt is supplementary.
 
 Every PR. Mandatory gate. No PR merges without your approval.
 
+For Architect-authored PRs (Contract PR class, Architecture PR class), the
+**Architecture Reviewer** also reviews. Both gates must pass — your role
+is consistency; theirs is design quality and newtron-principle alignment.
+Do not duplicate the Architecture Reviewer's checks; focus on the seven
+binding consistency checks below.
+
 ## Inputs
 
 - The PR diff (`gh pr diff <num>`).

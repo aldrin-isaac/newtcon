@@ -43,7 +43,7 @@ design decisions in unfamiliar areas:
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Intent → Replay → Render → Deliver |
 | AI Instructions | `docs/ai-instructions.md` | Universal behavioral directives |
-| DESIGN_PRINCIPLES | `docs/DESIGN_PRINCIPLES_NEWTRON.md` | The principles newtcon UX surfaces |
+| **DESIGN_PRINCIPLES_NEWTRON** (foundational) | `docs/DESIGN_PRINCIPLES_NEWTRON.md` | newtron's authoritative principles. **Required reading for the Architect and Architecture Reviewer before every Contract PR.** newtcon's design must derive from and not contradict these. |
 
 **newtcon does not re-document newtron's substrate.** When the UI exposes an
 intent record, a ChangeSet, or a projection, those terms mean what newtron's
@@ -134,8 +134,20 @@ do not create new handler files unless adding a new resource family.
 
 ## Design Principles
 
-These principles are derived from newtron's DESIGN_PRINCIPLES, adapted for the
-operator-UI surface. They are binding on every agent.
+These principles are derived from newtron's
+`DESIGN_PRINCIPLES_NEWTRON.md`, adapted for the operator-UI surface. They
+are binding on every agent.
+
+**Derivation is mandatory.** newtcon's principles are not invented; they
+operationalize newtron's principles for the UI layer. The Architect MUST
+cite specific newtron principle sections when proposing changes to this
+list (see `AGENTS.md` §Architect). A principle in newtcon that contradicts
+a newtron principle is a bug.
+
+newtcon surfaces newtron's architecture; it does not reshape it. Where
+newtron has a word for something (ChangeSet, Intent, projection,
+ApplyService, Reconcile, drift, validate/verify), newtcon uses that word.
+New terminology in newtcon is a design smell.
 
 ### Service-First, Not Device-First
 

@@ -14,6 +14,7 @@ wiring that makes the roles operational lives in `.claude/`:
   `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` (required for Claude Code's
   agent-teams feature; requires Claude Code v2.1.32 or later).
 - `.claude/agents/architect.md`
+- `.claude/agents/architecture-reviewer.md`
 - `.claude/agents/tech-lead.md`
 - `.claude/agents/implementer.md`
 - `.claude/agents/critic.md`
@@ -42,13 +43,25 @@ Reference: <https://code.claude.com/docs/en/agent-teams>.
 | Role | Model | Cardinality | Invocation | Owns |
 |------|-------|-------------|------------|------|
 | **Architect** | Opus (`claude-opus-4-7`) | 1 (singleton, on-demand) | API/architecture decisions; new contract endpoints | `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`, ADRs |
+| **Architecture Reviewer** | Opus (`claude-opus-4-7`) | 1 (mandatory, per Architect PR) | Every Architect-authored PR | Adversarial design review; newtron-principle alignment |
 | **Tech Lead** | Opus (`claude-opus-4-7`) | 1 (per-feature) | Feature kickoff | Slicing features into independent issues; acceptance criteria per slice |
 | **Implementer** | Sonnet (`claude-sonnet-4-6`) | N (parallel pool) | Per-slice issue | Code + tests + docs for one slice end-to-end |
-| **Critic** | Opus (`claude-opus-4-7`) | 1 (mandatory, per-PR) | Every PR before merge | Design drift review, principle compliance, scope check |
+| **Critic** | Opus (`claude-opus-4-7`) | 1 (mandatory, per-PR) | Every PR before merge | Consistency review: scope, contract compliance, file ownership, principle compliance |
 | **Drift Auditor** | Opus (`claude-opus-4-7`) | 1 (weekly cron) | Weekly | Cumulative diff scan, systemic drift detection, operator report |
 
 No PM role. No separate Test role. No "Frontend Engineer" and "Backend Engineer"
 splits (slices cross the stack).
+
+The Architect and Architecture Reviewer are intentionally separate seats with
+the same model. The Architect proposes; the Architecture Reviewer pushes
+back. Without that adversarial gate, the Architect is a single-point-of-
+failure for design quality — every Architect-authored PR would pass through
+only a consistency check (Critic) and a weekly aggregate scan (Drift
+Auditor), neither of which evaluates whether the proposed design is the
+best design. Both Architect and Architecture Reviewer are required to be
+deeply familiar with `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md`;
+newtcon's contract decisions surface newtron's architecture to the
+operator and must not contradict it.
 
 ## Why This Structure
 
@@ -75,15 +88,82 @@ Three antipatterns that this structure avoids by construction:
 `CLAUDE.md` or `API_CONTRACT.md` need editing; a design question crosses two
 or more slices.
 
-**Inputs:** the proposing issue or PR; the current `CLAUDE.md`,
-`API_CONTRACT.md`, and relevant newtron authoritative docs.
+**Required reading before every Contract PR:**
+1. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the sections
+   relevant to the change. The Architect must cite specific sections in
+   the PR description ("Newtron principles honored" section).
+2. `../newtron/docs/newtron/unified-pipeline-architecture.md` — confirm
+   how the operation traces through Intent → Replay → Render → Deliver
+   → Verify.
+3. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md` — current
+   newtcon state.
+4. The proposing issue or PR.
 
-**Outputs:** a PR that edits `CLAUDE.md`, `API_CONTRACT.md`, or
-`docs/architecture.md` (or all three). Architect PRs are a separate PR class
-and may not include implementation code in the same PR.
+**Inputs:** the above; the current state of newtcon.
+
+**Outputs:** a PR that edits exactly one PR class (`CLAUDE.md` OR
+`API_CONTRACT.md` OR `docs/architecture.md` OR an ADR — not mixed).
+Architect PRs are a separate PR class and may not include implementation
+code in the same PR.
+
+**Mandatory PR description sections (enforced by Architecture Reviewer):**
+- **Considered alternatives** — at least two real alternatives with
+  non-strawman reasoning for rejection.
+- **Newtron principles honored** — specific cited sections from
+  `DESIGN_PRINCIPLES_NEWTRON.md` that the design operationalizes.
+
+**Review gates:** both Critic (consistency) and Architecture Reviewer
+(design quality, newtron alignment) must approve. Either rejection blocks
+merge.
 
 **Out of scope:** implementing endpoints; writing tests; reviewing
-implementation PRs for code quality.
+implementation PRs for code quality; reviewing other Architect PRs.
+
+### Architecture Reviewer (Opus)
+
+**Invoked when:** every Architect-authored PR (Contract PR class,
+Architecture PR class). Mandatory gate alongside the Critic; neither alone
+is sufficient.
+
+**Why this role exists:** the Critic checks "does this fit?". The
+Architecture Reviewer checks "is this the right shape, and does it honor
+newtron?". Without this seat, the Architect is a single-point-of-failure
+for design quality. The role is deliberately adversarial — its purpose is
+to surface alternatives the Architect did not consider, assumptions the
+design takes that might not hold, and ways the design drifts from
+newtron's principles even when it looks internally consistent.
+
+**Required reading before every review:**
+1. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — re-read the sections
+   relevant to the PR. **You are expected to be deeply familiar with
+   this document.** Approval without grounding in newtron's principles
+   is forbidden.
+2. `../newtron/docs/newtron/unified-pipeline-architecture.md`.
+3. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md`.
+4. The PR diff and the "Considered alternatives" and "Newtron principles
+   honored" sections of the description.
+
+**Adversarial checks (see `.claude/agents/architecture-reviewer.md` for
+the full list):**
+
+1. "Considered alternatives" section present, with at least 2 non-strawman
+   alternatives.
+2. Assumptions the design takes are identified and defensible.
+3. Simpler design ruled out.
+4. New abstractions justified against existing newtcon / newtron concepts.
+5. No premature flexibility (extension points without concrete present-day
+   need).
+6. Specific newtron-principle sections cited and honored.
+7. newtron's domain vocabulary used (not parallel newtcon-specific
+   terminology where newtron's words fit).
+8. Pipeline-trace fields exposed on apply/preview-class endpoints.
+
+**Output:** approve with a comment naming the strongest aspect, OR
+request changes with structured per-check feedback citing newtron
+principle sections.
+
+**Out of scope:** writing code, writing tests, reviewing Implementer PRs
+(Critic's role), reviewing PRs you previously approved, stylistic critique.
 
 ### Tech Lead (Opus)
 
@@ -135,6 +215,12 @@ agent-to-agent communication.
 
 **Invoked when:** every PR opens. Mandatory gate; no PR merges without Critic
 approval.
+
+For Architect-authored PRs (Contract PR class, Architecture PR class), the
+**Architecture Reviewer** also reviews. Both gates must pass. Your role
+is consistency; theirs is design quality. Do not duplicate the
+Architecture Reviewer's design checks; focus on the seven binding
+consistency checks below.
 
 **Inputs:** the PR diff, `CLAUDE.md`, `AGENTS.md`, `API_CONTRACT.md`,
 `docs/architecture.md`, relevant newtron principles.
@@ -217,12 +303,12 @@ The Tech Lead re-slices.
 
 PRs are typed. Each type has different requirements:
 
-| Class | Editable Files | Requires Critic? | Requires Architect? |
-|-------|----------------|-------------------|---------------------|
-| **Implementation** | `internal/`, `cmd/`, `web/`, tests | Yes | No |
-| **Contract** | `API_CONTRACT.md` | Yes | Yes (must be authored by Architect) |
-| **Architecture** | `CLAUDE.md`, `AGENTS.md`, `docs/architecture.md` | Yes | Yes (Architect-authored) |
-| **Audit** | `docs/audits/` | No | No (auto-committed by Drift Auditor) |
+| Class | Editable Files | Requires Critic? | Requires Architect? | Requires Architecture Reviewer? |
+|-------|----------------|-------------------|---------------------|---------------------------------|
+| **Implementation** | `internal/`, `cmd/`, `web/`, tests | Yes | No | No |
+| **Contract** | `API_CONTRACT.md` | Yes | Yes (must be authored by Architect) | Yes |
+| **Architecture** | `CLAUDE.md`, `AGENTS.md`, `docs/architecture.md` | Yes | Yes (Architect-authored) | Yes |
+| **Audit** | `docs/audits/` | No | No (auto-committed by Drift Auditor) | No |
 
 A single PR may not cross classes. An Implementer PR that tries to edit
 `API_CONTRACT.md` is rejected by the Critic on principle, regardless of the
