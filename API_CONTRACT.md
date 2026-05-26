@@ -77,6 +77,33 @@ matching `details` schemas defined here. A handler that invents a new
 violation; the per-target failure has the same shape as the top-level
 `error` body.
 
+### Vocabulary boundaries between kinds
+
+Two pairs of kinds have overlapping conceptual territory; the contract
+draws the line as follows so handlers and consumers do not have to
+guess:
+
+- **`validation_failure.reason: "target_absent"`** vs
+  **`precondition_failure.condition: "node_unknown" | "service_unknown"`**.
+  `target_absent` is per-field within a multi-target request whose
+  body otherwise parsed (the operator named a VLAN that does not
+  exist on switch1 inside one entry of a 4-entry `targets[]`);
+  `node_unknown` / `service_unknown` are whole-request preconditions
+  on a path parameter (the operator hit `/api/services/legacy/instances`
+  for a service that does not exist in the spec). Rule:
+  request-cannot-be-attempted-at-all → `precondition_failure`;
+  request-attempted-and-one-field-refused → `validation_failure`.
+- **`validation_failure` (substrate stages)** vs
+  **`drift_refusal`**. Substrate-stage validations
+  (`validation_stage: "substrate_precondition" | "substrate_schema"`)
+  are refusals grounded in a specific named input being wrong (a VLAN
+  ID out of range, a VRF that does not exist on the device). A
+  `drift_refusal` is refusal grounded in device CONFIG_DB diverging
+  from the projection — no input is "wrong"; the substrate has moved
+  since the operator's last visit. Rule: input-is-wrong →
+  `validation_failure`; input-was-right-when-you-typed-it-but-the-device-changed
+  → `drift_refusal`.
+
 ### Companion fields on every error
 
 Two fields appear on every `details` payload, regardless of `kind`:
@@ -400,7 +427,14 @@ Bounded enum for `condition`:
 | `service_unknown` | `service` path parameter not in the spec | `{ service }` |
 | `card_signal_resolved` | Inbox `card_id` no longer derivable — signal resolved before operator opened it | `{ card_id, resolved_at }` |
 | `newtron_capability_missing` | newtron is reachable but does not expose a capability this endpoint requires; a Gap-Handling-Protocol issue exists | `{ capability, gap_issue_url, expected_shape }` |
-| `partial_results_present` | Catastrophic mid-sequence failure with partial results captured (e.g., commit's 502) | `{ partial_results, last_attempted_step }` |
+
+Catastrophic mid-sequence failures with partial results captured (e.g.,
+the Workbench commit 502 path) are NOT a `precondition_failure`. There
+is a single contract home for partial results:
+`internal.details.partial_results` (see §`details` for `kind:
+"internal"` below). Per-endpoint sections that report partial-results
+recovery point at that home; the `precondition_failure` enum does not
+duplicate it.
 
 Field rules:
 
@@ -409,9 +443,8 @@ Field rules:
 - **`condition_details`** populates the per-row schema above. Fields
   not in the per-row schema for the named `condition` are absent (not
   `null`).
-- **`next_action_hint`** is REQUIRED for every `condition` except
-  `partial_results_present` (which is itself a recovery hint).
-  `verb` names a concrete operator action (`re_preview`,
+- **`next_action_hint`** is REQUIRED for every `condition` in the
+  enum. `verb` names a concrete operator action (`re_preview`,
   `re_dry_run`, `re_commit_preview`, `stage_reconcile_delta`,
   `inspect_operation`, `open_inbox_card`, `file_gap_followup`,
   `retry_after_expiry`, etc.); `endpoint` points to where the verb is
@@ -1728,10 +1761,14 @@ Field rules:
 
 **Errors:**
 - Unknown or expired `operation_id` → 404 with
-  `kind: "precondition_failure"` and `details.reason: "operation_unknown_or_expired"`.
+  `kind: "precondition_failure"` per the typed schema in §Error
+  Schema, with `condition: "operation_unknown_or_expired"`.
 - newtron-server unreachable while the operation is still in-flight →
-  503 with `kind: "newtron_unavailable"`; the last-known pipeline state
-  is included in `details.last_known`.
+  503 with `kind: "newtron_unavailable"` per the typed schema in §Error
+  Schema. `details.last_known.kind` is `"operation_pipeline"` and
+  `details.last_known.payload` carries the last-observed pipeline
+  snapshot; `details.affected_nodes[]` lists the Node the operation
+  targets.
 
 ## Endpoints — Change Workbench (third surface)
 
@@ -2152,10 +2189,12 @@ proposed HTTP shape (which matches the `expected_shape` block above).
 The implementer slice for `/diff` is blocked until newtron#4 lands.
 
 **Errors:**
-- Unknown `batch_id` → 404 `precondition_failure`.
-- newtron unreachable → 503 `newtron_unavailable` with
-  `details.last_known.projection_diff` carrying the most recent
-  successful diff if any.
+- Unknown `batch_id` → 404 `precondition_failure` per the typed schema
+  in §Error Schema.
+- newtron unreachable → 503 `newtron_unavailable` per the typed schema
+  in §Error Schema. `details.last_known.kind` is `"projection_diff"`
+  and `details.last_known.payload` carries the most recent successful
+  diff if any (`kind: "none"` if none has been computed).
 
 ### `POST /api/workbench/{batch_id}/dry_run`
 
@@ -2282,10 +2321,11 @@ A drift-guard refusal on any target → 409 with `kind:
   states) → 409 `precondition_failure` with `details.current_state`.
   Dry-run on a stashed batch is allowed (and useful — the operator
   inspects a stashed batch's effect before deciding to restore).
-- newtron unreachable for any Node → 503 `newtron_unavailable` with
-  `details.unreachable_nodes[]`. The dry-run is not partially
-  returned; either every Node's sandbox replay succeeds or the call
-  fails.
+- newtron unreachable for any Node → 503 `newtron_unavailable` per
+  the typed schema in §Error Schema. `details.affected_nodes[]` lists
+  the unreachable Nodes; `details.last_known.kind` is `"none"` (the
+  dry-run is not partially returned — either every Node's sandbox
+  replay succeeds or the call fails as a whole).
 
 ### `POST /api/workbench/{batch_id}/commit/preview`
 
@@ -2434,8 +2474,9 @@ Field rules:
   commit-preview whose Render stage would reject mid-flight would
   teach a false confidence.
 - newtron-server unreachable for any target Node → 503
-  `newtron_unavailable` with `details.unreachable_nodes[]`. The
-  preview is not partially rendered.
+  `newtron_unavailable` per the typed schema in §Error Schema.
+  `details.affected_nodes[]` lists the unreachable Nodes; the preview
+  is not partially rendered.
 
 ### `POST /api/workbench/{batch_id}/commit`
 
@@ -2594,10 +2635,15 @@ Field rules:
 **Errors:**
 - Stale or already-consumed `preview_id` → 410 Gone with
   `kind: "precondition_failure"`.
-- `preview_id` was a dry-run preview, not a commit-preview → 400
-  `validation_failure` with `details.preview_kind`. The contract
-  rejects this on principle: the operator must have seen the
-  substrate-faithful commit preview before committing.
+- `preview_id` was a dry-run preview, not a commit-preview → 409
+  `precondition_failure` per the typed schema in §Error Schema, with
+  `condition: "preview_id_wrong_class"` and
+  `condition_details: { preview_id, received_kind: "workbench_dry_run", required_kind: "workbench_commit_preview" }`.
+  The contract rejects this on principle: the operator must have seen
+  the substrate-faithful commit preview before committing. (HTTP 409
+  matches the precondition-failure convention used elsewhere in the
+  contract for wrong-state preview misuse, replacing the prior 400
+  which conflated this with input-validation failures.)
 - Batch state is not `previewed` (commit-preview must immediately
   precede commit) → 409 `precondition_failure`.
 - Catastrophic newtcon-server failure mid-sequence → 502 with
@@ -2779,7 +2825,8 @@ Field rules:
   to non-committed intents → 400 `validation_failure` with
   `details.invalid_handles[]`.
 - newtron-server unreachable for any target Node → 503
-  `newtron_unavailable` with `details.unreachable_nodes[]`.
+  `newtron_unavailable` per the typed schema in §Error Schema.
+  `details.affected_nodes[]` lists the unreachable Nodes.
 
 ### `POST /api/workbench/{batch_id}/revert`
 
@@ -3370,9 +3417,11 @@ Field rules:
     intent record no longer exists on the device (reversed by a
     later operation). The operator is told which.
 - newtron-server unreachable → 503 with
-  `kind: "newtron_unavailable"` and `details.last_known.record`
-  carrying the most recent cached record snapshot if newtcon-server
-  has one from a prior fetch within the request-cache window.
+  `kind: "newtron_unavailable"` per the typed schema in §Error
+  Schema. `details.last_known.kind` is `"intent_record"` and
+  `details.last_known.payload` carries the most recent cached record
+  snapshot if newtcon-server has one from a prior fetch within the
+  request-cache window (`kind: "none"` otherwise).
 
 ### `GET /api/projection/nodes/{node}`
 
@@ -4054,8 +4103,10 @@ Field rules:
   {"operation_unknown_or_expired", "operation_evicted"}` (same
   semantics as the operations endpoint).
 - newtron-server unreachable while verify is in-flight → 503 with
-  `kind: "newtron_unavailable"` and `details.last_known.assertion`
-  carrying the most recent assertion snapshot newtcon-server has.
+  `kind: "newtron_unavailable"` per the typed schema in §Error Schema.
+  `details.last_known.kind` is `"verify_assertion"` and
+  `details.last_known.payload` carries the most recent assertion
+  snapshot newtcon-server has (`kind: "none"` if none captured yet).
 
 ## Endpoints — Rehearsal (sandbox surface)
 
