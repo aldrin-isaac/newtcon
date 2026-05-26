@@ -795,14 +795,10 @@ Per-verb `params`:
   "manual_equivalent": {
     "newtron_cli": "newtron switch1 intent reconcile -x --mode delta",
     "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/3",
-      "expected_shape": {
-        "method": "POST",
-        "path": "/network/default/node/switch1/reconcile",
-        "query": { "dry_run": "false" },
-        "body": { "mode": "delta" }
-      }
+      "status": "available",
+      "method": "POST",
+      "path": "/network/default/node/switch1/intent/reconcile",
+      "query": { "reconcile": "delta", "dry_run": "false" }
     }
   }
 }
@@ -865,8 +861,8 @@ Field rules:
 
   | Verb | `status` | Underlying newtron HTTP |
   |------|----------|-------------------------|
-  | `reconcile_delta` | `pending_newtron_gap` | newtron#3 |
-  | `reconcile_full` | `pending_newtron_gap` | newtron#3 (composite workflow available as a 3-call sequence but does not match newtcon's single-action contract; see gap issue) |
+  | `reconcile_delta` | `available` | `POST /network/{n}/node/{d}/intent/reconcile?reconcile=delta&dry_run=false` (preview: `dry_run=true`) |
+  | `reconcile_full` | `available` | `POST /network/{n}/node/{d}/intent/reconcile?reconcile=full&dry_run=false` (preview: `dry_run=true`; the operator confirms the disruptive `confirm_disruptive: true` `params` at the newtcon layer — newtron's endpoint itself is non-confirming) |
   | `rollback_zombie` | `available` | `POST /network/{n}/node/{d}/rollback-zombie` |
   | `clear_zombie` | `available` | `POST /network/{n}/node/{d}/clear-zombie` |
   | `retire_policy` | `pending_newtron_gap` | depends on policy-kind-specific reverse op exposure; tracked separately when slice lands |
@@ -3400,7 +3396,7 @@ Idempotent; safe to poll. No newtron-side state is mutated.
       {
         "verb": "stage_reconcile_delta",
         "rationale": "if verify failures correspond to a drift detection signal, a delta reconcile would re-apply the missing entries; stage via Workbench",
-        "manual_equivalent_newtron_cli": "newtron switch1 intent reconcile -x  # full; see gap #3 for delta"
+        "manual_equivalent_newtron_cli": "newtron switch1 intent reconcile -x --mode delta"
       }
     ]
   },
