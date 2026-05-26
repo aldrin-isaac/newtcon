@@ -65,7 +65,19 @@ disagree, the philosophy wins.
 newtcon delivers exactly three operator surfaces, in this order:
 
 1. **Service Composer** — pick a service spec, pick N target interfaces across
-   M nodes, preview the resulting ChangeSets, commit atomically. Same surface
+   M nodes, preview the resulting ChangeSets, commit. The commit is **atomic
+   per-Node** — each target Node's ChangeSet lands as a single TxPipeline
+   write (newtron's `cs.Apply`, `ApplyDrift`, or `ReplaceAll`, depending on
+   the verb; see `../newtron/docs/newtron/unified-pipeline-architecture.md`
+   §6, §8 and `DESIGN_PRINCIPLES_NEWTRON.md` §8, §11). When a Composer
+   batch spans multiple Nodes (M > 1), the per-Node commits are independent:
+   newtron operates per-device and exposes no cross-Node atomicity
+   primitive, so a multi-Node batch is **structured best-effort**, with
+   each target's outcome reported separately in
+   `POST /api/apply`'s `per_target[]` response. The operator sees, per
+   target, whether the per-Node ChangeSet committed atomically, partially
+   failed at validate / deliver / verify, or did not run because an earlier
+   target failed and the batch policy was configured to halt. Same surface
    handles apply, refresh, and remove. See [`API_CONTRACT.md`](API_CONTRACT.md).
 2. **Operator Inbox** — actionable cards for drift, convergence stragglers,
    partial operations, reference-count warnings, reconcile-due signals.
@@ -263,6 +275,16 @@ Errors are returned in domain terms, not HTTP-status approximations. A
 validation failure from newtron's pipeline is surfaced with its validate-stage
 output. A drift-guard refusal is rendered as a structured drift report, not as
 "500 Internal Server Error."
+
+Multi-target operations (multi-Node Composer batches, Workbench commits)
+extend this honesty principle: the per-target outcome is reported per
+target, not collapsed to a single batch verdict. A 200 response carrying
+`aggregate.all_applied = false` is the correct shape for a partial
+success; a partial-success batch MUST NOT be reported as a uniform
+success or a uniform failure. This is operator-philosophy invariant #9
+(Confidence and limits are explicit) made binding at the contract: the
+honest shape — "Node A committed atomically, Node B failed at verify,
+Node C did not run" — survives all the way to the operator.
 
 ### No Hidden State
 
