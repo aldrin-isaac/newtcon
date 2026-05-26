@@ -123,9 +123,23 @@ agent) proposes them, the PR is rejected on principle:
 ## Surfaces and Their Pipeline Trace
 
 Each of the three operator surfaces produces operations that trace through
-newtron's pipeline (Intent → Replay → Render → Deliver → Verify). The UI
-makes the pipeline stages visible — this is non-negotiable per
-[`../CLAUDE.md`](../CLAUDE.md) §Pipeline-Aware UX.
+newtron's pipeline (Intent → Replay → Render → [Deliver]) and, when the
+operation delivered to a device, the post-deliver Verify assertion. The UI
+makes both the pipeline stages and the verify assertion visible — this is
+non-negotiable per [`../CLAUDE.md`](../CLAUDE.md) §Pipeline-Aware UX.
+
+The two are deliberately not collapsed into a single "five-stage pipeline."
+Per `../newtron/docs/newtron/unified-pipeline-architecture.md` §2, the
+pipeline is `Intent → Replay → Render → [Deliver]` — four stages, with
+`Deliver` conditional on whether the caller commits the ChangeSet. Per §7
+of the same document, `cs.Verify(n)` is a **Device I/O operation**: it
+re-reads CONFIG_DB and asserts that what was delivered actually landed.
+Verify is therefore a post-deliver assertion against the device, not a
+sibling of the build stages. The contract (`../API_CONTRACT.md`
+§Operations) reflects that split: a `pipeline` object with four stages
+and a separate top-level `verify` object typed `device_io_assertion`. The
+prose here matches that shape so an agent can map a UI element to a
+contract field without translation.
 
 ### Service Composer
 
@@ -136,7 +150,7 @@ operator selects service + targets
 POST /api/preview ─► newtcon-server ─HTTP─► newtron-server
                           │                       │
                           │                preview pipeline
-                          │                (Intent → Replay → Render dry-run)
+                          │                (Intent → Replay → Render, Deliver skipped)
                           │                       │
                           │                ChangeSet per target
                           │                       │
@@ -147,12 +161,16 @@ preview rendered to operator
 POST /api/apply ───► newtcon-server ─HTTP─► newtron-server
                           │                       │
                           │                apply pipeline
-                          │                (Render → Deliver → Verify)
+                          │                (Intent → Replay → Render → Deliver)
                           │                       │
-                          │                intent recorded on device
+                          │                ChangeSet committed; intent on device
+                          │                       │
+                          │                then, as Device I/O (not a stage):
+                          │                cs.Verify(n) re-reads CONFIG_DB
+                          │                and asserts the ChangeSet landed
                           │                       │
                           ▼ ◄─────────────────────┘
-per-target pipeline trace
+per-target pipeline trace + verify assertion
 ```
 
 ### Operator Inbox
