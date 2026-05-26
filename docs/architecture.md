@@ -212,13 +212,14 @@ delivers atomically where newtron's API guarantees it.
 
 ## Caching
 
-newtcon has no persistent cache in v0. Per-request, it may cache within the
+newtcon's persistent state is limited to its observation-history layer (see
+`internal/history/` or equivalent). Operational state (intent, projection,
+ChangeSet, drift detection) is **never** cached persistently — it is sourced
+live from newtron at query time. Per-request, the server may cache within a
 handler call to avoid duplicate HTTP calls to newtron-server. Any cache
-beyond that requires a contract decision (Architect PR) and must be:
-
-- Explicit: documented in the contract response with `as_of` timestamp.
-- Time-bounded: maximum lifetime declared in the contract.
-- Invalidatable: the operator can force a refresh via a contract endpoint.
+beyond that requires a contract decision (Architect PR) and must be
+explicit, time-bounded, invalidatable, and surfaced with `as_of` timestamps
+in the response.
 
 Hidden caches violate `CLAUDE.md` §No Hidden State.
 
