@@ -661,6 +661,559 @@ Field rules:
   should be re-classified as one of the other four kinds, not
   emitted as `internal` with explanatory `rationale_ref` text.
 
+## Shared Response Schemas
+
+Five typed objects are reused across multiple endpoints in this contract:
+`ChangeSet`, `Validate`, `Confidence`, `Reverses`, and
+`PartialSuccessSafety`. They are defined once here and referenced by
+name elsewhere. Any endpoint that names one of these schemas in its
+response MUST populate it exactly as defined; per-endpoint divergence
+is a contract violation.
+
+The pattern mirrors §Error Schema (where five `kind` values are
+defined once and per-endpoint failures reference back). Re-coining
+parallel shapes per endpoint produces the same drift `CLAUDE.md`
+§No Hidden State rejects on substrate freshness: two vocabularies for
+the same domain object teach the operator that the substrate is two
+things, when it is one.
+
+### `ChangeSet`
+
+The structured per-Node ChangeSet — the universal contract per
+`DESIGN_PRINCIPLES_NEWTRON.md` §11 ("The ChangeSet Is the Universal
+Contract"): the same object IS the preview, the execution receipt,
+and the verification contract. The operator never sees three
+divergent representations because there are not three; there is one.
+
+Shape:
+
+```json
+{
+  "writes": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "key": "default|10.1.0.1",
+      "fields": { "asn": "65002", "local_addr": "10.1.0.0", "admin_status": "up" },
+      "prior_fields": null
+    }
+  ],
+  "deletes": [
+    {
+      "table": "INTERFACE_IP",
+      "key": "Ethernet0|10.0.0.5/31",
+      "fields": null,
+      "prior_fields": { "scope": "global" }
+    }
+  ],
+  "intent_records": [
+    {
+      "table": "NEWTRON_INTENT",
+      "key": "interface|Ethernet0",
+      "fields": { "operation": "apply-service", "state": "actuated", "name": "transit", "service_name": "transit", "ip_address": "10.1.0.0/31", "_parents": "vrf|Vrf_TRANSIT,service|transit" }
+    }
+  ]
+}
+```
+
+Field rules:
+
+- **`writes[*]`** — every CONFIG_DB add or modify. `table` and `key`
+  are newtron's CONFIG_DB substrate vocabulary, never paraphrased.
+  `fields` is the full hash of field→value pairs the write would
+  install (or did install, in execution-receipt usage); values are
+  strings because CONFIG_DB hashes are string-valued. An empty
+  `fields` map is permitted and meaningful: SONiC uses key-as-data
+  patterns (e.g., `LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32`,
+  PortChannel members, route targets) where the key carries the
+  semantic content and the hash is empty. Per
+  `newtron/pkg/newtron/device/sonic/types.go` `Entry`, field-less
+  entries are valid wire-shape.
+- **`writes[*].prior_fields`** — REQUIRED on execution-receipt usage
+  (Provenance `/api/changesets/{id}`, operation-trace endpoints) when
+  newtron's `Lock → snapshot → fn → commit-or-restore → Unlock` cycle
+  captured prior state. `null` when the write was a creation, when
+  the entry was not previously present, or when the source response
+  is a preview (preview cannot know what the device will hold at
+  execution time without a re-read newtron does not perform on
+  dry-run — surfacing `null` is the honest answer, not a fabricated
+  baseline). Preview responses MAY populate `prior_fields` from
+  newtron's last-known projection state when an explicit field rule
+  says so on the endpoint; absent that rule, `prior_fields` is
+  `null` on preview.
+- **`deletes[*]`** — every CONFIG_DB delete. `table` and `key` carry
+  the deletion target.
+- **`deletes[*].fields`** — `null` for whole-row deletes (the
+  default; `Delete(table, key)` in newtron removes the entire hash).
+  Present as a `string[]` ONLY when the delete is field-scoped (e.g.,
+  newtron's field-level merge path on `DEVICE_METADATA` where one
+  field is dropped while the rest of the hash is preserved); the
+  array names which fields are removed. The field-list form is rare
+  in practice but the schema admits it because the substrate admits
+  it; coining `field_deletes` as a separate shape would teach two
+  vocabularies for what is one CONFIG_DB operation.
+- **`deletes[*].prior_fields`** — REQUIRED on execution-receipt
+  usage when newtron captured prior state; surfaced so the operator
+  sees what was actually removed, not just that something was
+  removed. `null` on preview (same rule as `writes[*].prior_fields`).
+- **`intent_records[]`** — the NEWTRON_INTENT record(s) the
+  ChangeSet writes (`unified-pipeline-architecture.md` §3, §4: every
+  mutating operation prepends its intent record to the ChangeSet,
+  per `cs.Prepend()`). Separated from `writes[]` because the intent
+  record IS the decision substrate per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §1 and §22 — the operator's
+  one-glance view of "what intent will this write" must not require
+  scanning the writes array for `table == "NEWTRON_INTENT"`.
+  Implementations also include the intent record inside `writes[]`
+  so that wire-order semantics (intent first, then config; per
+  `unified-pipeline-architecture.md` §3) remain explicit on the
+  CONFIG_DB stream. The two surfaces are redundant by design: one
+  serves the operator's domain question ("what does newtron now
+  declare?") and one serves the CONFIG_DB execution question ("what
+  is the wire order?"); collapsing them would force the operator to
+  reconstruct domain semantics from substrate.
+
+Endpoints that already return their own ChangeSet shape with
+additional fields (notably `/api/changesets/{id}` with
+`render_decisions[]`, `wire_order`, etc.) embed this schema's
+fields verbatim and add their own on top; the schema names the
+floor, not the ceiling. The `intent_records_written[*]` field on
+`/api/changesets/{id}` is a navigation-augmented sibling of this
+schema's `intent_records[]` (it adds `intent_url`, `role`); both
+exist because the captured ChangeSet (Provenance retention) carries
+addressing the preview ChangeSet (per-invocation) does not yet
+have.
+
+**Gap and reconstruction.** newtron's `WriteResult`
+(`docs/newtron/api.md` §15) today exposes the ChangeSet only via the
+human-readable `preview` string and a `change_count` integer; the
+structured `ConfigChange[]` (table, key, type, fields) that newtron
+carries on `ChangeSet.Changes` internally is not serialized to the
+wire. Until newtron exposes the structured field
+([newtron#11](https://github.com/aldrin-isaac/newtron/issues/11)),
+`internal/newtronc/` reconstructs it from the dry-run string. The
+reconstruction is bounded by the Gap-Handling Protocol; the
+operator surface remains the typed schema above.
+
+### `Validate`
+
+A typed split of validation outcomes per `DESIGN_PRINCIPLES_NEWTRON.md`
+§13 ("Prevent Bad Writes, Don't Just Detect Them"), which distinguishes
+**preconditions** ("business logic") from **schema validation**
+("data format") as two fail-closed gates with different operator
+meanings. Collapsing them into one `errors[]` array hides the
+substrate cause from the operator (operator-philosophy invariant #7,
+"errors carry the substrate") and prevents the UI from rendering the
+two as different operator-facing affordances ("you must supply X" vs
+"this binding conflicts").
+
+Shape:
+
+```json
+{
+  "ok": true,
+  "preconditions": [
+    {
+      "validation_stage": "request | substrate_precondition",
+      "rejections": [ /* §Error Schema validation_failure rejections shape */ ]
+    }
+  ],
+  "schema_violations": [
+    {
+      "validation_stage": "substrate_schema",
+      "rejections": [ /* §Error Schema validation_failure rejections shape */ ]
+    }
+  ]
+}
+```
+
+Field rules:
+
+- **`ok`** — `true` when both `preconditions[]` and
+  `schema_violations[]` are empty; `false` when either is non-empty.
+  The discriminator is computed; it is not a separately settable
+  field. A response with `ok: true` and non-empty arrays is a
+  contract violation.
+- **`preconditions[]`** carries domain-level refusals:
+  - `validation_stage: "request"` — newtcon-server itself rejected
+    inputs before any newtron call (malformed body, unknown enum,
+    missing required field, target not in spec). These appear when
+    the validation is per-target inside a multi-target request whose
+    body otherwise parsed; whole-request preconditions are
+    `precondition_failure` per §Error Schema's vocabulary boundaries.
+  - `validation_stage: "substrate_precondition"` — newtron's
+    `PreconditionError` per `DESIGN_PRINCIPLES_NEWTRON.md` §13 "Two
+    kinds of refusal": the operation's subject is absent (VLAN
+    missing, interface missing, VRF never created), OR a domain
+    refusal where "the resource exists but can't be safely modified"
+    (the VRF has interfaces still bound to it, the IP-VPN has
+    bindings that reference it). Both are surfaced here because both
+    are "business-logic" refusals in §13's framing — distinct from
+    schema rejections, which are about data format. The operator
+    fixes a precondition by changing the situation (unbinding a
+    dependent resource, creating a missing parent); they fix a
+    schema violation by changing the value.
+- **`schema_violations[]`** carries newtron's schema-validation
+  refusals per `DESIGN_PRINCIPLES_NEWTRON.md` §13 "Schema validation
+  enforces data format": out-of-range value, unknown enum, bad
+  pattern, missing required field, unknown table, or write to a
+  table newtron owns. `validation_stage` is `"substrate_schema"`
+  (the only value admitted in this array). These are the fail-closed
+  format checks that prevent the bad write from reaching Redis. The
+  operator fixes a schema violation by changing the value to one the
+  schema accepts; substrate is the YANG-derived schema rule, which
+  is the authority per §13.
+- **`rejections[]`** in both arrays uses the same per-row shape as
+  §Error Schema's `validation_failure.rejections[]`: typed
+  `locator`, bounded `reason`, `expected` / `actual` / `allowed`
+  populated per reason, and a substrate-grounded `message`. The
+  rejection rows are structurally identical because the substrate is
+  identical — the split is by *stage* (which gate refused), not by
+  *substrate shape* (the field, the value, the reason). The
+  rationale_ref companion on each row points at §13 (substrate) and
+  invariant #7 (principle).
+
+Endpoint authors choose the response shape for partial-validity:
+- **Preview-class endpoints** (`/api/preview`, `/api/workbench/{batch_id}/dry_run`,
+  `/api/inbox/{card_id}/action/preview`, `/api/intents/preview`,
+  `/api/rehearsal/sessions/{sid}/preview`) MAY return 200 with
+  `Validate.ok == false` AND a populated `ChangeSet`/`Confidence`
+  block alongside; the preview is still informative for the targets
+  that did validate, and the operator commits a partial-validity
+  preview at their own risk (commit-class endpoints refuse). Refusing
+  to return any preview is also admitted when the failure is severe
+  enough that the ChangeSet cannot be synthesized; in that case the
+  response is non-2xx with `kind: "validation_failure"` per §Error
+  Schema.
+- **Commit-class endpoints** (`/api/apply`, `/api/workbench/{batch_id}/commit`,
+  `/api/workbench/{batch_id}/revert`, `/api/inbox/{card_id}/action`,
+  `/api/intents`, `/api/rehearsal/sessions/{sid}/apply`) refuse on
+  any non-empty `preconditions[]` or `schema_violations[]` in their
+  consumed preview; the refusal is 400 `validation_failure` per
+  §Error Schema, sourced from the preview's `Validate` block.
+
+### `Confidence`
+
+A categorical confidence/limits marker per operator-philosophy
+invariant #9 ("Confidence and limits are explicit. … False
+confidence is worse than no confidence because it teaches the
+operator to over-trust"). The contract surfaces confidence where the
+system has it, with substrate-grounded reasons when confidence is
+not full.
+
+Shape:
+
+```json
+{
+  "level": "high | conditional | low",
+  "reasons": [
+    {
+      "code": "preconditions_substrate_only | resolution_unverified | drift_observed_during_render | shared_resource_count_estimated | verify_heuristic | newtron_partial_response | reconstruction_from_string | cross_target_dependency_unknown",
+      "message": "ROUTE_MAP|TRANSIT_IN_A1B2C3D4 reference count is computed from the current projection; if newtron is processing concurrent writes the count may shift before commit",
+      "rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#24-policy-vs-infrastructure--shared-objects-have-independent-lifecycles",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  ]
+}
+```
+
+Field rules:
+
+- **`level`** — bounded categorical, three values:
+  - `high` — the system asserts the output with substrate-grounded
+    certainty: every input was verified, no estimates were made, no
+    upstream gap is filling the answer. `reasons[]` is empty (the
+    only `level` value for which empty `reasons[]` is permitted).
+  - `conditional` — the system computed the output, but at least
+    one substrate input is qualified by a named limit (a
+    reconstruction from a non-canonical newtron field, a count
+    estimated from the projection rather than re-read, a verify
+    that is heuristic rather than assertional). The operator can
+    proceed but must read the `reasons[]` first.
+  - `low` — the system cannot assert the output: a required
+    substrate input was missing or unreachable, an upstream gap
+    forced fallback to a conservative default, or the output is a
+    best-effort guess. `reasons[]` MUST be non-empty AND MUST name
+    the failing substrate; rendering `level: "low"` without
+    grounding the failure violates invariant #1 ("no black boxes").
+- **`reasons[]`** — REQUIRED non-empty when `level != "high"`.
+  Each entry has a bounded `code`, a substrate-grounded `message`,
+  and a `rationale_ref` (the typed `{ substrate, principle }`
+  object used throughout this contract). The codes are bounded:
+
+  | `code` | Meaning |
+  |--------|---------|
+  | `preconditions_substrate_only` | The preview's preconditions were checked at newtcon-server only; substrate-level preconditions (newtron's PreconditionError per §13) have not been re-verified since the last newtron read. |
+  | `resolution_unverified` | The preview's resolved params depend on a spec resolution that newtron has not re-confirmed for this request (cache hit within request window). |
+  | `drift_observed_during_render` | Drift was observed during render but was below the guard threshold; the preview is computed against the projection, not the actual device. |
+  | `shared_resource_count_estimated` | Reference counts in `reference_impact` are computed from the projection; concurrent operations against the same shared resources MAY shift the count before commit. |
+  | `verify_heuristic` | The verify stage is using a heuristic check (e.g., dataplane probe, BGP session reachability) rather than the canonical `cs.Verify(n)` ChangeSet assertion. Used on cross-device verify additions, NOT on the standard Composer/Workbench apply path. |
+  | `newtron_partial_response` | newtron returned a partial response; some substrate fields were filled from cache or defaulted. |
+  | `reconstruction_from_string` | A structured field was reconstructed from a string-only newtron response (today: the ChangeSet `writes`/`deletes` arrays reconstructed from `WriteResult.preview` — see newtron#11 for the gap). |
+  | `cross_target_dependency_unknown` | Cross-target dependency analysis (used for `PartialSuccessSafety`) could not be completed; the safety class fell back to `unknown`. |
+
+  New codes are a Contract PR.
+- **`rationale_ref`** uses the typed shape (`{ substrate, principle }`
+  with required `substrate` and required `principle`). Per the
+  convention used throughout this contract, a string-only rationale
+  is rejected at contract level.
+
+The confidence object is computed and surfaced; it is not provided
+by the operator on input. An endpoint that supports user-asserted
+confidence is a different surface (rehearsal, manual-mode parity
+discretion) and not in scope for the `Confidence` schema.
+
+### `Reverses`
+
+A reverse-symmetry confirmation block per
+`DESIGN_PRINCIPLES_NEWTRON.md` §15 ("Symmetric Operations — What
+You Create, You Can Remove"): every mutating operation has a
+corresponding reverse, and the operator who initiates a remove MUST
+see the originating substrate (what is being reversed, when, by
+which operation) before the remove runs. Without that view, the
+operator cannot verify the remove undoes a specific apply — exactly
+the gap §15 closes by binding reverse symmetry into newtron's
+contract.
+
+Shape:
+
+```json
+{
+  "originating": [
+    {
+      "intent_id": "<opaque>",
+      "intent_url": "/api/intents/<opaque>",
+      "operation_id": "<opaque>",
+      "operation_url": "/api/operations/<opaque>",
+      "verb": "ApplyService",
+      "applied_at": "2026-04-15T08:23:00Z",
+      "applied_by": "operator:aldrin",
+      "intent_record_summary": {
+        "operation": "apply-service",
+        "resource_key": "interface|Ethernet0",
+        "name": "transit",
+        "state": "actuated"
+      }
+    }
+  ],
+  "reverse_strategy": "symmetric_verb | reconcile_delta | reconcile_full",
+  "reverse_strategy_rationale_ref": {
+    "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#16-verb-vocabulary--the-name-is-the-lifecycle-contract"
+  },
+  "inverse_of_inverse": {
+    "verb": "ApplyService",
+    "stage_via": "/api/preview",
+    "params_to_redo": {
+      "service": "transit",
+      "ip_address": "10.1.0.0/31",
+      "peer_as": 65002
+    },
+    "manual_equivalent": {
+      "newtron_cli": "newtron switch1 apply-service --interface Ethernet0 --service transit --ip 10.1.0.0/31 --peer-as 65002 -x",
+      "newtron_http": {
+        "status": "available",
+        "method": "POST",
+        "path": "/network/default/node/switch1/interface/Ethernet0/apply-service",
+        "body": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 }
+      }
+    },
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/intents.md#11-identity-fields",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`originating[]`** — REQUIRED, non-empty when the reverse exists.
+  Lists every intent record the reverse operation will undo. The
+  typical case is one entry (a remove of a single apply); composite
+  reverses (e.g., a remove that decommissions a service across
+  multiple bindings on one interface) carry one entry per
+  originating intent. Per §15's "If newtron creates it, newtron must
+  be able to remove it", every originating intent surfaced here is
+  expected to be reversible by the named `reverse_strategy`; entries
+  that are NOT reversible (e.g., baseline `setup-*` intents with no
+  individual reverse) appear in the parent endpoint's
+  `scope_unrevertable` block, not here.
+- **`originating[*].intent_record_summary`** — the small set of
+  fields the operator needs at-a-glance to confirm "yes, that is the
+  intent I want to reverse." Full record substrate is reachable via
+  `intent_url`. The summary is not a paraphrase: every field shown
+  is a verbatim NEWTRON_INTENT record field per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §22 (`operation`, `resource_key`,
+  `name`, `state`).
+- **`originating[*].applied_at`** — the timestamp from the intent
+  record's `applied_at` field (NEWTRON_INTENT `_timing.applied_at`
+  per `newtron/docs/newtron/intents.md` §1). Surfaced because the
+  operator who removes "the apply" must be able to confirm WHICH
+  apply (re-applies move the timestamp forward; the operator must
+  see the current binding's apply time, not an earlier replay's).
+- **`reverse_strategy`** — one of three bounded values that match
+  the Workbench `/revert/preview` enum:
+  - `symmetric_verb` — the canonical case per §15's pair table.
+    Forward verb dispatches its symmetric reverse (e.g.,
+    `ApplyService` → `RemoveService`).
+  - `reconcile_delta` — used when the originating intent has no
+    individual reverse per §15's baseline exception (`setup-*`,
+    `set-*` verbs); the reverse is reconcile on the affected Node
+    with the originating intent removed from the projection.
+  - `reconcile_full` — reserved for full-projection reverses; rare
+    in practice and only emitted when the originating commit was
+    itself a `Reconcile`.
+- **`inverse_of_inverse`** — the reverse-of-the-reverse: what the
+  operator would do to redo the originating apply, if they later
+  decide they actually wanted it. The contract surfaces this so the
+  remove is not a one-way door — per §15, every operation has a
+  symmetric reverse, and the operator who reverses an apply must
+  also see how to re-apply if needed. The `params_to_redo` block
+  carries the user params from the originating intent record (per
+  §22's dual-purpose intent: user params are sufficient for
+  reconstruction). `manual_equivalent` follows the same four-status
+  enum used elsewhere in this contract (`available |
+  pending_newtron_gap | partial_match | not_applicable`).
+
+The `Reverses` schema is present ONLY in preview responses where
+`operation` is a remove or revert verb (or in the `remove` slot of
+endpoints with operation discrimination). On apply previews of a
+forward verb, the `Reverses` block is absent: there is no prior
+intent to reverse. Endpoints that always remove (Workbench
+`/revert/preview`, Inbox `retire_policy` action preview) populate
+`Reverses` on every response; endpoints that may be apply OR remove
+(Composer `/api/preview` with `operation: "remove"`) populate
+`Reverses` only when the operation discriminator is a remove.
+
+### `PartialSuccessSafety`
+
+A structured per-batch (and optionally per-target) signal stating
+whether partial success of a multi-target operation produces a
+known-safe or known-fragile state, with substrate-level rationale.
+Per operator-philosophy invariant #9 ("Confidence and limits are
+explicit"), the operator MUST know before clicking apply whether
+"3 of 5 succeeded" is recoverable-at-leisure or actively dangerous.
+
+Shape:
+
+```json
+{
+  "class": "safe | fragile | unknown",
+  "reasons": [
+    {
+      "code": "independent_targets | shared_policy_reuse | cross_target_dependency | coordinated_routing_policy | half_configured_peering | uniform_route_target_required | reconcile_baseline | unknown_classification | newtron_dependency_endpoint_unavailable",
+      "message": "BGP peering edge between switch1 Ethernet0 (neighbor 10.1.0.1) and switch2 Ethernet0 (neighbor 10.1.0.0) — partial commit leaves a half-configured session",
+      "edges": [
+        {
+          "from": { "node": "switch1", "resource_key": "interface|Ethernet0|bgp|10.1.0.1" },
+          "to":   { "node": "switch2", "resource_key": "interface|Ethernet0|bgp|10.1.0.0" },
+          "kind": "bgp_peering"
+        }
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  ],
+  "fragile_target_subset": ["switch1:Ethernet0", "switch2:Ethernet0"],
+  "recovery_hint": {
+    "verb": "revert",
+    "stage_via": "/api/workbench/{batch_id}/revert/preview",
+    "rationale": "if partial-commit occurs and the operator decides to back out, /revert produces the symmetric reverses (per §15) for the committed subset"
+  }
+}
+```
+
+Field rules:
+
+- **`class`** — bounded categorical, three values:
+  - `safe` — every target in the batch is independent of every
+    other under partial success. If 3 of 5 succeed and 2 fail, the
+    successful 3 are in a state the operator can retry the failed
+    2 against at leisure, with no transient blackhole, no
+    half-configured peering, no uniformity-violating policy
+    rollout. The rationale names the substrate (typically:
+    "no cross-target dependency edge was found among the proposed
+    intents").
+  - `fragile` — at least one cross-target dependency exists that
+    makes partial success dangerous. Examples: two halves of a
+    BGP peering, coordinated routing-policy changes, EVPN
+    peer-group uniformity, fabric-wide RT changes. `reasons[]`
+    names the edges (substrate-grounded), and
+    `fragile_target_subset[]` lists the targets implicated in
+    those edges. The operator who proceeds despite `fragile` is
+    making an informed decision; the operator who proceeds without
+    knowing `fragile` is the failure mode this schema prevents.
+  - `unknown` — the system could not determine safety. **Default
+    conservative posture: the consumer treats `unknown` as
+    `fragile` for display purposes** (the operator sees the
+    warning), but the contract preserves the distinction so the
+    operator knows whether the system *judged* fragile or
+    *failed to determine*. `reasons[]` names the substrate cause
+    of the unknown classification (typically:
+    `cross_target_dependency_unknown` or
+    `newtron_dependency_endpoint_unavailable`).
+- **`reasons[]`** — REQUIRED non-empty when `class != "safe"`.
+  Bounded `code`, substrate-grounded `message`, optional `edges[]`
+  carrying the substrate-level dependency edges that produced the
+  classification, and a typed `rationale_ref`. The codes are
+  bounded:
+
+  | `code` | When used | `class` |
+  |--------|-----------|---------|
+  | `independent_targets` | No cross-target dependency edge among proposed intents. | `safe` |
+  | `shared_policy_reuse` | Multiple targets reference the same shared policy object (ACL_TABLE, ROUTE_MAP, etc. per `DESIGN_PRINCIPLES_NEWTRON.md` §24, §25); the policy is created on first reference and shared. Partial success is still safe — reference-counting makes shared-policy operations independent. | `safe` |
+  | `cross_target_dependency` | A substrate-level dependency edge connects two targets. The `edges[]` list names them. | `fragile` |
+  | `coordinated_routing_policy` | The verb-and-params shape implies coordinated policy across nodes (e.g., RT changes, prefix-set changes, peer-group uniformity). | `fragile` |
+  | `half_configured_peering` | Two targets are the two halves of a BGP peering; partial success leaves a session that cannot establish. | `fragile` |
+  | `uniform_route_target_required` | Multiple targets must import the same RT for VPN route exchange; partial success creates a partition. | `fragile` |
+  | `reconcile_baseline` | The batch includes baseline verbs (`setup-*`) per §15's exception; partial success is undefined because baseline is per-Node-lifetime. Conservative posture: `fragile`. | `fragile` |
+  | `unknown_classification` | newtcon-server's classifier has not been taught to evaluate the verb-and-params combination. | `unknown` |
+  | `newtron_dependency_endpoint_unavailable` | The newtron HTTP endpoint that exposes cross-target dependency edges ([newtron#13](https://github.com/aldrin-isaac/newtron/issues/13)) is not yet available; classification falls back to `unknown`. | `unknown` |
+
+  New codes are a Contract PR.
+- **`fragile_target_subset[]`** — OPTIONAL when `class == "safe"`,
+  REQUIRED non-empty when `class == "fragile"` AND the fragility
+  applies to a proper subset of targets (i.e., not every target is
+  implicated). Identifiers are the per-target locator
+  (`node:interface` for Composer targets, `intent_handle` for
+  Workbench batches). When fragility applies to every target in
+  the batch (e.g., a uniform policy change), the subset is
+  redundant with the full target list and MAY be omitted; in that
+  case the parent endpoint's per-target list IS the fragile set.
+  When `class == "unknown"`, the field is omitted (the system
+  cannot judge subset membership without judging the class).
+- **`recovery_hint`** — REQUIRED on `class == "fragile"` and
+  RECOMMENDED on `class == "unknown"`. Names a concrete next-action
+  verb the operator can use if partial commit occurs. The hint is
+  not prescriptive; the operator may choose differently. For
+  multi-target operations whose reverses are themselves symmetric
+  (§15), `revert` is the canonical next action and `stage_via`
+  points at the Workbench `/revert/preview` surface.
+
+**Source and gap.** Cross-target dependency analysis depends on a
+newtron endpoint that does not yet exist (filed as
+[newtron#13](https://github.com/aldrin-isaac/newtron/issues/13)).
+Until that endpoint lands, newtcon-server classifies based on the
+verb-and-params shape with a verb catalog: well-known coordinated
+verbs (RT changes, peer-group uniformity, fabric-wide policy)
+classify as `fragile` from local rules; otherwise the class is
+`unknown`. Once newtron#13 lands, classification reads the edge set
+directly. `Confidence.reasons[]` carries
+`cross_target_dependency_unknown` when classification fell back.
+
+This schema is present on every multi-target preview response
+(`/api/preview` with `len(targets) > 1`, `/api/workbench/{batch_id}/dry_run`,
+`/api/workbench/{batch_id}/commit/preview`, `/api/workbench/{batch_id}/revert/preview`,
+`/api/intents/preview` with `intents[]` spanning multiple Nodes).
+For single-target previews the schema is OMITTED entirely (the
+question is moot: there is no partial-success state to be safe or
+fragile under). A multi-target preview that omits
+`PartialSuccessSafety` is a contract violation.
+
 ## Endpoints — Service Composer (first surface)
 
 ### `GET /api/health`
@@ -810,16 +1363,16 @@ interface + service.
     {
       "node": "switch1",
       "interface": "Ethernet0",
-      "validate": { "ok": true, "errors": [] },
-      "changeset": {
-        "writes": [ /* CONFIG_DB key+fields */ ],
-        "deletes": [ /* CONFIG_DB keys */ ]
-      },
+      "validate": { /* §Validate schema */ },
+      "changeset": { /* §ChangeSet schema */ },
       "reference_impact": {
-        "created": ["ROUTE_MAP_ab12cd34"],
+        "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
         "incremented": [],
+        "decremented": [],
         "garbage_collected": []
-      }
+      },
+      "confidence": { /* §Confidence schema */ },
+      "reverses": { /* §Reverses schema — present only when operation == "remove"; absent on apply/refresh */ }
     }
   ],
   "aggregate": {
@@ -827,13 +1380,70 @@ interface + service.
     "node_count": 2,
     "total_writes": 14,
     "total_deletes": 0
-  }
+  },
+  "confidence": { /* §Confidence schema — batch-level */ },
+  "partial_success_safety": { /* §PartialSuccessSafety schema — present only when len(targets) > 1; omitted on single-target previews */ }
 }
 ```
 
-Validation failures in any target produce a 200 with `validate.ok = false` for
-the failing target(s) and `aggregate.all_valid = false`. The preview is still
-returned for the targets that did validate.
+Field rules:
+
+- **`per_target[*].validate`** populates the `Validate` schema. Per-target
+  failures fall into `preconditions[]` (domain-level: target already
+  bound, drift observed below the guard threshold, missing parent VRF
+  on a non-`apply` verb) or `schema_violations[]` (newtron-schema
+  rejections per `DESIGN_PRINCIPLES_NEWTRON.md` §13 schema validation:
+  `peer_as` out of range, unknown enum value, unknown table). Per the
+  `Validate` schema's commit-class rule, `/api/apply` refuses to consume
+  a preview with any non-empty `preconditions[]` or `schema_violations[]`.
+- **`per_target[*].changeset`** populates the `ChangeSet` schema.
+  `prior_fields` is `null` on preview entries (preview cannot capture
+  device state without a re-read newtron does not perform on dry-run);
+  the substrate is filled at apply time and surfaced through
+  `GET /api/changesets/{changeset_id}` after commit.
+- **`per_target[*].confidence`** carries the per-target confidence
+  assessment. Common `reasons[]` codes on preview today:
+  `reconstruction_from_string` (the ChangeSet was reconstructed from
+  newtron's WriteResult string — see [newtron#11](https://github.com/aldrin-isaac/newtron/issues/11)),
+  `shared_resource_count_estimated` (reference_impact counts are
+  computed from the projection; concurrent operations may shift them),
+  `resolution_unverified` (resolved params were cached from the
+  current request window). When all preview inputs are canonical and
+  newtron returned a fully structured response, `level: "high"` and
+  `reasons[]: []`.
+- **`per_target[*].reverses`** is PRESENT only when
+  `operation == "remove"`; populates the `Reverses` schema with the
+  originating apply's intent record(s) and operation trace. Absent
+  on `apply` (no prior intent to reverse) and on `refresh` (the
+  refresh path is implemented as a teardown-and-reapply in newtron
+  per `unified-pipeline-architecture.md` §6 — its `Reverses` is
+  expressed via the per-target ChangeSet's `deletes[]` and is not
+  re-surfaced as a separate block; the operator who refreshes is
+  not undoing a prior apply, they are re-applying it).
+- **`confidence`** (batch-level, top-level) is the rollup of per-target
+  confidence: `level: "high"` only when every per-target is `high`;
+  `conditional` when any per-target is `conditional` and none are
+  `low`; `low` when any per-target is `low`. The batch-level
+  `reasons[]` summarizes the most common contributing codes from
+  the per-target arrays; the operator drills into per-target for
+  detail.
+- **`partial_success_safety`** populates the `PartialSuccessSafety`
+  schema and is PRESENT only when `len(targets) > 1`. Single-target
+  previews omit the field entirely. For multi-target apply of an
+  independent service binding (the canonical Composer flow today),
+  `class: "safe"` with `reasons[*].code: "independent_targets"`.
+  For multi-target operations against verbs the classifier
+  recognizes as coordinated (`bgp_peering`, RT changes, etc.) or
+  in the absence of newtron#13 for verb-and-params that haven't
+  been classified, `class: "fragile"` or `"unknown"` per the
+  schema's bounded codes.
+
+Validation failures in any target produce a 200 with the failing
+target's `validate.ok = false` and `aggregate.all_valid = false`. The
+preview is still returned for the targets that did validate (per
+the §Validate schema's preview-class rule). The operator commits a
+partial-validity preview at their own risk: `/apply` refuses if any
+per-target's `validate.ok == false`.
 
 A drift-guard refusal on any target → 409 with `kind: "drift_refusal"`
 and `details` per the typed schema in §Error Schema (`per_target[]`
@@ -874,7 +1484,8 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
       },
       "verify": {
         "kind": "device_io_assertion",
-        "state": "in_progress"
+        "state": "in_progress",
+        "confidence": { /* §Confidence schema — see field rule below */ }
       }
     }
   ],
@@ -896,6 +1507,23 @@ The `verify.state` may transition from `in_progress` to `complete` or
 `failed` after the response returns; consumers poll
 [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id) for
 the terminal verify state.
+
+**`verify.confidence`** populates the `Confidence` schema. For the
+canonical Composer apply path, `verify` is `cs.Verify(n)` — newtron's
+ChangeSet re-read assertion per `DESIGN_PRINCIPLES_NEWTRON.md` §14
+("Verify Your Writes; Observe Everything Else") — which is by
+construction `level: "high"` with empty `reasons[]`: newtron knows
+what it wrote, so it verifies with certainty. The field is surfaced
+on every apply response (not only on edge cases) so the operator
+learns the confidence vocabulary from successful applies, not only
+from failures (per operator-philosophy invariant #9: "false
+confidence is worse than no confidence"). When a verify path is
+heuristic (e.g., a future cross-device verify addition that probes
+the dataplane rather than re-reading CONFIG_DB), the same schema
+carries `level: "conditional"` with `reasons[*].code:
+"verify_heuristic"` — same shape, honest level. The same field is
+exposed on `GET /api/operations/{operation_id}.verify` for the
+polling path.
 
 A stale `preview_id` (expired or already consumed) → 410 Gone with
 `kind: "precondition_failure"`.
@@ -973,6 +1601,7 @@ newtron-side state is mutated.
       "first_observed": "2026-05-25T13:47:02Z",
       "last_observed": "2026-05-25T14:02:11Z",
       "summary": { /* per-kind, see below */ },
+      "confidence": { /* §Confidence schema — see field rule below */ },
       "dismissed": null
     }
   ],
@@ -994,6 +1623,30 @@ newtron reads. Required by `CLAUDE.md` §No Hidden State — the operator
 sees how fresh the projection is. If `newtron_reachable` is `false`, `cards`
 reflects the last successful derivation and `as_of` carries that earlier
 timestamp; the operator must not be shown stale data as current.
+
+`cards[*].confidence` populates the `Confidence` schema. The level
+reports how strongly newtcon-server can assert that the card reflects
+current substrate:
+
+- `level: "high"` — the card was derived from a fresh substrate read,
+  and the underlying signal source (e.g., the drift read for `drift`
+  cards) returned a complete response. `reasons[]: []`.
+- `level: "conditional"` — the card was derived but one input is
+  qualified. Common `reasons[*].code` values on cards today:
+  `newtron_partial_response` (the source read returned a partial
+  result and some fields were filled from cache),
+  `shared_resource_count_estimated` (for `reference_warning` cards
+  where the ref count was computed from the projection rather than
+  re-read).
+- `level: "low"` — the card is shown because the source read was
+  unavailable AND newtcon-server is rendering a last-known set per
+  the `newtron_reachable == false` path; the operator must not act
+  on a `low`-confidence card without re-fetching. `reasons[]` names
+  the substrate cause.
+
+Per operator-philosophy invariant #9, the field is surfaced even on
+the canonical `high` case so the operator learns the vocabulary from
+healthy cards (not only from edge cases).
 
 `dismissed`, when non-null, has the shape:
 ```json
@@ -1086,6 +1739,7 @@ to read the substrate, not a digest of it (operator-philosophy invariant #3).
   "as_of": "2026-05-25T14:02:11Z",
   "dismissed": null,
   "summary": { /* same as list */ },
+  "confidence": { /* §Confidence schema — same field as the list endpoint's cards[*].confidence */ },
   "detail": { /* per-kind, see below */ },
   "available_actions": [
     {
@@ -1352,11 +2006,9 @@ Per-verb `params`:
   "card_id": "<echoed>",
   "verb": "<echoed>",
   "produces_changeset": true,
-  "changeset": {
-    "writes": [ /* CONFIG_DB key+fields */ ],
-    "deletes": [ /* CONFIG_DB keys */ ],
-    "intent_records": [ /* NEWTRON_INTENT records prepended */ ]
-  },
+  "changeset": { /* §ChangeSet schema */ },
+  "confidence": { /* §Confidence schema */ },
+  "reverses": { /* §Reverses schema — present only when verb produces a reverse (retire_policy, rollback_zombie); see field rule below */ },
   "reconcile_mode": "delta | full",
   "drift_resolved_preview": {
     "before": { "missing": 9, "extra": 2, "modified": 3 },
@@ -1385,7 +2037,7 @@ Per-verb `params`:
     "decremented": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
     "garbage_collected": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"]
   },
-  "validate": { "ok": true, "errors": [] },
+  "validate": { /* §Validate schema */ },
   "disruption": {
     "config_reload": true,
     "bgp_restart": false,
@@ -1413,9 +2065,31 @@ Field rules:
 - `produces_changeset` is `true` for `reconcile_*`, `rollback_zombie`,
   `retire_policy`; `false` for `acknowledge`, `recheck`, `clear_zombie`.
 - When `produces_changeset == false`, `changeset`, `validate`,
-  `reconcile_mode`, and `drift_resolved_preview` are omitted; `consequence`
-  is present instead with the same shape as the dismiss preview's
-  `consequence`.
+  `reconcile_mode`, `drift_resolved_preview`, and `confidence` are
+  omitted; `consequence` is present instead with the same shape as the
+  dismiss preview's `consequence`.
+- `validate` populates the `Validate` schema (§Shared Response
+  Schemas). For `reconcile_*` and `rollback_zombie`, `preconditions[]`
+  carries refusals like "intent DB inconsistent" or
+  "zombie record state has changed since card derivation";
+  `schema_violations[]` carries newtron-schema rejections that would
+  refuse the synthesized ChangeSet at fail-closed schema validation.
+- `confidence` populates the `Confidence` schema and surfaces the
+  per-action assessment. Common `reasons[]` codes on Inbox action
+  previews: `drift_observed_during_render` (for reconcile_delta
+  previews where the drift entry set shifted between card derivation
+  and preview), `shared_resource_count_estimated` (for retire_policy
+  where the reference count may shift before commit),
+  `reconstruction_from_string` (the ChangeSet was reconstructed from
+  newtron's WriteResult string — see [newtron#11](https://github.com/aldrin-isaac/newtron/issues/11)).
+- `reverses` populates the `Reverses` schema and is PRESENT only when
+  the verb is a remove or rollback (`retire_policy`, `rollback_zombie`):
+  for `retire_policy`, `originating[]` lists the policy intent(s)
+  being retired; for `rollback_zombie`, `originating[]` is the
+  zombie's underlying intent record (the partial apply being
+  reversed). Absent on `reconcile_*` (reconcile is not a reverse of a
+  prior apply — it is a re-derivation of the projection against the
+  device) and on no-op verbs.
 - `drift_resolved_preview` is REQUIRED on `reconcile_delta` and
   `reconcile_full` action previews; OPTIONAL on others.
   `before`/`after` counts (missing/extra/modified) are present for
@@ -1496,15 +2170,16 @@ exactly the `DriftEntry[]` newtron returned, in the same shape as the
 Inbox drift card's `detail.drift_entries[]`.
 
 A validation failure (the action would write invalid CONFIG_DB per
-`DESIGN_PRINCIPLES_NEWTRON` §13) → 200 with `validate.ok == false` and
-`validate.errors[]` populated; the preview is returned but
-`produces_changeset` does not imply executable. When the validation
-failure is severe enough that newtcon-server refuses to return a
-preview at all (rather than returning it with `validate.ok == false`),
+`DESIGN_PRINCIPLES_NEWTRON.md` §13) → 200 with `validate.ok == false`
+and `validate.preconditions[]` and/or `validate.schema_violations[]`
+populated per the `Validate` schema's two-refusals split (§Shared
+Response Schemas). The preview is returned but `produces_changeset`
+does not imply executable. When the validation failure is severe
+enough that newtcon-server refuses to return a preview at all,
 the response is 400 with `kind: "validation_failure"` per the typed
 schema in §Error Schema, with `validation_stage: "substrate_schema"`
-or `"substrate_precondition"` per `DESIGN_PRINCIPLES_NEWTRON` §13's
-two-refusals split.
+or `"substrate_precondition"` — matching the `Validate` schema's
+stage discriminator.
 
 ### `POST /api/inbox/{card_id}/action`
 
@@ -1543,7 +2218,8 @@ guarantees per verb:
   "verify": {
     "kind": "device_io_assertion",
     "state": "in_progress",
-    "started_at": "2026-05-25T14:06:02Z"
+    "started_at": "2026-05-25T14:06:02Z",
+    "confidence": { /* §Confidence schema — see §POST /api/apply for the verify.confidence rule */ }
   },
   "card_state_after": "resolved | persists | armed_for_recheck"
 }
@@ -1696,6 +2372,7 @@ work; the full retention contract lands in a follow-up PR.
     "completed_at": "2026-05-25T14:06:03Z",
     "skip_reason": null,
     "verify_url": "/api/operations/<opaque>/verify",
+    "confidence": { /* §Confidence schema — see field rule below */ },
     "assertion": {
       "passed": 14,
       "failed": 0,
@@ -2057,17 +2734,16 @@ Idempotent; safe to poll.
       "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
       "staged_at": "2026-05-25T14:10:00Z",
       "preview_result": {
-        "validate": { "ok": true, "errors": [] },
-        "changeset": {
-          "writes": [ /* CONFIG_DB key+fields */ ],
-          "deletes": [ /* CONFIG_DB keys */ ]
-        },
+        "validate": { /* §Validate schema */ },
+        "changeset": { /* §ChangeSet schema */ },
         "reference_impact": {
           "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
           "incremented": [],
           "decremented": [],
           "garbage_collected": []
-        }
+        },
+        "confidence": { /* §Confidence schema */ },
+        "reverses": { /* §Reverses schema — present only when verb is a remove */ }
       },
       "commit_result": null,
       "intent_id": null,
@@ -2253,11 +2929,8 @@ single-screen mode prefer inline.
       "node": "switch1",
       "interface": "Ethernet0",
       "verb": "ApplyService",
-      "validate": { "ok": true, "errors": [] },
-      "changeset": {
-        "writes": [ /* CONFIG_DB key+fields */ ],
-        "deletes": [ /* CONFIG_DB keys */ ]
-      },
+      "validate": { /* §Validate schema */ },
+      "changeset": { /* §ChangeSet schema */ },
       "reference_impact": {
         "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
         "incremented": [],
@@ -2267,7 +2940,9 @@ single-screen mode prefer inline.
       "intent_record_preview": {
         "key": "service|transit|Ethernet0",
         "fields": { /* NEWTRON_INTENT record fields that would be written */ }
-      }
+      },
+      "confidence": { /* §Confidence schema */ },
+      "reverses": { /* §Reverses schema — present only when verb is a remove (RemoveService, DeleteVLAN, UnbindACL, etc.) */ }
     }
   ],
   "per_node_summaries": [
@@ -2293,6 +2968,8 @@ single-screen mode prefer inline.
     "decremented": [],
     "garbage_collected": []
   },
+  "confidence": { /* §Confidence schema — batch-level rollup */ },
+  "partial_success_safety": { /* §PartialSuccessSafety schema — present only when len(per_target) > 1 across distinct Nodes */ },
   "diff": null
 }
 ```
@@ -2536,7 +3213,8 @@ not tool-imposed automation").
       "verify": {
         "kind": "device_io_assertion",
         "state": "in_progress",
-        "started_at": "2026-05-25T14:15:02Z"
+        "started_at": "2026-05-25T14:15:02Z",
+        "confidence": { /* §Confidence schema — see §POST /api/apply for the verify.confidence rule */ }
       },
       "intent_record": {
         "key": "service|transit|Ethernet0",
@@ -2721,17 +3399,16 @@ affected Node — also per §15's "baseline operations" clause.
       },
       "node": "switch1",
       "interface": "Ethernet0",
-      "validate": { "ok": true, "errors": [] },
-      "changeset": {
-        "writes": [ /* CONFIG_DB key+fields */ ],
-        "deletes": [ /* CONFIG_DB keys */ ]
-      },
+      "validate": { /* §Validate schema */ },
+      "changeset": { /* §ChangeSet schema */ },
       "reference_impact": {
         "created": [],
         "incremented": [],
         "decremented": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
         "garbage_collected": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"]
       },
+      "confidence": { /* §Confidence schema */ },
+      "reverses": { /* §Reverses schema — REQUIRED on every per_target entry of /revert/preview because the endpoint is by construction always a reverse */ },
       "shared_resource_handling": [
         {
           "resource": "VRF|CUSTOMER",
@@ -2792,7 +3469,9 @@ affected Node — also per §15's "baseline operations" clause.
   "scope_unrevertable": {
     "intent_handles": [],
     "reason_by_handle": {}
-  }
+  },
+  "confidence": { /* §Confidence schema — batch-level rollup */ },
+  "partial_success_safety": { /* §PartialSuccessSafety schema — present only when len(per_target) > 1 across distinct Nodes; the partial-success question applies to revert just as it does to forward apply */ }
 }
 ```
 
@@ -2811,6 +3490,14 @@ Field rules:
     `Reconcile` against the prior intent snapshot. This requires
     that newtcon-server captured the prior snapshot at commit
     time; see `scope_unrevertable` below.
+- `per_target[*].reverses` populates the `Reverses` schema and is
+  REQUIRED. `originating[]` carries the intent record(s) the
+  per-target reverse is undoing — typically one entry per
+  per_target, matching the originating commit. The
+  `reverse_strategy` field on the per_target mirrors the
+  `Reverses.reverse_strategy` value (they are the same fact
+  surfaced at two scopes; collapsing them would lose the per-target
+  rendering hook).
 - `per_target[*].shared_resource_handling[]` enumerates every
   shared resource the reverse touches and the decision newtron's
   domain logic will make (preserve vs. garbage-collect). Per
@@ -2878,7 +3565,8 @@ reversed subset.
       "verify": {
         "kind": "device_io_assertion",
         "state": "in_progress",
-        "started_at": "2026-05-25T14:21:02Z"
+        "started_at": "2026-05-25T14:21:02Z",
+        "confidence": { /* §Confidence schema — see §POST /api/apply for the verify.confidence rule */ }
       },
       "reverse_intent_record": {
         "key": "remove-service|Ethernet0",
@@ -3381,11 +4069,8 @@ Field rules:
       "resource_key": "interface|Ethernet0",
       "intent_id": "<opaque>",
       "intent_url": null,
-      "validate": { "ok": true, "errors": [] },
-      "changeset": {
-        "writes": [ /* CONFIG_DB key+fields, including the NEWTRON_INTENT record */ ],
-        "deletes": [ /* CONFIG_DB keys */ ]
-      },
+      "validate": { /* §Validate schema */ },
+      "changeset": { /* §ChangeSet schema */ },
       "intent_record_preview": {
         "key": "interface|Ethernet0",
         "fields": { /* NEWTRON_INTENT record that would be written, including user + resolved params */ }
@@ -3397,6 +4082,8 @@ Field rules:
         "decremented": [],
         "garbage_collected": []
       },
+      "confidence": { /* §Confidence schema */ },
+      "reverses": { /* §Reverses schema — present only when operation is a remove verb (remove-service, delete-vlan, etc.) */ },
       "dag_context_preview": {
         "parents_resolved": [
           {
@@ -3479,7 +4166,9 @@ Field rules:
     "unreachable_nodes": [],
     "drift_guard_clean": true,
     "drift_blocked_nodes": []
-  }
+  },
+  "confidence": { /* §Confidence schema — batch-level rollup */ },
+  "partial_success_safety": { /* §PartialSuccessSafety schema — present only when intents[] spans more than one Node */ }
 }
 ```
 
@@ -3488,7 +4177,8 @@ Field rules:
 - **`per_intent[*]`** is one entry per submitted intent. The shape
   is symmetric with Workbench's `dry_run` `per_target[]` so the
   frontend reuses its rendering logic — `validate`, `changeset`,
-  `reference_impact` are the same fields with the same semantics.
+  `reference_impact`, `confidence`, and `reverses` are the same
+  fields with the same semantics (§Shared Response Schemas).
 - **`per_intent[*].intent_record_preview`** is the NEWTRON_INTENT
   record that would be written, with both user and resolved params
   visible. Per operator-philosophy invariant #1 ("no black boxes"),
