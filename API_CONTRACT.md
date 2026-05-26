@@ -124,6 +124,7 @@ the service to one interface on one node.
       "interface": "Ethernet0",
       "applied_at": "2026-04-15T08:23:00Z",
       "intent_id": "<opaque>",
+      "intent_url": "/api/intents/<opaque>",
       "params": { "ip": "10.1.0.0/31", "peer_as": 65002 },
       "health": {
         "config_db": "present | drifted | absent",
@@ -135,7 +136,10 @@ the service to one interface on one node.
 }
 ```
 
-`intent_id` is opaque — used only as a handle for subsequent operations.
+`intent_id` is opaque. `intent_url` is the navigation link to the
+Provenance surface at
+[`GET /api/intents/{intent_id}`](#get-apiintentsintent_id) for full
+substrate inspection.
 
 ### `GET /api/services/{name}/candidates`
 
@@ -255,6 +259,7 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
       "interface": "Ethernet0",
       "applied": true,
       "intent_id": "<opaque>",
+      "intent_url": "/api/intents/<opaque>",
       "operation_id": "<opaque>",
       "operation_url": "/api/operations/<opaque>",
       "pipeline": {
@@ -533,7 +538,8 @@ Per-kind `detail` shapes:
     "kind": "ApplyService",
     "resource": "Ethernet0",
     "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
-    "intent_id": "<opaque>"
+    "intent_id": "<opaque>",
+    "intent_url": "/api/intents/<opaque>"
   }
 }
 
@@ -829,17 +835,32 @@ Field rules:
   operator could issue by hand to achieve the same effect — the
   operator-philosophy invariant #2 (manual-mode parity) is binding,
   not aspirational.
-- `manual_equivalent.newtron_http` is an object with one of two shapes:
+- `manual_equivalent.newtron_http` is an object with one of four
+  shapes; `status` is the discriminator and is bounded by the enum
+  `available | pending_newtron_gap | partial_match | not_applicable`:
   (a) `{ "status": "available", "method", "path", "query"?, "body"? }`
-  pointing to an endpoint that exists in `newtron/docs/newtron/api.md`
-  today; or (b) `{ "status": "pending_newtron_gap", "gap_issue":
-  "<URL>", "expected_shape": { … } }` for verbs whose newtron HTTP
-  surface does not exist yet and is tracked under the Gap-Handling
-  Protocol (`CLAUDE.md` §Gap-Handling Protocol). The shape MUST be
-  one of these two — silently fabricating an endpoint URL is
-  forbidden. `newtron_cli` always points to the equivalent CLI
-  invocation (the CLI is itself an HTTP client and exposes the gap as
-  a working command path).
+  — an endpoint that exists in `newtron/docs/newtron/api.md` today
+  and answers the same question with the same substrate;
+  (b) `{ "status": "pending_newtron_gap", "gap_issue": "<URL>",
+  "expected_shape": { … } }` — no newtron HTTP shape exists today;
+  tracked under the Gap-Handling Protocol (`CLAUDE.md`
+  §Gap-Handling Protocol);
+  (c) `{ "status": "partial_match", "method", "path", "query"?,
+  "body"?, "note": "<rationale>" }` — an endpoint exists that
+  answers a related but not identical question; the `note` explains
+  the gap honestly (used, e.g., on the Provenance verify endpoint,
+  where newtron's `verify-committed` re-verifies the LAST committed
+  ChangeSet rather than a specified historical operation);
+  (d) `{ "status": "not_applicable", "rationale": "<text>" }` — no
+  newtron HTTP shape applies, by design, because the substrate is
+  not addressable in newtron's model (used, e.g., on the
+  Provenance ChangeSet endpoint, where ChangeSets are
+  per-invocation artifacts in newtron and the addressable retention
+  is a newtcon-server concern).
+  The shape MUST be one of these four — silently fabricating an
+  endpoint URL is forbidden. `newtron_cli` always points to the
+  equivalent CLI invocation when one exists; it is `null` when no
+  CLI equivalent applies (matching `not_applicable`).
 - Per-verb `manual_equivalent.newtron_http.status` today:
 
   | Verb | `status` | Underlying newtron HTTP |
@@ -1014,7 +1035,8 @@ work; the full retention contract lands in a follow-up PR.
     "kind": "ApplyService",
     "resource": "Ethernet0",
     "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
-    "intent_id": "<opaque>"
+    "intent_id": "<opaque>",
+    "intent_url": "/api/intents/<opaque>"
   },
   "pipeline": {
     "intent": {
@@ -1056,6 +1078,7 @@ work; the full retention contract lands in a follow-up PR.
     "started_at": "2026-05-25T14:06:02Z",
     "completed_at": "2026-05-25T14:06:03Z",
     "skip_reason": null,
+    "verify_url": "/api/operations/<opaque>/verify",
     "assertion": {
       "passed": 14,
       "failed": 0,
@@ -1106,6 +1129,13 @@ Field rules:
   Verify is skippable for verbs that wrote no ChangeSet (e.g.,
   `acknowledge`, `clear_zombie`) or when the caller explicitly opted out
   (`no_save` / similar newtron flags); operators must be told which.
+- **`verify.verify_url`** is the navigation link to the dedicated
+  Provenance endpoint
+  [`GET /api/operations/{operation_id}/verify`](#get-apioperationsoperation_idverify),
+  which returns the full per-entry assertion diff plus
+  interpretation hints. UI clients that poll for verify completion
+  use the dedicated endpoint instead of re-fetching the full
+  operation trace.
 - **`intent.intent_record`** exposes the NEWTRON_INTENT record that the
   operation wrote, in the same shape newtron stores it. Per
   `DESIGN_PRINCIPLES_NEWTRON` §1 and §22, the intent record IS the
@@ -1241,7 +1271,7 @@ session-scoped retention window (see `GET /api/workbench/{batch_id}`).
 All IDs are opaque to the client; the structure is an implementation
 concern of newtcon-server.
 
-### Provenance forward-references
+### Provenance references
 
 Each intent inside a batch carries the same substrate that
 `/api/operations/{operation_id}` exposes per
@@ -1249,10 +1279,10 @@ Each intent inside a batch carries the same substrate that
 user params, and (after commit) the NEWTRON_INTENT record actually
 written. Per operator-philosophy invariant #1 ("no black boxes"), every
 intent in a batch is fully inspectable, and after commit the contract
-exposes a forward link to the dedicated provenance surface at
-`/api/intents/{intent_id}` (planned per
-[newtcon#5](https://github.com/aldrin-isaac/newtcon/issues/5); link
-field present today, target endpoint lands in a separate Contract PR).
+exposes a navigation link to the dedicated Provenance surface at
+[`GET /api/intents/{intent_id}`](#get-apiintentsintent_id) for full
+intent-record substrate (record fields, DAG context, origin, linked
+ChangeSets, rebuild implication).
 
 ### `POST /api/workbench/stage`
 
@@ -1459,11 +1489,8 @@ Field rules:
   `/commit`; structure mirrors `per_target` entries of the commit
   response (see below).
 - `intent.intent_id` and `intent.intent_url` are populated only
-  after commit and point to the dedicated provenance surface
-  (planned per [newtcon#5](https://github.com/aldrin-isaac/newtcon/issues/5));
-  pre-#5, `intent_url` is a forward link that resolves to 404 — the
-  field is in the contract today so that the commit shape does not
-  change when provenance lands.
+  after commit and point to the dedicated Provenance surface at
+  [`GET /api/intents/{intent_id}`](#get-apiintentsintent_id).
 
 **Errors:**
 - Unknown `batch_id` → 404 `precondition_failure` with
@@ -2487,3 +2514,959 @@ The active batch can now be addressed via `GET
 
 Stale or already-consumed `preview_id` → 410 Gone with
 `kind: "precondition_failure"`.
+
+## Endpoints — Provenance (why-mode surface)
+
+The Provenance endpoints expose newtron's **substrate** as a
+navigable, queryable surface. Every other endpoint in this contract
+returns operator-facing shapes (cards, batches, ChangeSet previews);
+this surface returns the underlying intent records, projection
+rows, ChangeSet artifacts, and verify assertions that those shapes
+are derived from. Operator-philosophy invariants #1 ("no black
+boxes") and #5 ("why-mode is always available") make this surface
+load-bearing, not optional: without it, every other surface is a
+digest the operator cannot click through.
+
+The surface is read-only. No endpoint here mutates newtron state or
+newtcon-server state. All endpoints are idempotent and safe to poll.
+
+### Identifiers and resolution
+
+The Provenance surface uses opaque IDs already minted by other
+surfaces:
+
+| ID | Minted by | Resolves to (internally, opaque to consumer) |
+|----|-----------|---------------------------------------------|
+| `intent_id` | Service Composer apply, Workbench commit, Inbox action — every place a NEWTRON_INTENT record is written | `(network, node, resource_key)` — the addressing tuple newtron uses for an intent record |
+| `operation_id` | Every state-changing endpoint (apply, commit, inbox action) | `(network, node, operation_sequence)` — the addressing tuple newtcon-server uses for an operation trace |
+| `changeset_id` | Per `operation_id`, one or more `changeset_id`s — one per per-Node bundle the operation rendered | `(operation_id, per_node_sequence)` |
+
+The structure of an ID is an implementation concern of
+newtcon-server; consumers MUST treat all IDs as opaque. The mapping
+table above is documentation of provenance, not a wire contract.
+
+`intent_id`, `operation_id`, and `changeset_id` are surfaced as link
+fields throughout the rest of the contract (`intent_url` on
+Workbench commit results, `operation_url` on apply/inbox/commit
+responses, etc.). Provenance endpoints are the targets of those
+links. Every shape that exposes one of these IDs MUST also expose
+its `*_url` companion so the UI follows-the-link without
+constructing paths from opaque IDs (the contract owns URL
+construction).
+
+### Retention
+
+Provenance retention mirrors operations retention:
+
+- **Intent records** are stored in newtron CONFIG_DB and persist for
+  the life of the resource (`DESIGN_PRINCIPLES_NEWTRON.md` §1, §23).
+  An `intent_id` that resolves to a since-deleted resource returns
+  404 with `details.reason: "intent_resolved"` (the underlying
+  intent was reversed; it no longer exists on the device).
+  newtcon-server does not cache intent records — every read is a
+  fresh newtron call.
+- **Projection** is rebuilt fresh per request from current intents
+  (`unified-pipeline-architecture.md` §8 "RebuildProjection —
+  Projection Freshness"); there is no separate retention.
+- **ChangeSets** are captured by newtcon-server at apply time (the
+  ChangeSet returned in the preview is the ChangeSet that executes —
+  `DESIGN_PRINCIPLES_NEWTRON.md` §11) and retained for the same
+  window as the originating operation. See
+  [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18)
+  for the operation-retention contract (minimum 30 minutes
+  post-terminal-state pinned today; full retention contract lands in
+  a follow-up Contract PR). A `changeset_id` whose underlying
+  operation has been evicted returns 404 with
+  `details.reason: "operation_evicted"`.
+- **Verify assertions** are captured by newtcon-server alongside the
+  ChangeSet at apply time (from
+  `WriteResult.verification` returned by newtron — `api.md` §15
+  Write Result Types); same retention as the operation.
+
+The retention boundary is the operation's. ChangeSets and verify
+assertions outlive their operation only insofar as the operation
+itself does.
+
+### `GET /api/intents/{intent_id}`
+
+Return the full NEWTRON_INTENT record for one intent, plus the
+intent-DAG context (parents, children, depth) and the navigation
+links to the operation that wrote it and the ChangeSet that
+delivered it.
+
+The intent record IS the decision substrate per
+`DESIGN_PRINCIPLES_NEWTRON.md` §1 ("The Node — Intent and Reality in
+One Object") and `unified-pipeline-architecture.md` §1 ("Intent DB
+is the decision substrate"). This endpoint exposes it directly —
+not a summary, not a friendly digest. Operator-philosophy
+invariant #1 is binding: the operator clicks an `intent_url` and
+gets the substrate, not a paraphrase.
+
+The endpoint composes two newtron reads
+(`GET .../intents` filtered to the resource key, and
+`GET .../intent/tree?kind=...&resource=...&ancestors=true` for DAG
+context) and joins them with the newtcon-server-side
+operation-history mapping.
+
+**Response 200:**
+```json
+{
+  "intent_id": "<echoed>",
+  "as_of": "2026-05-25T14:30:00Z",
+  "addressing": {
+    "network": "default",
+    "node": "switch1",
+    "resource_key": "interface|Ethernet0"
+  },
+  "record": {
+    "operation": "apply-service",
+    "state": "actuated",
+    "name": "transit",
+    "params": {
+      "user": {
+        "service": "transit",
+        "ip_address": "10.1.0.0/31",
+        "peer_as": 65002
+      },
+      "resolved": {
+        "vrf_name": "Vrf_TRANSIT",
+        "l3vni": "10100",
+        "route_map_in": "TRANSIT_IN_A1B2C3D4",
+        "ingress_acl": "PROTECT_RE_IN_1ED5F2C7"
+      }
+    },
+    "dag": {
+      "parents": ["vrf|Vrf_TRANSIT", "service|transit"],
+      "children": ["interface|Ethernet0|qos", "interface|Ethernet0|acl|in"]
+    },
+    "timing": {
+      "created_at": "2026-05-25T14:06:00Z",
+      "applied_at": "2026-05-25T14:06:02Z"
+    },
+    "holder": "newtcon-server@abcd1234",
+    "applied_by": "operator:aldrin"
+  },
+  "params_split_rationale_ref": {
+    "substrate": "newtron/docs/newtron/intents.md#11-identity-fields",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#22-dual-purpose-intent--user-params-and-resolved-params"
+  },
+  "origin": {
+    "kind": "operator_action | service_spec_resolution | reconcile_replay | provisioning_replay",
+    "operation_id": "<opaque>",
+    "operation_url": "/api/operations/<opaque>",
+    "surface": "composer | inbox | workbench | provisioning",
+    "operator_identity": "operator:aldrin",
+    "started_at": "2026-05-25T14:06:00Z",
+    "origin_rationale_ref": {
+      "substrate": "newtron/docs/newtron/intents.md#34-validateintentdag",
+      "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
+    }
+  },
+  "changesets": [
+    {
+      "changeset_id": "<opaque>",
+      "changeset_url": "/api/changesets/<opaque>",
+      "role": "wrote_intent_record",
+      "operation_id": "<opaque>",
+      "applied_at": "2026-05-25T14:06:02Z"
+    }
+  ],
+  "dag_context": {
+    "parents_detail": [
+      {
+        "resource_key": "vrf|Vrf_TRANSIT",
+        "intent_id": "<opaque>",
+        "intent_url": "/api/intents/<opaque>",
+        "operation": "create-vrf",
+        "state": "actuated"
+      },
+      {
+        "resource_key": "service|transit",
+        "intent_id": "<opaque>",
+        "intent_url": "/api/intents/<opaque>",
+        "operation": "apply-service",
+        "state": "actuated"
+      }
+    ],
+    "children_detail": [
+      {
+        "resource_key": "interface|Ethernet0|qos",
+        "intent_id": "<opaque>",
+        "intent_url": "/api/intents/<opaque>",
+        "operation": "apply-qos",
+        "state": "actuated"
+      }
+    ]
+  },
+  "rebuild_implication": {
+    "summary": "Reversing this intent removes 8 projection entries across BGP_NEIGHBOR, INTERFACE, INTERFACE_IP, and decrements references on ACL_TABLE|PROTECT_RE_IN_1ED5F2C7 (becomes orphaned), ROUTE_MAP|TRANSIT_IN_A1B2C3D4 (decremented; 3 consumers remain), VRF|Vrf_TRANSIT (decremented; 1 consumer remains).",
+    "deeply_inspectable_via": "/api/workbench/stage with the symmetric reverse verb, then /api/workbench/{batch_id}/dry_run",
+    "rebuild_implication_rationale_ref": {
+      "substrate": "newtron/docs/newtron/intents.md#52-content-hashed-naming",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+    }
+  },
+  "manual_equivalent": {
+    "newtron_cli": "newtron switch1 intent list --resource 'interface|Ethernet0' --format full",
+    "newtron_http": {
+      "status": "available",
+      "method": "GET",
+      "path": "/network/default/node/switch1/intents",
+      "note": "Returns ALL intents on the device; filter client-side to resource_key='interface|Ethernet0' to isolate this record. For DAG context, also call GET /network/default/node/switch1/intent/tree?kind=interface&resource=Ethernet0&ancestors=true."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`record.params.user` vs `record.params.resolved`** is the
+  dual-purpose intent split mandated by
+  `DESIGN_PRINCIPLES_NEWTRON.md` §22. User params are what the
+  operator requested; resolved params are what spec resolution
+  computed and what was written to CONFIG_DB. Both are surfaced
+  separately because they read differently for reconstruction
+  (Snapshot reads user) vs teardown (RemoveService reads resolved);
+  the operator MUST be able to see both to understand what was
+  recorded and why.
+- **`origin.kind`** distinguishes substrate-causes for the intent's
+  existence:
+  - `operator_action` — the intent was written because the operator
+    directly invoked a verb (Composer apply, Inbox action,
+    Workbench commit). `operation_url` points to the operation
+    trace.
+  - `service_spec_resolution` — the intent was synthesized by a
+    parent operation as a derived resource (e.g., a `vrf|*` intent
+    created by an `ApplyService` because the service spec required
+    a VRF that did not yet exist). `operation_url` points to the
+    parent operation; the DAG `parents_detail` walks the
+    derivation chain.
+  - `reconcile_replay` — the intent was rewritten by a
+    `Reconcile`/`ApplyDrift` replay of existing intents
+    (`unified-pipeline-architecture.md` §6); the original intent
+    pre-existed reconcile but its `applied_at` reflects the most
+    recent replay.
+  - `provisioning_replay` — the intent was written by a Day-1
+    provisioning operation
+    (`unified-pipeline-architecture.md` §1 "Topology Mode").
+- **`changesets[]`** lists every ChangeSet that wrote, modified, or
+  deleted this intent record. For the typical case (intent written
+  once and currently `actuated`), the list has one entry. For an
+  intent that was reapplied (e.g., `RefreshService` with a spec
+  change), the list grows; the most recent entry is the one whose
+  ChangeSet matches the current `record` state.
+- **`dag_context.parents_detail[]` and `children_detail[]`** carry
+  per-relationship navigation links so the operator follows the
+  intent DAG one click at a time
+  (`DESIGN_PRINCIPLES_NEWTRON.md` §43 "Intent DAG"). The list is
+  one-hop only; the operator clicks through to walk further.
+- **`rebuild_implication`** is a textual summary of what reversing
+  the intent would do, plus a deep-inspect link to the Workbench
+  surface that lets the operator stage the symmetric reverse and
+  see the full ChangeSet. The summary is a hint; the substrate is
+  in the linked Workbench dry-run, not in the summary itself
+  (operator-philosophy invariant #1: counts and summaries do not
+  substitute for the substrate).
+- **`manual_equivalent.newtron_http.status: "available"`** because
+  the substrate IS exposed by existing newtron endpoints; the
+  endpoint shape is a composite read with client-side filtering, as
+  the `note` explains. The Provenance read in newtcon is a
+  convenience composition, not a workaround for a newtron gap.
+
+**Errors:**
+- Unknown or expired `intent_id` → 404 with
+  `kind: "precondition_failure"` and `details.reason ∈
+  {"intent_unknown", "intent_resolved"}`.
+  - `intent_unknown` — the ID was never minted by newtcon-server.
+  - `intent_resolved` — the ID was minted, but the underlying
+    intent record no longer exists on the device (reversed by a
+    later operation). The operator is told which.
+- newtron-server unreachable → 503 with
+  `kind: "newtron_unavailable"` and `details.last_known.record`
+  carrying the most recent cached record snapshot if newtcon-server
+  has one from a prior fetch within the request-cache window.
+
+### `GET /api/projection/nodes/{node}`
+
+Return the current typed projection for one Node — the per-table,
+per-key, per-field expected-state derived from intent replay, as
+defined in `DESIGN_PRINCIPLES_NEWTRON.md` §1 and
+`unified-pipeline-architecture.md` §1.
+
+The projection is **not** the device's actual CONFIG_DB (that is
+the drift-source) and **not** the intent records (those are the
+inputs to the projection). It is the rendered effect of replaying
+every intent on the Node through newtron's config methods. Per
+`DESIGN_PRINCIPLES_NEWTRON.md` §1, the projection IS what the
+device should look like; reading it is how the operator learns what
+newtron believes about the Node.
+
+This is the substrate behind every operator-facing question of the
+form "what does newtron think this device is?" — independent of
+what the device actually has. The drift card (`kind: "drift"` in
+the Inbox surface) renders the diff between this projection and
+the device; this endpoint is the half of that diff the operator
+otherwise cannot see directly.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `table` | string (repeatable) | unset (all owned tables) | Restrict the response to one or more CONFIG_DB tables. |
+| `mode` | string | `"actuated"` | `"actuated"` reads from the device's NEWTRON_INTENT records (the live, on-device intent set); `"topology"` reads from the abstract topology (`topology.json`). The two correspond to the actuated/topology mode split in `unified-pipeline-architecture.md` §3. |
+
+**Response 200:**
+```json
+{
+  "node": "switch1",
+  "network": "default",
+  "mode": "actuated",
+  "as_of": "2026-05-25T14:35:00Z",
+  "rebuilt_at": "2026-05-25T14:35:00Z",
+  "intent_count": 47,
+  "tables": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "entries": [
+        {
+          "key": "default|10.0.0.1",
+          "fields": { "asn": "65001", "local_addr": "10.0.0.0" },
+          "owning_intent": {
+            "resource_key": "interface|Ethernet0|bgp-peer",
+            "intent_id": "<opaque>",
+            "intent_url": "/api/intents/<opaque>"
+          }
+        },
+        {
+          "key": "default|10.1.0.1",
+          "fields": { "asn": "65002", "local_addr": "10.1.0.0" },
+          "owning_intent": {
+            "resource_key": "interface|Ethernet4|bgp-peer",
+            "intent_id": "<opaque>",
+            "intent_url": "/api/intents/<opaque>"
+          }
+        }
+      ]
+    },
+    {
+      "table": "VLAN",
+      "entries": [
+        {
+          "key": "Vlan100",
+          "fields": { "vlanid": "100" },
+          "owning_intent": {
+            "resource_key": "vlan|100",
+            "intent_id": "<opaque>",
+            "intent_url": "/api/intents/<opaque>"
+          }
+        }
+      ]
+    }
+  ],
+  "owned_tables_total": 18,
+  "drift": {
+    "summary": {
+      "entry_count": 0,
+      "by_type": { "missing": 0, "extra": 0, "modified": 0 }
+    },
+    "drift_card_url": null,
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/api.md#11-intent-history-settings-and-drift",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#21-reconstruct-dont-record"
+    }
+  },
+  "manual_equivalent": {
+    "newtron_cli": "newtron switch1 intent reconcile  # without -x — emits the projection-as-preview",
+    "newtron_http": {
+      "status": "pending_newtron_gap",
+      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/5",
+      "expected_shape": {
+        "method": "GET",
+        "path": "/network/default/node/switch1/projection",
+        "query": { "table": "<repeatable>", "mode": "actuated|topology" }
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`as_of` and `rebuilt_at`** are deliberately separate fields.
+  `as_of` is when newtcon-server completed the underlying read;
+  `rebuilt_at` is when newtron last replayed intents to rebuild the
+  projection. On `GET .../projection` the two coincide in the
+  no-cache path, but the two-timestamp shape leaves room for an
+  explicit cache to be introduced later (Architect-authored) per
+  `docs/architecture.md` §Caching. Operator-philosophy invariant #9
+  ("confidence and limits are explicit") is honored by surfacing
+  the freshness of the substrate independently of the response
+  envelope.
+- **`tables[*].entries[*].owning_intent`** attributes each
+  projection entry back to the intent record whose replay produced
+  it. Per `unified-pipeline-architecture.md` §4-5, each render step
+  is initiated by one config method whose intent is captured on the
+  ChangeSet; the projection entry is rendered by exactly one such
+  step. Attribution is the bridge that lets the operator click from
+  a CONFIG_DB-shaped projection entry to the intent that caused it
+  — the why-mode invariant materialized at the projection level.
+- **`drift.summary`** is a lightweight inline counts-only view of
+  `GET /network/{n}/node/{d}/drift` for the same Node, surfaced so
+  the operator immediately knows whether the projection matches
+  reality. The full drift entries are reached via the drift card
+  (`drift_card_url` when non-null; null when `drift.summary.entry_count
+  == 0`). The projection endpoint is the **what newtron believes**;
+  the drift card is the **how reality differs**; both are reachable
+  from each other.
+- **`owned_tables_total`** carries the cardinality of
+  `OwnedTables()` for the Node so the operator can see when a
+  `table` filter is restricting the response.
+
+**Why `pending_newtron_gap`:** newtron's projection is currently
+exposed only as an in-memory side-effect of `Reconcile()` (which
+also delivers) and as an opaque composite handle from
+`generate-composite` (whose contents are not readable via `GET`).
+There is no HTTP endpoint that returns the typed per-table
+expected-state derived from intent replay as a pure read. The gap
+was filed by the newtcon Architect at the time this contract was
+written, per `CLAUDE.md` §Gap-Handling Protocol; see
+[newtron#5](https://github.com/aldrin-isaac/newtron/issues/5) for
+the proposed HTTP shape (which matches the `expected_shape` block
+above). The implementer slice for this endpoint is blocked until
+newtron#5 lands.
+
+**Errors:**
+- Unknown `node` → 404 with `kind: "precondition_failure"` and
+  `details.reason: "node_unknown"`.
+- `table` filter contains an unowned table → 400 with
+  `kind: "validation_failure"` and `details.owned_tables[]`.
+- newtron-server unreachable → 503 with
+  `kind: "newtron_unavailable"`.
+
+### `GET /api/projection/services/{service}`
+
+Return the projection slice **contributed by one service across
+every Node that binds it** — the per-Node projection rows that
+exist because of the named service's intent records.
+
+This is the service-first lens on the substrate. The Composer and
+Inbox surfaces are service-first per
+[`CLAUDE.md`](CLAUDE.md) §Design Principles; the Provenance surface
+follows the same vocabulary. Per
+`DESIGN_PRINCIPLES_NEWTRON.md` §1 and the `service|*` intent type
+(`intents.md` §7.4), a service binding produces a DAG subtree under
+`service|{name}` whose leaves are the projection rows the service
+owns on each bound Node. This endpoint returns that DAG subtree's
+rendered effect, grouped by Node.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `node` | string (repeatable) | unset (all nodes binding the service) | Restrict the response to one or more bound Nodes. |
+| `table` | string (repeatable) | unset (all owned tables) | Restrict to specific CONFIG_DB tables. |
+
+**Response 200:**
+```json
+{
+  "service": "transit",
+  "as_of": "2026-05-25T14:36:00Z",
+  "binding_count": 12,
+  "per_node": [
+    {
+      "node": "switch1",
+      "interfaces": ["Ethernet0", "Ethernet4"],
+      "intent_count_for_service": 8,
+      "rebuilt_at": "2026-05-25T14:36:00Z",
+      "tables": [
+        {
+          "table": "BGP_NEIGHBOR",
+          "entries": [
+            {
+              "key": "default|10.1.0.1",
+              "fields": { "asn": "65002", "local_addr": "10.1.0.0" },
+              "owning_intent": {
+                "resource_key": "interface|Ethernet0|bgp-peer",
+                "intent_id": "<opaque>",
+                "intent_url": "/api/intents/<opaque>"
+              }
+            }
+          ]
+        },
+        {
+          "table": "ROUTE_MAP",
+          "entries": [
+            {
+              "key": "TRANSIT_IN_A1B2C3D4",
+              "fields": { "match_prefix_list": "TRANSIT_PFX_C9E1B7A4" },
+              "owning_intent": {
+                "resource_key": "service|transit",
+                "intent_id": "<opaque>",
+                "intent_url": "/api/intents/<opaque>"
+              },
+              "shared_with_services": []
+            }
+          ]
+        }
+      ],
+      "signal_unavailable": false
+    },
+    {
+      "node": "switch9",
+      "interfaces": ["Ethernet0"],
+      "intent_count_for_service": 0,
+      "rebuilt_at": null,
+      "tables": [],
+      "signal_unavailable": true,
+      "signal_unavailable_reason": "device unreachable; last successful read was 4 hours ago and is outside the cache window"
+    }
+  ],
+  "aggregate": {
+    "node_count": 12,
+    "node_count_with_signal": 11,
+    "node_count_signal_unavailable": 1,
+    "total_intent_count_for_service": 84,
+    "total_entries": 156
+  },
+  "shared_resource_summary": [
+    {
+      "resource": "ROUTE_MAP|TRANSIT_IN_A1B2C3D4",
+      "ref_count_in_service": 12,
+      "ref_count_outside_service": 0,
+      "decision_on_service_remove": "garbage_collect"
+    },
+    {
+      "resource": "ACL_TABLE|PROTECT_RE_IN_1ED5F2C7",
+      "ref_count_in_service": 12,
+      "ref_count_outside_service": 3,
+      "decision_on_service_remove": "preserve"
+    }
+  ],
+  "shared_resource_summary_rationale_ref": {
+    "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#24-policy-vs-infrastructure--shared-objects-have-independent-lifecycles",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+  },
+  "manual_equivalent": {
+    "newtron_cli": "for each node N binding 'transit': newtron N intent tree --kind service --resource transit --ancestors",
+    "newtron_http": {
+      "status": "pending_newtron_gap",
+      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/6",
+      "expected_shape": {
+        "method": "GET",
+        "path": "/network/default/service/transit/projection",
+        "query": { "node": "<repeatable>", "table": "<repeatable>" }
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`per_node[*].signal_unavailable`** uses the same pattern as the
+  Inbox surface: a Node whose underlying signal is currently
+  unreadable is NOT silently dropped (that would violate
+  `CLAUDE.md` §No Hidden State). It appears with
+  `signal_unavailable: true`, an empty `tables`, and a
+  substrate-grounded reason. Aggregate counts split signal-present
+  vs signal-unavailable.
+- **`shared_resource_summary[]`** is the reference-aware view of
+  the service's shared policy objects. Per
+  `CLAUDE.md` §Reference-Aware Removals and
+  `DESIGN_PRINCIPLES_NEWTRON.md` §24, removing a service binding
+  triggers a domain decision per shared resource (garbage-collect
+  vs preserve). The summary surfaces that decision at the
+  projection level, so the operator who is reading the service's
+  substrate can see — before any remove operation — which shared
+  resources are exclusive to this service and which are shared with
+  other services. This is the reference-aware lens applied to the
+  service-first navigation.
+- **`shared_resource_summary[*].decision_on_service_remove`** is
+  the decision newtron would make IF every binding of this service
+  were removed. It is a hypothetical projection, not an action.
+  Operator-philosophy invariant #4 ("show before do") is honored
+  for the largest possible reverse operation on this service.
+- **`per_node[*].rebuilt_at`** is per-Node because the read is
+  per-Node; `null` when `signal_unavailable: true`. The top-level
+  `as_of` is the timestamp at which newtcon-server completed the
+  cross-Node fan-out.
+
+**Why `pending_newtron_gap`:** there is no newtron HTTP endpoint
+that returns a service-scoped projection slice across Nodes.
+`/intent/tree?kind=service&resource={svc}` returns the intent-side
+DAG for one device; the projection-side rendering of that DAG —
+per-table, per-key, per-field — does not exist as an HTTP read on
+either the per-Node or per-service axis. The gap was filed by the
+newtcon Architect at the time this contract was written, per
+`CLAUDE.md` §Gap-Handling Protocol; see
+[newtron#6](https://github.com/aldrin-isaac/newtron/issues/6) for
+the proposed HTTP shape. The implementer slice for this endpoint is
+blocked until newtron#6 lands. (newtron#5 is a prerequisite of
+newtron#6 — the per-Node projection read is the building block of
+the per-service slice; newtron may choose to land #5 first.)
+
+**Errors:**
+- Unknown `service` → 404 with `kind: "precondition_failure"` and
+  `details.reason: "service_unknown"`.
+- Service known but no bindings → 200 with empty `per_node` and
+  `binding_count: 0` (not an error; absence of bindings is a valid
+  state and surfacing it as 200 lets the operator see "this service
+  is defined but currently unused").
+- `node` filter naming a node that does not bind the service → that
+  node is omitted from `per_node` (not an error; filter is a
+  whitelist).
+- `table` filter contains an unowned table → 400 with
+  `kind: "validation_failure"`.
+- newtron-server unreachable for ALL bound Nodes → 503 with
+  `kind: "newtron_unavailable"`.
+
+### `GET /api/changesets/{changeset_id}`
+
+Return the full ChangeSet for one per-Node bundle of one operation,
+plus the rationale linking it to the originating intent record and
+the operation trace.
+
+Per `DESIGN_PRINCIPLES_NEWTRON.md` §11 ("The ChangeSet Is the
+Universal Contract"), the ChangeSet is the one object that is
+simultaneously the preview, the execution receipt, and the
+verification contract. This endpoint exposes the captured ChangeSet
+for a completed operation so the operator can answer:
+
+- "What was written?" — the `writes` and `deletes` arrays.
+- "Why was it written?" — the link to the originating intent and
+  the rationale block.
+- "What was the verify result?" — the link to
+  `/api/operations/{operation_id}/verify`.
+
+newtcon-server retains the ChangeSet for the same window as the
+parent operation (see §Retention above). This endpoint serves the
+captured artifact; newtron itself does not have a "ChangeSet by ID"
+read because ChangeSets are per-invocation in newtron's model. The
+addressability is a newtcon-server concern that exists because the
+operator needs a stable URL to navigate to from elsewhere.
+
+**Response 200:**
+```json
+{
+  "changeset_id": "<echoed>",
+  "as_of": "2026-05-25T14:40:00Z",
+  "addressing": {
+    "operation_id": "<opaque>",
+    "operation_url": "/api/operations/<opaque>",
+    "network": "default",
+    "node": "switch1",
+    "per_node_sequence": 1
+  },
+  "captured_at": "2026-05-25T14:06:02Z",
+  "writes": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "key": "default|10.1.0.1",
+      "fields": { "asn": "65002", "local_addr": "10.1.0.0", "admin_status": "up" },
+      "prior_fields": null
+    },
+    {
+      "table": "NEWTRON_INTENT",
+      "key": "interface|Ethernet0",
+      "fields": { "operation": "apply-service", "state": "actuated", "name": "transit", "service_name": "transit", "ip_address": "10.1.0.0/31", "_parents": "vrf|Vrf_TRANSIT,service|transit", "_children": "interface|Ethernet0|qos" },
+      "prior_fields": null
+    }
+  ],
+  "deletes": [
+    {
+      "table": "INTERFACE_IP",
+      "key": "Ethernet0|10.0.0.5/31",
+      "prior_fields": { "scope": "global" }
+    }
+  ],
+  "intent_records_written": [
+    {
+      "resource_key": "interface|Ethernet0",
+      "intent_id": "<opaque>",
+      "intent_url": "/api/intents/<opaque>",
+      "role": "primary"
+    }
+  ],
+  "render_decisions": [
+    {
+      "decision": "vrf_creation_required",
+      "rationale": "service spec 'transit' declares vrf_name 'Vrf_TRANSIT'; intent DB lookup for vrf|Vrf_TRANSIT returned no record; created VRF intent as parent",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#724-applyservice",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+      }
+    },
+    {
+      "decision": "content_hash_route_map",
+      "rationale": "route map content for service 'transit' hashed to A1B2C3D4 (8-char SHA256 of CONFIG_DB fields); generated ROUTE_MAP|TRANSIT_IN_A1B2C3D4",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#52-content-hashed-naming",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#25-content-hashed-naming--version-shared-objects-by-what-they-write"
+      }
+    },
+    {
+      "decision": "shared_acl_increment",
+      "rationale": "ACL_TABLE|PROTECT_RE_IN_1ED5F2C7 already exists from prior bindings; incrementing reference count via DAG child registration",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#53-dag-based-reference-counting",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#24-policy-vs-infrastructure--shared-objects-have-independent-lifecycles"
+      }
+    }
+  ],
+  "reference_impact": {
+    "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4", "PREFIX_SET|TRANSIT_PFX_C9E1B7A4"],
+    "incremented": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7", "VRF|Vrf_TRANSIT"],
+    "decremented": [],
+    "garbage_collected": []
+  },
+  "wire_order": {
+    "rationale": "intent records prepended; CONFIG_DB writes interleaved per dependency order; deletes last to avoid daemon thrash",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#4-config-methods-intent--entry-generation",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#18-write-ordering-and-daemon-settling"
+    }
+  },
+  "totals": {
+    "write_count": 14,
+    "delete_count": 1,
+    "intent_record_count": 1
+  },
+  "verify_url": "/api/operations/<opaque>/verify",
+  "atomicity": "atomic_via_txpipeline",
+  "atomicity_rationale_ref": {
+    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract"
+  },
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "not_applicable",
+      "rationale": "ChangeSets in newtron are per-invocation artifacts, not persistent addressable objects. The ChangeSet for this operation was returned in newtron's WriteResult at apply time (the same ChangeSet that previewed was the ChangeSet that executed, per DESIGN_PRINCIPLES_NEWTRON §11); newtcon-server retained it for provenance. To regenerate an equivalent ChangeSet today, an operator would re-run the original verb in dry-run mode against the same Node; this will produce a ChangeSet of the same shape but with current timestamps and fresh resolved-params, not the captured original."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`writes[*].prior_fields` and `deletes[*].prior_fields`** carry
+  the snapshot of the entry's CONFIG_DB state immediately before
+  the ChangeSet executed, captured by newtron's
+  `Lock → snapshot → fn → commit-or-restore → Unlock` cycle
+  (`unified-pipeline-architecture.md` §8). `null` when the write was
+  a creation (no prior state) or when newtron does not capture
+  prior state for the table. This is the audit-trail substrate that
+  lets the operator answer "what was there before?" — invariant #1
+  ("no black boxes") applied to a historical ChangeSet.
+- **`render_decisions[]`** captures the non-obvious choices the
+  Render stage made — VRF/ACL creation-vs-reuse, content-hash
+  generation, dependency-ordering. Each decision has a textual
+  rationale AND a `rationale_ref` to the substrate-level and
+  principle-level documents. This is the why-mode substrate at the
+  ChangeSet level: an operator clicking "why was this ChangeSet
+  this shape?" gets a per-decision answer, not a paraphrase.
+  Implementations populate `render_decisions[]` from newtron's
+  render-time logs (today exposed only in process logs; over time
+  expected to come through a structured render-decisions field on
+  newtron's WriteResult — see Gap-Handling for evolution path).
+- **`intent_records_written[*].role`** is one of:
+  - `primary` — the intent record the operation was named after
+    (e.g., `apply-service` writes `interface|{intf}` as primary).
+  - `derived` — an intent created because the primary required it
+    as a parent (e.g., `vrf|{name}` created during an apply-service
+    because the spec declared a VRF that did not yet exist).
+  - `child_registration` — an intent updated only to register a
+    new child (DAG `_children` field append; no domain params
+    changed).
+- **`reference_impact`** mirrors the same field on the preview
+  shapes throughout the contract — same enum, same semantics —
+  recorded at execution time. The operator who clicks a historical
+  ChangeSet sees the SAME reference-impact view they saw at
+  preview time, with the actual decisions (e.g., what was actually
+  garbage-collected when the ChangeSet ran), not just the
+  projected ones.
+- **`verify_url`** points to the dedicated verify endpoint for the
+  parent operation. The ChangeSet itself does not embed verify
+  results inline because verify is a post-deliver Device I/O
+  assertion against the ChangeSet
+  (`unified-pipeline-architecture.md` §7) — distinct enough to
+  warrant its own endpoint, and reachable from here in one click.
+- **`manual_equivalent.newtron_http.status: "not_applicable"`** is
+  the honest answer (not a gap): newtron does not expose ChangeSets
+  as addressable objects because they are per-invocation in
+  newtron's model. The captured ChangeSet exposed here is a
+  newtcon-server retention artifact, derived from the WriteResult
+  newtron returned at apply time. The contract surfaces the
+  not-applicable status with its rationale, rather than fabricating
+  a `pending_newtron_gap` claim where no gap actually exists
+  (operator-philosophy invariant #1: the operator must not be
+  taught a false model of where the substrate lives).
+
+**Errors:**
+- Unknown `changeset_id` → 404 with
+  `kind: "precondition_failure"` and `details.reason ∈
+  {"changeset_unknown", "operation_evicted"}`.
+  - `changeset_unknown` — the ID was never minted.
+  - `operation_evicted` — the parent operation has been evicted
+    from newtcon-server's retention window; the ChangeSet is no
+    longer available even though it was once minted. The operator
+    is told which.
+
+### `GET /api/operations/{operation_id}/verify`
+
+Return the full verify-stage assertion diff for one operation —
+the per-entry assertion of "what was written" vs "what re-reading
+CONFIG_DB returned" — as captured by `cs.Verify(n)` at apply time.
+
+Per `unified-pipeline-architecture.md` §7 ("Device I/O") and
+`DESIGN_PRINCIPLES_NEWTRON.md` §14 ("Verify Your Writes; Observe
+Everything Else"), verify is a **Device I/O assertion**: newtron
+re-reads every CONFIG_DB entry it just wrote and diffs against the
+ChangeSet. The assertion is absolute — newtron knows what it
+wrote — and the diff (passed, failed, per-entry errors) is the
+substrate-level answer to "did the write actually land on the
+device?"
+
+This endpoint is the dedicated polling target for the verify
+substrate. The same data is also returned inline in
+[`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id)
+under the `verify` key, but that endpoint returns the full
+operation trace (pipeline, intent, terminal status) and is
+heavyweight to poll. UI clients that want only the verify diff —
+the typical case for a progress indicator on a long-running verify
+— poll this endpoint instead.
+
+Idempotent; safe to poll. No newtron-side state is mutated.
+
+**Response 200:**
+```json
+{
+  "operation_id": "<echoed>",
+  "operation_url": "/api/operations/<opaque>",
+  "as_of": "2026-05-25T14:41:00Z",
+  "kind": "device_io_assertion",
+  "kind_rationale_ref": {
+    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
+  },
+  "state": "pending | in_progress | complete | failed | skipped",
+  "started_at": "2026-05-25T14:06:02Z",
+  "completed_at": "2026-05-25T14:06:03Z",
+  "skip_reason": null,
+  "asserted_against": {
+    "changeset_id": "<opaque>",
+    "changeset_url": "/api/changesets/<opaque>",
+    "entry_count": 15,
+    "delivered_at": "2026-05-25T14:06:02Z"
+  },
+  "assertion": {
+    "passed": 14,
+    "failed": 1,
+    "entries": [
+      {
+        "table": "BGP_NEIGHBOR",
+        "key": "default|10.1.0.1",
+        "outcome": "passed",
+        "fields_asserted": ["asn", "local_addr", "admin_status"]
+      },
+      {
+        "table": "BGP_NEIGHBOR",
+        "key": "default|10.1.0.5",
+        "outcome": "failed",
+        "fields_asserted": ["asn", "local_addr", "admin_status"],
+        "field_errors": [
+          {
+            "field": "asn",
+            "expected": "65002",
+            "actual": "",
+            "interpretation": "field missing on device after delivery; daemon may have rejected the write"
+          }
+        ]
+      }
+    ]
+  },
+  "interpretation": {
+    "verdict": "verify_failed_on_subset",
+    "verdict_rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
+    },
+    "next_action_hints": [
+      {
+        "verb": "inspect_daemon_state",
+        "rationale": "verify failure on BGP_NEIGHBOR fields suggests bgp daemon may have rejected the write; consider GET /network/{n}/node/{d}/bgp/status",
+        "manual_equivalent_newtron_cli": "newtron switch1 bgp status"
+      },
+      {
+        "verb": "stage_reconcile_delta",
+        "rationale": "if verify failures correspond to a drift detection signal, a delta reconcile would re-apply the missing entries; stage via Workbench",
+        "manual_equivalent_newtron_cli": "newtron switch1 intent reconcile -x  # full; see gap #3 for delta"
+      }
+    ]
+  },
+  "manual_equivalent": {
+    "newtron_cli": "newtron switch1 verify-committed",
+    "newtron_http": {
+      "status": "partial_match",
+      "method": "POST",
+      "path": "/network/default/node/switch1/verify-committed",
+      "note": "Re-runs verify against the LAST committed ChangeSet on the device, not the historical ChangeSet for this specific operation_id. The historical assertion captured by newtcon-server at this operation's apply time is the authoritative answer to the substrate question 'did this operation verify?'; the live re-verify answers a different question ('does the device's current state still match the LAST commit?'). The contract surfaces the captured assertion here; an operator who wants a live re-verify uses Workbench to stage a fresh operation."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`state`** mirrors the verify state in
+  [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id)
+  exactly. A `pending` or `in_progress` state means the assertion
+  has not produced a diff yet; `assertion.entries[]` is empty and
+  `assertion.passed`/`failed` are both `0`. A `skipped` state
+  populates `skip_reason` (e.g., the verb wrote no ChangeSet) and
+  empty `assertion.entries[]`.
+- **`assertion.entries[]`** is per-entry, not summarized. Each
+  entry has an `outcome` (`passed` or `failed`); failed entries
+  have `field_errors[]` with the per-field
+  `expected`/`actual`/`interpretation`. The `interpretation` is a
+  textual hint produced by newtcon-server — NOT a verdict on the
+  device; it surfaces likely causes (daemon rejection, schema
+  mismatch) so the operator has a starting point, not a
+  conclusion.
+- **`asserted_against`** points to the ChangeSet the assertion
+  diffed against. Verify is defined as "diff CONFIG_DB re-read
+  against THIS ChangeSet" (`DESIGN_PRINCIPLES_NEWTRON.md` §11,
+  §14); the contract makes the relationship traversable as a
+  hyperlink. An operator clicking "what did this verify check?"
+  reaches the captured ChangeSet directly.
+- **`interpretation.verdict`** is one of:
+  - `verify_passed` — all entries passed.
+  - `verify_failed_on_subset` — at least one entry failed; subset
+    is in `assertion.entries[]` with `outcome: "failed"`.
+  - `verify_pending` — not yet complete.
+  - `verify_skipped` — verb wrote no ChangeSet, or caller opted out.
+- **`interpretation.next_action_hints[]`** lists per-verdict
+  recommendations grounded in newtron substrate operations. Each
+  hint carries a `manual_equivalent_newtron_cli` so the operator
+  can run the diagnostic by hand — operator-philosophy invariant
+  #2 ("manual-mode parity") applied to error response. Hints are
+  ordered by relevance; the UI surfaces the top one as the
+  default.
+- **`manual_equivalent.newtron_http.status: "partial_match"`** is
+  a new status value alongside `"available"` and
+  `"pending_newtron_gap"`. It is used when an existing newtron
+  endpoint answers a related but not identical question; the
+  `note` explains the gap honestly. The bounded enum for
+  `manual_equivalent.newtron_http.status` is therefore
+  `available | pending_newtron_gap | partial_match | not_applicable`.
+
+**Errors:**
+- Unknown or evicted `operation_id` → 404 with
+  `kind: "precondition_failure"` and `details.reason ∈
+  {"operation_unknown_or_expired", "operation_evicted"}` (same
+  semantics as the operations endpoint).
+- newtron-server unreachable while verify is in-flight → 503 with
+  `kind: "newtron_unavailable"` and `details.last_known.assertion`
+  carrying the most recent assertion snapshot newtcon-server has.
+
+
