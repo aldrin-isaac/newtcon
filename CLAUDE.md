@@ -159,14 +159,20 @@ If newtron's HTTP API does not expose what newtcon needs, follow the
 
 ## Gap-Handling Protocol
 
-When implementing a slice, an agent may discover that newtron's HTTP API
-does not expose required functionality. The agent MUST:
+When implementing a slice or authoring a Contract PR, an agent may
+discover that newtron's HTTP API does not expose required functionality.
+The agent MUST:
 
 1. **Stop implementing the feature.** Do not work around the gap.
 2. **Open a newtron issue** (in newtron's repo, not newtcon's) titled
-   `newtron HTTP API gap: <domain-term>`. The body describes the gap in
-   domain terms (operator-facing intent), not implementation terms, and
-   proposes the HTTP shape newtron should expose.
+   `newtron HTTP API gap: <domain-term>`. The body must contain:
+   - The gap described in domain terms (operator-facing intent), not
+     implementation terms.
+   - The proposed HTTP shape newtron should expose.
+   - An **"Existing newtron API surveyed"** section enumerating what
+     was checked and why it is insufficient (see below). A gap issue
+     filed without this section is invalid; the gap is presumed not
+     to exist until the survey is added.
 3. **Mark the newtcon issue blocked** with a link to the newtron issue.
 4. **Move to the next available slice.**
 
@@ -178,9 +184,46 @@ Forbidden under any circumstance:
 - Re-implementing newtron logic in newtcon "as a workaround."
 - Calling `bin/newtron` (or any newtron binary) as a subprocess.
 - Reading newtron's CONFIG_DB / APP_DB / etc. directly via a Redis client.
+- **Filing a gap issue without an "Existing newtron API surveyed"
+  section.**
 
 If the gap blocks all available slices, halt and notify the operator via the
 Drift Auditor's next report.
+
+### Existing newtron API surveyed — required section in every gap issue
+
+The autonomous agent team does not have direct access to newtron's
+source. Architects and Implementers reason about newtron's API shape
+by inference — a process that has produced confabulated gap reports
+twice (newtron#3 was closed because the endpoint already existed at
+`/intent/reconcile`; newtron#4/#5/#6 referenced composite endpoints
+that do not exist in newtron's code). To force verification before
+filing, every gap issue MUST include this section.
+
+Enumerate, at minimum:
+
+- The **routes table** at `../newtron/pkg/newtron/api/handler.go`
+  `buildMux()` — list any routes whose name or path might cover the
+  needed capability.
+- The **handler implementations** at
+  `../newtron/pkg/newtron/api/handler_node.go` and
+  `handler_network.go` for any route examined.
+- **Public Node methods** at
+  `../newtron/pkg/newtron/network/node/node.go`.
+- **Public Network methods** at
+  `../newtron/pkg/newtron/network/network.go`.
+- **Existing types** at `../newtron/pkg/newtron/types.go` and
+  `../newtron/pkg/newtron/device/sonic/types.go`.
+
+For each item examined, name the route/method/type and state why it
+is insufficient — wrong shape, returns a summary instead of substrate
+(`DESIGN_PRINCIPLES_NEWTRON.md` §46), requires N stitched calls,
+doesn't exist, etc.
+
+The survey is the operator's audit trail. Architecture Reviewer and
+Critic both check that it is present and substantive on any newtcon
+issue that links to a newtron gap. Filing without it, or with a
+trivial "I didn't find anything" body, is rejected.
 
 ## File Ownership Map
 

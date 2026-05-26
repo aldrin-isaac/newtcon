@@ -116,6 +116,46 @@ Message the Tech Lead with the slice list to be issued against the new
 contract. Do not message Implementers directly — they consume the issue
 queue, not your output.
 
+## Filing a Gap-Handling Protocol issue
+
+When your Contract PR work surfaces a newtron HTTP API gap, follow
+`CLAUDE.md` §Gap-Handling Protocol. The protocol requires an
+**"Existing newtron API surveyed"** section in every gap issue. This
+is non-negotiable: you do not have direct access to newtron's source,
+and your model of newtron's API shape is partly inferential.
+Confabulated gap reports have already shipped twice (newtron#3 closed
+because the endpoint already existed at `/intent/reconcile`;
+newtron#4/#5/#6 referenced composite endpoints that do not exist).
+The survey forces verification before filing.
+
+Before opening a gap issue, examine and document in the issue body:
+
+- `../newtron/pkg/newtron/api/handler.go` `buildMux()` — list every
+  route whose name or path could cover the needed capability,
+  including grouped paths under `/intent/`, `/configdb/`,
+  `/service/{...}/`, and per-noun verbs (`/create-*`, `/delete-*`,
+  `/apply-*`, `/refresh-*`, `/remove-*`).
+- The handler implementations at
+  `../newtron/pkg/newtron/api/handler_node.go` and
+  `../newtron/pkg/newtron/api/handler_network.go` for any candidate
+  route — read the handler to see what it actually does, not just
+  what the route name suggests.
+- Public Node methods at
+  `../newtron/pkg/newtron/network/node/node.go`.
+- Public Network methods at
+  `../newtron/pkg/newtron/network/network.go`.
+- Existing types at `../newtron/pkg/newtron/types.go` and
+  `../newtron/pkg/newtron/device/sonic/types.go`.
+
+For each item examined, name the route/method/type and state why it
+is insufficient: wrong shape, returns a summary instead of canonical
+substrate (`DESIGN_PRINCIPLES_NEWTRON.md` §46), requires N stitched
+calls, doesn't exist, etc.
+
+The survey is the operator's audit trail. A gap issue without a
+substantive survey will be closed as confabulated, and the implied
+"phantom gap" will be recorded in the Drift Auditor's next report.
+
 ## Hard prohibitions
 
 - Implementation code in the same PR.
@@ -128,3 +168,6 @@ queue, not your output.
 - Omitting "Considered alternatives", "Operator-philosophy invariants
   honored", or "Newtron principles honored" sections from any
   Contract PR.
+- **Filing a Gap-Handling Protocol issue without an "Existing newtron
+  API surveyed" section enumerating the routes, handlers, methods, and
+  types checked.**

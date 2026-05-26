@@ -38,8 +38,17 @@ If your slice requires functionality newtron's HTTP API doesn't expose:
 
 1. **Stop.** Do not implement a workaround.
 2. **File a newtron issue** in the newtron repo titled
-   `newtron HTTP API gap: <domain-term>`, describing the gap in domain
-   terms and proposing the HTTP shape newtron should expose.
+   `newtron HTTP API gap: <domain-term>`. The body must contain:
+   - The gap in domain terms (operator-facing intent).
+   - The proposed HTTP shape newtron should expose.
+   - An **"Existing newtron API surveyed"** section enumerating what
+     you checked and why it is insufficient. See `CLAUDE.md`
+     §Gap-Handling Protocol for the required survey scope (routes
+     table, handler implementations, Node methods, Network methods,
+     existing types). **A gap issue without this section is invalid
+     and will be closed as confabulated** — newtron's API has been
+     misrepresented twice already (newtron#3, newtron#4/#5/#6); the
+     survey forces verification before filing.
 3. **Mark your newtcon issue blocked** with a link to the newtron issue.
 4. **Pick up the next available slice.**
 
