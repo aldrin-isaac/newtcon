@@ -31,9 +31,14 @@ operator without it** — measured over months of use, not minutes.
 
 ## The litmus test
 
-An operator who uses newtcon for a year and is then required to manage
-a SONiC fabric without it should be **more capable** than they were
-when they started.
+An operator who uses newtcon for a year must be **more capable** than
+they were when they started. The strongest expression of "more
+capable" is operators who file PRs at the method level, not tickets at
+the symptom level. They can run the failed substrate operation
+manually, isolate device-vs-automation, name the method in the
+automation that produced the wrong config, and propose a fix.
+Operators who do that have become participants in the automation, not
+its consumers.
 
 - **More capable** → philosophy honored.
 - **Equally capable** → newtcon was a productivity tool, not a
@@ -85,12 +90,9 @@ not summarized. The operator never has to take a result on faith.
 
 ### 2. Manual-mode parity
 
-Anything the automation can do, the operator can do by hand through
-the same surface. Automation is an accelerator on top of manual
-control, not a replacement for it. The same UI elements that drive
-automated actions can drive manual ones; the operator chooses which
-lever to pull. There is no "advanced mode" hidden behind a flag —
-there is one mode, with automation as an opt-in convenience.
+Anything the automation can do, the operator can do by hand using their existing tools (ssh + redis-cli + vendor CLI + console) directly against the device, **without newtron or newtcon in the path**. newtcon's contribution to manual-mode parity is to **teach** the device-level equivalent of every automated operation and to **expose** the substrate (CONFIG_DB tables, keys, fields, device addresses, vendor doc links) so the operator can act independently.
+
+newtcon does NOT provide a "manual mode," an "escape hatch," an embedded terminal, or any path that mediates device access. It would not be parity if the manual path required newtcon, because newtcon being unavailable is one of the failure modes parity exists to handle. The manual capability must be in the operator's own tools, not in newtcon's affordances.
 
 ### 3. The substrate is the teaching surface
 
@@ -150,6 +152,39 @@ automation is certain, it acts. When uncertain, it proposes and
 waits. When outside its competence, it escalates. False confidence is
 worse than no confidence because it teaches the operator to
 over-trust.
+
+## Concrete success vision: operators as participants
+
+The philosophy can sound abstract. A concrete vision of success makes
+it operational. The strongest expression of capability amplification
+is operators who become **participants in the automation, not
+consumers of it.**
+
+- The operator sees changes executing **in real time** — each
+  substrate write as it lands, not just "operation complete."
+  Streaming substrate observability, not aggregate success.
+- When the device rejects a change, the operator sees **exactly which
+  write failed**, what was attempted, and what the device returned.
+  Per-substrate-operation granularity on failures, not aggregate
+  error.
+- The operator can take the failed write and try it manually against
+  the device themselves, **isolating device-vs-automation**. The
+  failed write is shown in copy-paste-ready form; the operator's own
+  ssh session is the venue.
+- The operator can point at the **exact method in the automation**
+  that produced the bad config. In verbose mode, every substrate
+  operation carries the call-site (file:line / function name) of the
+  automation method that emitted it. The operator learns the names of
+  the automation's parts.
+- The operator **files a PR** against the automation, not a ticket.
+  They name the method, propose the fix. The automation team accepts
+  the patch.
+
+When this is working, the operator has become a co-developer of the
+automation. They identify bugs at the method level, isolate failures
+to either device or automation, and contribute back. This is the
+strongest form of capability amplification: not just "more capable at
+network operations" but "more capable at improving the tool itself."
 
 ## Aesthetic discipline: beautiful, elegant, simple AND powerful
 
