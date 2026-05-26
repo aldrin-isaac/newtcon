@@ -3469,4 +3469,998 @@ Field rules:
   `kind: "newtron_unavailable"` and `details.last_known.assertion`
   carrying the most recent assertion snapshot newtcon-server has.
 
+## Endpoints — Rehearsal (sandbox surface)
+
+The Rehearsal surface is **the operator's safe sandbox for practicing
+manual control of the network**. It is the contract realization of
+operator-philosophy invariant #6 ("rehearsal mode is real"), declared
+non-negotiable in [`docs/operator-philosophy.md`](docs/operator-philosophy.md):
+
+> A safe sandbox where the operator can practice manual control without
+> affecting reality. Operations in rehearsal mode are explicitly marked,
+> no real device is touched, and the operator's actions are shown
+> alongside what the automation would have done. Used for training,
+> drills, and pre-flight before high-stakes changes.
+
+Without this surface, manual-takeover-readiness is theoretical — and
+theoretical readiness is exactly the autopilot whose pilots cannot fly
+when it fails. The Rehearsal surface is the only place in the contract
+where the operator practices, and it is therefore load-bearing on the
+whole capability-amplification thesis of newtcon.
+
+### Sessions, not flags
+
+Rehearsal is a **session-scoped mode**, not a flag on existing
+endpoints. The operator opens a `RehearsalSession`; while it is open,
+the operator addresses operations through this surface's session-scoped
+endpoints. The session carries a `rehearsal_session_id`, and every
+response under the surface is tagged `"rehearsal": true` at the top
+level.
+
+This shape is deliberate. Two alternatives were considered and
+rejected:
+
+- **`rehearsal=true` flag on existing endpoints** (Composer's
+  `/api/apply`, Workbench's `/commit`, Inbox's `/action`) — rejected
+  because the flag is forgettable. A UI that flips the flag on the
+  "Apply" button must remember to flip it back; one missed code path
+  ships a real device write under a rehearsal banner. The contract
+  must make rehearsal-vs-real **unmistakable at the URL level**, not a
+  boolean buried in a JSON body. Operator-philosophy invariant #6's
+  "explicitly marked" requirement is binding at the URL, not the body.
+- **Parallel rehearsal endpoint set with no session** (every
+  `/api/rehearsal/{verb}` call independent) — rejected because
+  multi-step rehearsal requires step `N+1` to see step `N`'s effects.
+  Per `unified-pipeline-architecture.md` §8, newtron's existing
+  `Lock → snapshot → fn → restore → Unlock` is per-invocation: it
+  restores after each `fn`. A session is the substrate that lets the
+  operator walk a multi-step practice scenario. (Single-step rehearsal
+  is also useful and is supported; see "Quickrun" below.)
+
+The session approach composes cleanly with Composer, Workbench, and
+Inbox: each surface gains a sibling rehearsal-scoped endpoint that
+returns the same shape it normally returns, plus a `rehearsal` envelope
+and an `automation_comparison` block (defined below). The frontend
+reuses its existing rendering code for the body; the envelope tells
+the operator they are in rehearsal.
+
+### Vocabulary
+
+Newtron's substrate vocabulary applies inside rehearsal exactly as it
+does outside:
+
+- **Sandbox** — the forked intent DB + simulated CONFIG_DB pair the
+  session owns. Per `unified-pipeline-architecture.md` §8, the
+  forked-via-snapshot intent DB is newtron's existing dry-run substrate;
+  rehearsal extends it to multi-step (see gap newtron#7).
+- **Replay** — every operation inside a session goes through the same
+  `Intent → Replay → Render` path as a real operation
+  (`unified-pipeline-architecture.md` §2, §8, and the one-code-path
+  guarantee of `DESIGN_PRINCIPLES_NEWTRON` §12). What differs: Deliver
+  is a no-op against a real device; the ChangeSet is "delivered" to
+  the session's forked CONFIG_DB.
+- **Snapshot** / **restore** — the session itself is one big snapshot
+  of the forked intent DB, captured at session-open and discarded at
+  session-close. Internal to a session, each session-scoped operation
+  runs the standard per-verb path against the fork; on session-close,
+  the fork itself is restored (i.e., discarded).
+- **Drill** — a named scenario that opens a session in a known
+  starting state (injected drift, zombie record, verify-failure
+  primer). Drills are pre-defined; operator-defined drills are out of
+  scope for v0 (deferred to a follow-up Contract PR).
+
+### Comparison surface (`automation_comparison`)
+
+Operator-philosophy invariant #6 requires that "the operator's actions
+are shown alongside what the automation would have done." Every
+rehearsal action response carries an `automation_comparison` block:
+
+```json
+{
+  "automation_comparison": {
+    "operator_action": {
+      "verb": "ApplyService",
+      "params": { /* what the operator passed */ },
+      "changeset_summary": { "writes": 12, "deletes": 2 }
+    },
+    "automation_proposal": {
+      "available": true,
+      "verb": "ApplyService",
+      "params": { /* what newtron would have proposed for the same situation */ },
+      "changeset_summary": { "writes": 14, "deletes": 0 },
+      "delta_from_operator": {
+        "params_differ_in": ["peer_as"],
+        "changesets_differ_in": {
+          "operator_only": [
+            { "table": "INTERFACE_IP", "key": "Ethernet0|10.0.0.5/31", "op": "delete" }
+          ],
+          "automation_only": [
+            { "table": "BGP_PEER_GROUP", "key": "TRANSIT_GROUP", "op": "write" }
+          ],
+          "both": [
+            { "table": "BGP_NEIGHBOR", "key": "default|10.1.0.1" }
+          ]
+        }
+      },
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#724-applyservice",
+        "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+      }
+    },
+    "verdict": {
+      "kind": "match | operator_more_complete | automation_more_complete | divergent",
+      "summary": "operator omitted BGP_PEER_GROUP write that automation would have included",
+      "teaches": "BGP_PEER_GROUP is a shared policy object; the automation creates it on first reference, then increments its reference count on subsequent ApplyService calls. The operator's manual ChangeSet skipped it; on a real device this would have left the BGP_NEIGHBOR entry referencing a non-existent peer group, causing bgpd to reject the neighbor configuration."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`automation_proposal.available`** is `false` when the operator's
+  verb has no automation analogue (e.g., a raw CONFIG_DB write that
+  newtron does not expose as a verb). In that case, `verb`, `params`,
+  `changeset_summary`, `delta_from_operator`, and
+  `rationale_ref` are omitted, and `verdict.kind` is
+  `automation_not_applicable`. The contract is honest: rehearsal does
+  not pretend the automation has an answer for every operator action.
+- **`verdict.teaches`** is a substrate-grounded explanation of the
+  delta the operator should learn from. Per operator-philosophy
+  invariant #3 ("the substrate is the teaching surface") and the
+  fractal-application clause ("Architect Contract PRs cite design
+  principles and considered alternatives as teaching"), the verdict is
+  the rehearsal surface's primary teaching moment. It is generated by
+  newtcon-server from the typed delta; it is NOT a free-text narrative
+  the operator authors.
+- **`delta_from_operator.changesets_differ_in.both[]`** lists keys
+  both ChangeSets touch (whether identically or with different
+  fields); the per-field comparison is reachable via the linked
+  rehearsal preview's full ChangeSets, not duplicated here.
+
+### Session lifecycle
+
+A session progresses through:
+
+```
+opened ─► (operator issues actions) ─► closed
+            │
+            └─ auto-expires at expires_at (TTL)
+```
+
+There are no intermediate states; a session is either open or closed,
+and closure releases every server-side artifact tied to the session
+(forked intent DB, simulated CONFIG_DB, action history). Closed
+sessions retain a **transcript** for 24 hours so the operator can
+review what they practiced; see `GET /api/rehearsal/transcripts/{...}`
+below.
+
+### Identifiers
+
+- `rehearsal_session_id` — opaque, server-assigned at session-open.
+  Stable for the life of the session.
+- `rehearsal_action_id` — opaque, server-assigned per action inside a
+  session. Used to address one action for inspection.
+- `drill_id` — opaque, naming a pre-defined drill scenario. Bounded
+  enum surfaced via
+  [`GET /api/rehearsal/drills`](#get-apirehearsaldrills).
+- `preview_id` — same shape and 5-minute TTL as elsewhere in the
+  contract. Rehearsal action endpoints follow the preview-before-commit
+  pattern.
+
+All IDs are opaque to the client.
+
+### Retention and isolation
+
+- Open sessions are server-memory only; they do not survive
+  newtcon-server restart. Operators are told this at session-open
+  (`session.persistence: "in_memory_only"`).
+- Closed-session transcripts are retained 24 hours, after which both
+  the transcript and any `rehearsal_action_id` it minted return 404.
+- Sessions never write to the real Node. The contract forbids any
+  rehearsal endpoint from causing a Deliver-stage write against a real
+  device — this is enforced by the `automation_comparison`-paired
+  fields, the `no_real_device_io: true` envelope, and the underlying
+  newtron call shape (newtron's `dry_run: true` / `execute: false` for
+  single-step; the proposed `rehearsal/session` endpoints for
+  multi-step).
+
+### Rehearsal envelope (on every response)
+
+Every response from this surface carries:
+
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<opaque or null>",
+  "as_of": "2026-05-25T14:30:00Z",
+  ...
+}
+```
+
+`no_real_device_io` is a load-bearing assertion, identical in spirit
+to the same field on Workbench's `/dry_run`. Per
+operator-philosophy invariant #9 ("Confidence and limits are
+explicit"), the envelope makes it impossible for any UI consumer to
+misread a rehearsal response as a real apply.
+
+`rehearsal_session_id` is `null` only on session-list, drill-list, and
+session-open responses (where there is no session yet, or the response
+is the session being opened). Every other endpoint requires a session
+and echoes its ID.
+
+### `GET /api/rehearsal/drills`
+
+List the pre-defined drill scenarios the operator can open. Idempotent;
+safe to poll. No newtron-side state is mutated.
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": null,
+  "as_of": "2026-05-25T14:00:00Z",
+  "drills": [
+    {
+      "drill_id": "drift-bgp-asn-modified",
+      "kind": "drift",
+      "name": "Drift drill: BGP_NEIGHBOR ASN externally modified",
+      "description": "An external operator changed asn on one BGP_NEIGHBOR entry. Practice detecting and reconciling.",
+      "node_required": true,
+      "default_node_hint": "any node with at least one BGP_NEIGHBOR entry",
+      "estimated_duration": "PT5M",
+      "teaches": [
+        "delta reconcile resolves modified-type drift without config reload",
+        "drift guard blocks new writes until reconcile clears the drift",
+        "the verdict on a delta reconcile names exactly which entries it patches"
+      ],
+      "teaches_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#6-delta-reconcile",
+        "principle": "docs/operator-philosophy.md#6-rehearsal-mode-is-real"
+      }
+    },
+    {
+      "drill_id": "zombie-apply-service-crash",
+      "kind": "zombie",
+      "name": "Partial operation drill: ApplyService crash mid-delivery",
+      "description": "A previous ApplyService crashed after writing the intent record but before completing CONFIG_DB writes. Practice rollback-zombie vs clear-zombie decision.",
+      "node_required": true,
+      "default_node_hint": "any node",
+      "estimated_duration": "PT5M",
+      "teaches": [
+        "the zombie intent record IS the substrate of what was partially applied",
+        "rollback-zombie reverses the partial; clear-zombie records that the operator cleaned up by hand",
+        "clear-zombie requires a narrative note that survives in the operations history"
+      ],
+      "teaches_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#crash-recovery-via-drift-guard--reconcile",
+        "principle": "docs/operator-philosophy.md#1-no-black-boxes"
+      }
+    },
+    {
+      "drill_id": "verify-failure-bgp-neighbor",
+      "kind": "verify_failure",
+      "name": "Convergence drill: verify failure on BGP_NEIGHBOR fields",
+      "description": "An apply-service operation's Deliver stage succeeded, but post-deliver verify finds the asn field missing on one entry. Practice interpreting verify diffs and deciding next action.",
+      "node_required": true,
+      "estimated_duration": "PT5M",
+      "teaches": [
+        "verify is a Device I/O assertion, not a pipeline stage",
+        "field_errors carry expected/actual per field; the interpretation is a hint, not a verdict",
+        "the next-action menu is grounded in the substrate, not in tool opinion"
+      ],
+      "teaches_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
+      }
+    },
+    {
+      "drill_id": "convergence-stuck-verify-pending",
+      "kind": "convergence_stuck",
+      "name": "Convergence drill: verify in-progress, not resolving",
+      "description": "An apply succeeded; verify has been in_progress for 4 minutes and is not advancing. Practice the operator decision between waiting, rechecking, or escalating.",
+      "node_required": true,
+      "estimated_duration": "PT3M",
+      "teaches": [
+        "a non-terminal verify is not failure — it is unfinished work",
+        "recheck is the substrate-level retry; acknowledge is the explicit waiting decision",
+        "operator-philosophy invariant #9 — confidence and limits are explicit"
+      ],
+      "teaches_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  ],
+  "free_practice": {
+    "supported": true,
+    "description": "Open a rehearsal session without a drill_id to practice anything (apply, remove, reconcile, ...) against a live-fork or empty starting state. See POST /api/rehearsal/sessions.",
+    "modes": ["fork_live", "fork_empty"]
+  }
+}
+```
+
+Field rules:
+
+- **`drills[]`** is a closed set in v0. The four kinds above are the
+  initial drill catalog; new drills require a Contract PR. This is
+  deliberate: drills must be curated for teaching value, not
+  user-extensible. (Operator-defined drills are deferred to a follow-up
+  Contract PR — see "Out of scope for v0" at the end of this section.)
+- **`teaches[]`** is the substrate-level lesson list for each drill.
+  Operator-philosophy invariant #3 ("the substrate is the teaching
+  surface") makes the lesson list contractual, not advisory: every
+  drill must declare what substrate it teaches, and the Architecture
+  Reviewer rejects new drills whose `teaches[]` is empty or generic.
+- **`teaches_rationale_ref`** uses the same shape as every other
+  `rationale_ref` in the contract: typed object with required
+  `substrate` and required `principle`.
+- **`free_practice`** describes the no-drill modes the operator can
+  open via `POST /api/rehearsal/sessions` with `drill_id` omitted.
+
+**Errors:** none specific to this endpoint beyond the standard
+`newtron_unavailable` for cross-cutting failures.
+
+### `POST /api/rehearsal/sessions`
+
+Open a new rehearsal session. May open a free-practice session (no
+`drill_id`) or a drill session (`drill_id` from
+`GET /api/rehearsal/drills`).
+
+**Request:**
+```json
+{
+  "node": "switch1",
+  "drill_id": "drift-bgp-asn-modified",
+  "mode": "fork_live | fork_empty | drill",
+  "label": "<operator-supplied free text, optional>",
+  "ttl": "PT30M"
+}
+```
+
+Field rules:
+
+- **`mode`** is the discriminator:
+  - `fork_live` — fork the live intent DB of `node`. Free-practice
+    against the current network state. `drill_id` must be omitted.
+  - `fork_empty` — start with an empty intent DB on `node` (offline
+    Node mode per `DESIGN_PRINCIPLES_NEWTRON` §1, exposed as a
+    rehearsal primitive). Free-practice Day-1 provisioning. `drill_id`
+    must be omitted.
+  - `drill` — open a drill session from the named `drill_id`.
+    `drill_id` is required.
+- **`ttl`** — session expires after this duration. Default `PT30M`;
+  max `PT4H`. Sessions also close on `DELETE`.
+- **`label`** — operator-supplied, for their own bookkeeping; appears
+  in session-list and transcript.
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<opaque>",
+  "as_of": "2026-05-25T14:00:00Z",
+  "session": {
+    "node": "switch1",
+    "mode": "drill",
+    "drill_id": "drift-bgp-asn-modified",
+    "label": "<echoed>",
+    "opened_at": "2026-05-25T14:00:00Z",
+    "expires_at": "2026-05-25T14:30:00Z",
+    "persistence": "in_memory_only",
+    "initial_state": {
+      "intent_count": 47,
+      "fork_source": "live device at 2026-05-25T14:00:00Z",
+      "drill_injection_summary": {
+        "drift_entries_injected": 1
+      }
+    },
+    "underlying_newtron_call": {
+      "manual_equivalent": {
+        "newtron_cli": null,
+        "newtron_http": {
+          "status": "pending_newtron_gap",
+          "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/7",
+          "expected_shape": {
+            "method": "POST",
+            "path": "/network/default/node/switch1/rehearsal/session",
+            "body": {
+              "fork_from": "live",
+              "ttl": "PT30M"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+For `mode: "drill"`, `underlying_newtron_call.manual_equivalent` points
+to the **drill-scenario** gap (newtron#8) instead, with the expected
+`POST /network/{n}/node/{d}/rehearsal/scenario/{kind}` shape.
+
+For `mode: "fork_empty"`, `initial_state.fork_source` is
+`"empty (offline Node mode)"` and `intent_count` is `0`. The empty-fork
+path could be implemented today via the existing offline Node mode
+(`DESIGN_PRINCIPLES_NEWTRON` §1, `unified-pipeline-architecture.md` §1
+"Topology Mode") plus per-verb `dry_run=true`, **but only for
+single-step**. Multi-step empty-fork rehearsal still needs newtron#7.
+
+**Errors:**
+- Unknown `node` → 404 `precondition_failure` with
+  `details.reason: "node_unknown"`.
+- Unknown `drill_id` → 400 `validation_failure` with
+  `details.allowed_drill_ids[]` and a hint to call
+  `GET /api/rehearsal/drills`.
+- `mode` and `drill_id` inconsistent (e.g., `mode: "fork_live"` with
+  `drill_id` set) → 400 `validation_failure`.
+- newtron-server unreachable → 503 `newtron_unavailable`.
+- newtron-server reachable but does not expose the rehearsal session
+  endpoint (gap newtron#7) AND the requested mode requires it
+  (`mode: "drill"` always; `mode: "fork_live"` and `mode: "fork_empty"`
+  when the session would be multi-step) → 501 with
+  `kind: "precondition_failure"` and
+  `details.reason: "newtron_capability_missing"`,
+  `details.gap_issue: "https://github.com/aldrin-isaac/newtron/issues/7"`.
+  Single-step rehearsal (see Quickrun below) is unaffected.
+
+### `GET /api/rehearsal/sessions`
+
+List the operator's currently-open rehearsal sessions.
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": null,
+  "as_of": "2026-05-25T14:05:00Z",
+  "sessions": [
+    {
+      "rehearsal_session_id": "<opaque>",
+      "node": "switch1",
+      "mode": "drill",
+      "drill_id": "drift-bgp-asn-modified",
+      "label": "...",
+      "opened_at": "2026-05-25T14:00:00Z",
+      "expires_at": "2026-05-25T14:30:00Z",
+      "action_count": 3,
+      "last_action_at": "2026-05-25T14:04:30Z"
+    }
+  ]
+}
+```
+
+### `GET /api/rehearsal/sessions/{rehearsal_session_id}`
+
+Return the full state of one session, including the action history
+(rehearsal action transcripts so far) and the current fork state
+summary.
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<echoed>",
+  "as_of": "2026-05-25T14:05:00Z",
+  "session": {
+    "node": "switch1",
+    "mode": "drill",
+    "drill_id": "drift-bgp-asn-modified",
+    "label": "...",
+    "opened_at": "2026-05-25T14:00:00Z",
+    "expires_at": "2026-05-25T14:30:00Z",
+    "persistence": "in_memory_only",
+    "current_fork_state": {
+      "intent_count": 47,
+      "projection_rebuilt_at": "2026-05-25T14:04:30Z",
+      "simulated_drift_entries": 1,
+      "simulated_zombie_present": false
+    }
+  },
+  "action_history": [
+    {
+      "rehearsal_action_id": "<opaque>",
+      "action_url": "/api/rehearsal/sessions/<sid>/actions/<aid>",
+      "at": "2026-05-25T14:03:10Z",
+      "verb": "GetDrift",
+      "outcome_summary": "1 drift entry inspected"
+    },
+    {
+      "rehearsal_action_id": "<opaque>",
+      "action_url": "/api/rehearsal/sessions/<sid>/actions/<aid>",
+      "at": "2026-05-25T14:04:30Z",
+      "verb": "ReconcileDelta",
+      "outcome_summary": "1 entry reconciled in fork; automation would have done same"
+    }
+  ]
+}
+```
+
+### `DELETE /api/rehearsal/sessions/{rehearsal_session_id}`
+
+Close a rehearsal session. Releases the fork, freezes the transcript,
+and returns the transcript URL.
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<echoed>",
+  "closed_at": "2026-05-25T14:10:00Z",
+  "transcript_url": "/api/rehearsal/transcripts/<opaque>",
+  "transcript_retention_until": "2026-05-26T14:10:00Z",
+  "action_count": 3,
+  "verdict_summary": {
+    "match": 2,
+    "operator_more_complete": 0,
+    "automation_more_complete": 1,
+    "divergent": 0,
+    "automation_not_applicable": 0
+  }
+}
+```
+
+`verdict_summary` aggregates the `automation_comparison.verdict.kind`
+across every action the operator took in the session. It is the
+**session-level teaching summary**: "you took 3 actions; on 2 you
+matched the automation exactly; on 1 the automation's proposal was
+more complete." Operator-philosophy invariant #6 made surfacing this
+comparison mandatory; the closure summary makes the comparison legible
+at the session granularity, not just per-action.
+
+### `POST /api/rehearsal/sessions/{rehearsal_session_id}/preview`
+
+Preview a rehearsal action: dry-run the verb against the session's
+forked intent DB + simulated CONFIG_DB, returning the per-target
+shape Composer's `/preview` returns, the rehearsal envelope, and the
+`automation_comparison` block. Mandatory before
+`POST .../sessions/{sid}/apply` per `CLAUDE.md` §Preview Before Commit,
+Always.
+
+The request mirrors Composer's `/preview` so the operator's mental
+model is exactly the same: same verb vocabulary, same `targets[]` and
+`params` shape. The operator practices the same body they would POST
+to `/api/preview` in production.
+
+**Request:** same shape as
+[`POST /api/preview`](#post-apipreview), with the addition that the
+`targets[]` entries must all be on the session's `node` (a rehearsal
+session is single-Node — multi-Node rehearsal sessions are deferred;
+see "Out of scope for v0").
+
+**Response 200:**
+
+The body has three top-level groups: the rehearsal envelope, the
+preview body (identical to Composer's `/preview` response — same
+`per_target[]`, `aggregate`, etc., so the frontend reuses one
+renderer), and the `automation_comparison` block.
+
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<echoed>",
+  "as_of": "2026-05-25T14:06:00Z",
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "preview": {
+    "per_target": [ /* same shape as POST /api/preview's per_target[] */ ],
+    "aggregate": { /* same shape as POST /api/preview's aggregate */ }
+  },
+  "automation_comparison": {
+    "operator_action": {
+      "verb": "ApplyService",
+      "targets": [ { "node": "switch1", "interface": "Ethernet0", "params": { "ip": "10.1.0.0/31", "peer_as": 65002 } } ],
+      "changeset_summary": { "writes": 12, "deletes": 2 }
+    },
+    "automation_proposal": {
+      "available": true,
+      "verb": "ApplyService",
+      "targets": [ { "node": "switch1", "interface": "Ethernet0", "params": { /* params automation would have used for the same situation */ } } ],
+      "changeset_summary": { "writes": 14, "deletes": 0 },
+      "delta_from_operator": {
+        "params_differ_in": [],
+        "changesets_differ_in": {
+          "operator_only": [
+            { "table": "INTERFACE_IP", "key": "Ethernet0|10.0.0.5/31", "op": "delete" }
+          ],
+          "automation_only": [
+            { "table": "BGP_PEER_GROUP", "key": "TRANSIT_GROUP", "op": "write" },
+            { "table": "ROUTE_MAP", "key": "TRANSIT_IN_A1B2C3D4", "op": "write" }
+          ],
+          "both": [
+            { "table": "BGP_NEIGHBOR", "key": "default|10.1.0.1" }
+          ]
+        }
+      },
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#724-applyservice",
+        "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+      }
+    },
+    "verdict": {
+      "kind": "automation_more_complete",
+      "summary": "operator omitted 2 writes the automation would have included (BGP_PEER_GROUP, ROUTE_MAP)",
+      "teaches": "BGP_PEER_GROUP and ROUTE_MAP are shared policy objects created on first reference by ApplyService. The operator's manual ChangeSet skipped them; on a real device the BGP_NEIGHBOR entry would reference a non-existent peer group and bgpd would reject the configuration. The automation's domain logic enforces this dependency; manual writes do not."
+    }
+  },
+  "underlying_newtron_call": {
+    "manual_equivalent": {
+      "newtron_cli": "newtron switch1 apply-service --interface Ethernet0 --service transit --ip 10.1.0.0/31 --peer-as 65002  # dry-run default",
+      "newtron_http": {
+        "status": "pending_newtron_gap",
+        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/7",
+        "expected_shape": {
+          "method": "POST",
+          "path": "/network/default/node/switch1/rehearsal/session/<sid>/apply-service",
+          "body": {
+            "interface": "Ethernet0",
+            "params": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 }
+          }
+        },
+        "note": "Until newtron#7 lands, single-step preview can be served by newtron's existing per-verb dry_run=true path; multi-step session-scoped preview (where step N+1 sees step N's effects) requires newtron#7."
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`preview.per_target[]`** is **identical in shape** to
+  `POST /api/preview`'s `per_target[]`. The whole point of rehearsal
+  is to practice exactly the production shape; if the contract diverged
+  the operator would not be practicing the real surface.
+- **`automation_comparison.verdict.kind`** is one of:
+  - `match` — the operator's ChangeSet and the automation's proposal
+    are functionally identical (same writes, same deletes, same field
+    values).
+  - `operator_more_complete` — the operator's ChangeSet includes
+    writes the automation would not have proposed (e.g., the operator
+    added a manual override the automation does not synthesize).
+  - `automation_more_complete` — the automation's proposal includes
+    writes the operator omitted (e.g., the operator skipped a shared
+    resource the automation would have created or incremented). This
+    is the "teaches the operator something they missed" verdict.
+  - `divergent` — both ChangeSets touch overlapping keys but with
+    different fields/values. Neither is "more complete" — they
+    disagree.
+  - `automation_not_applicable` — the operator's verb has no
+    automation analogue (free-form CONFIG_DB practice that newtron
+    does not expose as a verb).
+- **`underlying_newtron_call.manual_equivalent.newtron_http.status`**
+  is `pending_newtron_gap` (newtron#7) for any session-scoped action
+  today. Single-step rehearsal that bypasses sessions (see Quickrun
+  below) is `available` against newtron's existing per-verb
+  `dry_run=true`.
+
+**Errors:**
+- Unknown or expired `rehearsal_session_id` → 404 with
+  `kind: "precondition_failure"` and
+  `details.reason ∈ {"session_unknown", "session_expired"}`.
+- `targets[]` references a Node other than the session's Node → 400
+  `validation_failure` with `details.session_node` and
+  `details.invalid_targets[]`.
+- newtron-server unreachable → 503 `newtron_unavailable`.
+
+### `POST /api/rehearsal/sessions/{rehearsal_session_id}/apply`
+
+Apply a previously-generated rehearsal preview. **Writes the
+ChangeSet to the session's forked intent DB and simulated CONFIG_DB —
+no real device is touched.** The response shape mirrors Composer's
+`/api/apply` (so the frontend reuses one renderer), wrapped in the
+rehearsal envelope and tagged with the `automation_comparison` block
+the preview already computed (echoed for convenience).
+
+**Request:**
+```json
+{
+  "preview_id": "<from POST .../sessions/{sid}/preview>"
+}
+```
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<echoed>",
+  "as_of": "2026-05-25T14:07:00Z",
+  "rehearsal_action_id": "<opaque>",
+  "action_url": "/api/rehearsal/sessions/<sid>/actions/<aid>",
+  "apply": {
+    "per_target": [
+      {
+        "node": "switch1",
+        "interface": "Ethernet0",
+        "applied": true,
+        "rehearsal_intent_id": "<opaque>",
+        "rehearsal_intent_record": {
+          "key": "service|transit|Ethernet0",
+          "fields": { /* the NEWTRON_INTENT record that was written to the FORK */ }
+        },
+        "pipeline": {
+          "intent":  { "stage": "complete", "at": "2026-05-25T14:07:00Z" },
+          "replay":  { "stage": "complete", "at": "2026-05-25T14:07:00Z" },
+          "render":  { "stage": "complete", "at": "2026-05-25T14:07:00Z" },
+          "deliver": { "stage": "complete", "at": "2026-05-25T14:07:00Z", "target": "rehearsal_fork" }
+        },
+        "verify": {
+          "kind": "device_io_assertion",
+          "state": "skipped",
+          "skip_reason": "rehearsal mode — verify is a Device I/O assertion against a real device; the fork has no device. The fork's CONFIG_DB is, by construction, exactly what the ChangeSet wrote.",
+          "skip_reason_rationale_ref": {
+            "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+            "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
+          }
+        }
+      }
+    ],
+    "aggregate": {
+      "all_applied": true,
+      "verify_pending": 0
+    }
+  },
+  "automation_comparison": { /* echoed from the preview */ },
+  "fork_state_after": {
+    "intent_count": 48,
+    "projection_rebuilt_at": "2026-05-25T14:07:00Z",
+    "simulated_drift_entries": 0
+  }
+}
+```
+
+Field rules:
+
+- **`pipeline.deliver.target`** is the contract-level marker that
+  Deliver was directed at the rehearsal fork, not a real device. The
+  field is `"rehearsal_fork"` for rehearsal apply, `"device"` (omitted
+  for backward compatibility on the real apply endpoint) for real
+  apply.
+- **`verify.state`** is **always `"skipped"`** for rehearsal apply,
+  and `verify.skip_reason` carries the substrate explanation. Verify
+  is a Device I/O assertion against a real device
+  (`unified-pipeline-architecture.md` §7,
+  `DESIGN_PRINCIPLES_NEWTRON` §14); the fork has no device. Showing
+  a `complete` verify on a rehearsal apply would teach the operator
+  that the fork is verified — false, and a violation of
+  operator-philosophy invariant #1 ("no black boxes").
+- **`rehearsal_intent_id`** is opaque AND distinct from the
+  `intent_id` namespace of real intents. Rehearsal intent IDs never
+  collide with real intent IDs; consumers must not pass them to
+  non-rehearsal endpoints. The Provenance surface
+  (`GET /api/intents/{intent_id}`) does NOT resolve
+  `rehearsal_intent_id` values; use
+  `GET /api/rehearsal/sessions/{sid}/actions/{aid}` for the
+  rehearsal-side substrate.
+- **`fork_state_after`** is the session's fork state after this
+  action's Deliver completed against the fork. Subsequent actions in
+  the same session see this state.
+
+**Errors:**
+- Stale or already-consumed `preview_id` → 410 Gone with
+  `kind: "precondition_failure"`.
+- Session expired between preview and apply → 410 Gone with
+  `kind: "precondition_failure"` and
+  `details.reason: "session_expired"`.
+
+### `POST /api/rehearsal/sessions/{rehearsal_session_id}/inbox_action/preview`
+
+### `POST /api/rehearsal/sessions/{rehearsal_session_id}/inbox_action`
+
+### `POST /api/rehearsal/sessions/{rehearsal_session_id}/workbench/{operation}`
+
+Rehearsal-scoped siblings of the Inbox `/action/preview` + `/action`
+pair and the Workbench `/dry_run`, `/commit/preview`, `/commit`,
+`/revert/preview`, `/revert` endpoints. Same body shapes as the
+production endpoints; same response bodies wrapped in the rehearsal
+envelope with `automation_comparison`.
+
+For brevity these are documented by reference rather than by full
+re-statement: the rule is **shape-identity with the production
+endpoint**, plus the rehearsal envelope and `automation_comparison`.
+The production sections are
+[§Endpoints — Operator Inbox](#endpoints--operator-inbox-second-surface)
+and [§Endpoints — Change Workbench](#endpoints--change-workbench-third-surface).
+
+The `{operation}` in
+`POST /api/rehearsal/sessions/{sid}/workbench/{operation}` is one of:
+`dry_run`, `commit/preview`, `commit`, `revert/preview`, `revert`. The
+batch's intents are session-scoped (a rehearsal Workbench batch lives
+inside one rehearsal session; it does not persist into the production
+Workbench's stash collection on session-close).
+
+Both commit and revert apply against the session fork, not the real
+device. `pipeline.deliver.target == "rehearsal_fork"` and
+`verify.state == "skipped"` apply uniformly, just as for rehearsal
+apply.
+
+**Underlying newtron call status:**
+- Single-action rehearsal (one preview + one apply): can be served
+  today by newtron's existing per-verb `dry_run=true`
+  (`available`).
+- Multi-action rehearsal (a batch, or two actions in the same
+  session): `pending_newtron_gap` (newtron#7) — multi-step requires
+  the session primitive.
+
+### `GET /api/rehearsal/sessions/{rehearsal_session_id}/actions/{rehearsal_action_id}`
+
+Return the full substrate detail for one rehearsal action — the same
+shape as `GET /api/operations/{operation_id}` returns for a real
+operation, with the rehearsal envelope.
+
+The operator inspects what they did inside the session at exactly
+the same fidelity as they would inspect a real operation. Per
+operator-philosophy invariant #1 ("no black boxes") and invariant #6
+("rehearsal mode is real"), the rehearsal substrate must be **as
+deeply inspectable as the real substrate** — anything less would
+teach the operator that rehearsal is a toy, not a real practice
+ground.
+
+**Response 200:** same shape as
+[`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id),
+wrapped in the rehearsal envelope, plus the `automation_comparison`
+block from the originating preview.
+
+`pipeline.deliver.target` is `"rehearsal_fork"`; `verify.state` is
+`"skipped"` with the same `skip_reason` as the apply response. All
+other fields (intent record, pipeline timings, render decisions on
+the embedded ChangeSet) carry the same substrate they would for a
+real operation — because the same Render code path produced them.
+
+### `GET /api/rehearsal/transcripts/{transcript_id}`
+
+Return the transcript of a closed rehearsal session — every action
+the operator took, every preview, every `automation_comparison`
+verdict, plus the session-level `verdict_summary`. Retained 24 hours
+post-close (per `transcript_retention_until` returned by
+`DELETE /api/rehearsal/sessions/{sid}`).
+
+**Response 200:**
+```json
+{
+  "rehearsal": true,
+  "no_real_device_io": true,
+  "rehearsal_session_id": "<original session ID>",
+  "transcript_id": "<echoed>",
+  "as_of": "2026-05-25T14:30:00Z",
+  "session": { /* same shape as GET /api/rehearsal/sessions/{sid}.session, frozen at close */ },
+  "actions": [
+    {
+      "rehearsal_action_id": "<opaque>",
+      "at": "2026-05-25T14:03:10Z",
+      "verb": "GetDrift",
+      "request": { /* the request body the operator sent */ },
+      "response_summary": { /* outcome */ },
+      "automation_comparison": { /* per-action verdict */ },
+      "action_url": null
+    }
+  ],
+  "verdict_summary": {
+    "match": 2,
+    "operator_more_complete": 0,
+    "automation_more_complete": 1,
+    "divergent": 0,
+    "automation_not_applicable": 0
+  },
+  "expires_at": "2026-05-26T14:10:00Z"
+}
+```
+
+Field rules:
+
+- **`actions[*].action_url`** is `null` because the session is
+  closed; the live action endpoint is gone. The transcript itself
+  is the operator's record. Consumers who want richer inspection
+  must keep the session open.
+- **`verdict_summary`** is the session's teaching outcome — the
+  operator's score against the automation, in
+  comparison-by-substrate terms (not a numeric grade; the kinds
+  themselves are the score).
+
+**Errors:**
+- Unknown `transcript_id` → 404 with
+  `kind: "precondition_failure"` and
+  `details.reason: "transcript_unknown_or_expired"`.
+
+### `POST /api/rehearsal/quickrun`
+
+Single-step rehearsal: preview-and-apply one verb against a node, in
+one HTTP call, without opening a session. Used by the UI's "rehearse
+this" button on individual surface elements (a Composer apply, an
+Inbox card action, a Workbench preview). The verb runs through
+newtron's existing per-verb `dry_run=true` path against the real
+node's current state — no fork, no session, no multi-step continuity.
+
+The contract documents Quickrun separately from sessions because it
+has different `manual_equivalent` status (`available` today, no gap
+dependency) and a different operator mental model (one-shot vs.
+multi-step practice). Both shapes coexist; the operator picks the
+one that fits the practice they want to do.
+
+**Request:**
+```json
+{
+  "node": "switch1",
+  "verb": "ApplyService",
+  "interface": "Ethernet0",
+  "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 }
+}
+```
+
+**Response 200:**
+
+Same body shape as
+[`POST /api/rehearsal/sessions/{sid}/preview`](#post-apirehearsalsessionsrehearsal_session_idpreview)
+with `rehearsal_session_id: null`, plus the additional field
+`quickrun: true`. No `preview_id` (there is no follow-up apply call —
+Quickrun is preview-only by definition; "applying" would mutate the
+real device, which Quickrun forbids).
+
+**`underlying_newtron_call.manual_equivalent.newtron_http.status`** is
+`available` against newtron's existing per-verb `dry_run=true` path.
+
+**Errors:**
+- Unknown `node` → 404 `precondition_failure`.
+- Unknown `verb` → 400 `validation_failure` with
+  `details.allowed_verbs[]`.
+- newtron-server unreachable → 503 `newtron_unavailable`.
+
+### Out of scope for v0 (deferred Contract PRs)
+
+The following extensions are deliberately deferred:
+
+- **Operator-defined drills.** The v0 drill catalog is curated by the
+  Architect. An operator who wants to author a drill files an
+  Architect ticket; the drill is added to the catalog in a Contract
+  PR. Operator-defined drills (saved scenarios, parameter-templated
+  drills, shareable drill libraries) require a richer authoring
+  surface and are deferred.
+- **Multi-Node rehearsal sessions.** A rehearsal session is
+  single-Node in v0. Multi-Node sessions (e.g., practice
+  reverting a partial commit across switch1 + switch2) would require
+  cross-Node session coordination that has no production analogue
+  in newtron (per `DESIGN_PRINCIPLES_NEWTRON` §8, §31, newtron has no
+  cross-Node transaction; Workbench's per-Node atomicity model
+  applies). When the multi-Node Workbench rehearsal need surfaces,
+  it lands as a session-scoped multi-Node workbench in a follow-up
+  PR.
+- **Comparison verdict streaming.** v0 returns the verdict in the
+  apply response; live streaming of the comparison as the operator
+  types params is deferred.
+
+### Hard contract guarantees (binding)
+
+Every endpoint in this section MUST satisfy:
+
+1. **No Deliver-stage write to any real device.** Every rehearsal
+   response carries `no_real_device_io: true` AND
+   `pipeline.deliver.target: "rehearsal_fork"` (or
+   `pipeline.deliver.stage: "skipped"`). A rehearsal endpoint that
+   touches a real device's CONFIG_DB is a contract violation; the
+   Architecture Reviewer rejects any implementation that could.
+2. **No verify against a real device.** `verify.state` is
+   `"skipped"` for every rehearsal apply. Returning `"complete"`
+   would assert against a real device; rehearsal never does.
+3. **Comparison present on every action.** Every preview/apply
+   response carries `automation_comparison`. An empty
+   `automation_proposal.available: false` is allowed (and required
+   to be honest) when no automation analogue exists; a missing
+   `automation_comparison` field is a contract violation.
+4. **Shape-identity with production.** The `preview.per_target[]`
+   and `apply.per_target[]` bodies are bit-identical to Composer's
+   `/preview` and `/apply` for the same verb against the same
+   targets. The operator practices the real shape, not a rehearsal
+   subset.
+5. **`rehearsal_intent_id` namespace isolation.** Rehearsal intent
+   IDs never resolve via `GET /api/intents/{intent_id}`. The
+   Provenance surface is for real intents; the rehearsal action
+   endpoint is for rehearsal intents. Cross-resolution is forbidden
+   to prevent the operator from thinking a rehearsal write persisted.
 
