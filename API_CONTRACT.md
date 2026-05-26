@@ -1129,14 +1129,1356 @@ Field rules:
 
 ## Endpoints — Change Workbench (third surface)
 
-**Status:** stub. Detailed contract added when surface enters scope.
+The Workbench is a **staging area in newtcon-server** for a set of intents
+the operator intends to commit together. It is not a state machine in
+newtron; newtron has no "staged batch" concept. The Workbench is to
+newtcon what `git add` + `git diff --cached` + `git commit` are to git:
+the operator composes a unit of work, inspects its full effect against
+the current projection, and commits — or sets it aside and resumes
+later.
 
-Planned endpoints:
-- `POST /api/workbench/stage` — create or append to a staged batch.
-- `GET /api/workbench/{batch_id}/status` — per-target status, ChangeSets,
-  reference impact.
-- `GET /api/workbench/{batch_id}/diff` — projection-before vs projection-after.
-- `POST /api/workbench/{batch_id}/dry_run` — full sandbox replay.
-- `POST /api/workbench/{batch_id}/commit` — atomic apply.
-- `POST /api/workbench/{batch_id}/stash` — save for later.
-- `POST /api/workbench/{batch_id}/revert` — reverse via recorded reverse ops.
+### The atomicity model — read this first
+
+Every Workbench operation that delivers to one or more devices is
+**atomic per-Node, sequential across Nodes**. This is not a workbench
+choice; it is a property of newtron. Per
+`DESIGN_PRINCIPLES_NEWTRON` §8 ("Scope Boundaries") and §31 ("Node as
+Device Isolation Boundary"), newtron operates per-device with one
+failure domain per device. The batch-execute endpoint
+(`POST /network/{n}/node/{d}/execute`) wraps all operations targeting a
+single device in one `Lock → snapshot → fn → commit-or-restore →
+Unlock` cycle (`unified-pipeline-architecture.md` §8 "Execute"); within
+that cycle, application is atomic via Redis `TxPipeline`. There is no
+equivalent cross-device transaction in newtron, and the architecture
+explicitly rejects one as multi-device coordination being the
+orchestrator's job (`DESIGN_PRINCIPLES_NEWTRON` §11: "deciding whether
+to roll back the first is the orchestrator's responsibility").
+
+The Workbench IS that orchestrator. Therefore:
+
+- A Workbench commit that targets one Node is atomic.
+- A Workbench commit that targets N Nodes is N per-Node-atomic
+  operations executed in a defined order. Any subset may succeed; any
+  subset may fail. Each per-Node operation is structurally atomic;
+  the batch as a whole is not.
+- The contract surfaces this honestly. There is no `aggregate.atomic =
+  true` claim. Every commit and revert response carries per-target
+  results AND an aggregate that classifies the outcome
+  (`all_committed`, `partial`, `none_committed`) with a structured
+  `per_node_atomicity` block that names each Node and its inner
+  guarantee.
+
+This honesty is binding per `CLAUDE.md` §Operator-Honest Errors and
+operator-philosophy invariant #9 ("Confidence and limits are
+explicit"). A Workbench surface that lets the operator believe a
+20-device commit is one atomic transaction would teach a false model
+of newtron — exactly the dependency-creating pattern
+`docs/operator-philosophy.md` rejects.
+
+### Lifecycle and state
+
+A batch progresses through a small state machine, all of it owned by
+newtcon-server (newtron is unaware):
+
+```
+                ┌──── stage ────► drafting ────┐
+                │                       │      │
+                │                  (append)    │
+                │                       │      │
+                │                       ▼      │
+                │                   drafting   │
+                │                       │      │
+                │              dry_run / commit/preview
+                │                       │      │
+                │                       ▼      │
+                │                  previewed  ─┤
+                │                       │      │
+                │                    commit    │
+                │                       │      │
+                │                       ▼      │
+                │                  committed   │
+                │                       │      │
+                │              revert/preview  │
+                │                       │      │
+                │                       ▼      │
+                │                  revert_previewed
+                │                       │      │
+                │                    revert    │
+                │                       │      │
+                │                       ▼      │
+                │                  reverted    │
+                │                                        ┌──► drafting
+                │  stash/preview ─► stash_previewed ─► stashed ─► restore/preview ─► restore_previewed ─► restored ─┘
+                │                                              (from any non-terminal state)
+                └─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+States: `drafting`, `previewed`, `committed`, `revert_previewed`,
+`reverted`, `stash_previewed`, `stashed`, `restore_previewed`,
+`restored`. `restored` is a transient state: the act of restore
+transitions the batch back to `drafting` with the same `batch_id`.
+
+Terminal states for retention purposes: `committed`, `reverted`,
+`stashed`. Other states are working states and are subject to a
+session-scoped retention window (see `GET /api/workbench/{batch_id}`).
+
+### Identifiers
+
+- `batch_id` — opaque, server-assigned at stage time. Stable for the
+  life of the batch.
+- `intent_handle` — opaque, server-assigned per intent appended to a
+  batch. Used to address a specific intent within the batch for
+  removal or amendment before commit.
+- `preview_id` — opaque, returned by every `*/preview` endpoint. Valid
+  for 5 minutes. Required by the corresponding non-preview endpoint
+  (commit, revert, stash, restore) per `CLAUDE.md` §Preview Before
+  Commit, Always.
+- `stash_id` — opaque, server-assigned when a batch enters the
+  `stashed` state. Used to address the stash for inspection or
+  restore. Distinct from `batch_id` because stashes are first-class
+  objects with their own retention.
+
+All IDs are opaque to the client; the structure is an implementation
+concern of newtcon-server.
+
+### Provenance forward-references
+
+Each intent inside a batch carries the same substrate that
+`/api/operations/{operation_id}` exposes per
+[§Operations](#endpoints--operations) — intent kind, resource,
+user params, and (after commit) the NEWTRON_INTENT record actually
+written. Per operator-philosophy invariant #1 ("no black boxes"), every
+intent in a batch is fully inspectable, and after commit the contract
+exposes a forward link to the dedicated provenance surface at
+`/api/intents/{intent_id}` (planned per
+[newtcon#5](https://github.com/aldrin-isaac/newtcon/issues/5); link
+field present today, target endpoint lands in a separate Contract PR).
+
+### `POST /api/workbench/stage`
+
+Create a new batch or append intents to an existing one. **Not a
+state-changing endpoint against newtron** — staging mutates only
+newtcon-server's batch store. No preview pair is required (and none is
+defined). Idempotent semantics on the request: re-stage with the same
+`(verb, network, node, interface, params)` tuple does not create a
+duplicate intent; the existing `intent_handle` is returned.
+
+**Request:**
+```json
+{
+  "batch_id": "<opaque, omit to create a new batch>",
+  "label": "<operator-supplied free text, optional>",
+  "intents": [
+    {
+      "verb": "ApplyService | RemoveService | RefreshService | CreateVLAN | DeleteVLAN | CreateVRF | DeleteVRF | BindACL | UnbindACL | AddBGPPeer | RemoveBGPPeer | ApplyQoS | RemoveQoS | Reconcile | ...",
+      "network": "default",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 }
+    }
+  ]
+}
+```
+
+`verb` enumerates the symmetric verbs from
+`DESIGN_PRINCIPLES_NEWTRON` §15-§16. Node-scoped verbs (e.g.,
+`CreateVLAN`) omit `interface`; interface-scoped verbs require it.
+Unknown verbs → 400 `validation_failure` with
+`details.allowed_verbs[]`.
+
+`Reconcile` is admitted as a batchable intent: a Workbench batch may
+combine targeted intents on some Nodes with full or delta
+`Reconcile` on others (e.g., "apply service to switch1:Ethernet0 AND
+reconcile switch3"). The `params` object for `Reconcile` carries
+`{ "mode": "delta" | "full", "confirm_disruptive": <bool> }`;
+`confirm_disruptive` is required when `mode == "full"`.
+
+**Response 200:**
+```json
+{
+  "batch_id": "<opaque>",
+  "label": "<echoed or auto-assigned>",
+  "state": "drafting",
+  "created_at": "2026-05-25T14:10:00Z",
+  "last_modified_at": "2026-05-25T14:10:00Z",
+  "intents": [
+    {
+      "intent_handle": "<opaque>",
+      "verb": "ApplyService",
+      "network": "default",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
+      "staged_at": "2026-05-25T14:10:00Z",
+      "deduplicated_from_existing": false
+    }
+  ],
+  "node_count": 1,
+  "intent_count": 1
+}
+```
+
+`deduplicated_from_existing` is `true` when an identical intent
+already existed in the batch and the existing `intent_handle` was
+returned. The operator's UI surfaces this rather than silently
+adding-then-collapsing.
+
+**Errors:**
+- `batch_id` provided but unknown or in a non-`drafting` state → 409
+  `precondition_failure` with `details.current_state`. Append is
+  forbidden on `committed`, `reverted`, `stashed`, and the transient
+  `*_previewed` states.
+- An intent references a node or interface the spec does not declare
+  → 400 `validation_failure` with `details.invalid_targets[]`. This
+  is a spec-level rejection, not a newtron round-trip; it catches
+  typos before the operator wastes a preview cycle.
+
+### `DELETE /api/workbench/{batch_id}/intents/{intent_handle}`
+
+Remove one staged intent from a `drafting` batch. Mirrors the
+single-intent shape of `POST .../stage`. No newtron interaction; no
+preview required (drafting-state mutation only).
+
+**Response 200:**
+```json
+{
+  "batch_id": "<echoed>",
+  "removed_intent_handle": "<echoed>",
+  "intent_count_after": 3,
+  "node_count_after": 2
+}
+```
+
+Operating on a non-`drafting` batch → 409 `precondition_failure`.
+
+### `GET /api/workbench/{batch_id}`
+
+Return full batch state, including the most recent preview/dry-run
+result (if any) and the current per-Node atomicity classification.
+Idempotent; safe to poll.
+
+**Response 200:**
+```json
+{
+  "batch_id": "<opaque>",
+  "label": "<operator-supplied>",
+  "state": "drafting | previewed | committed | revert_previewed | reverted | stash_previewed | stashed",
+  "created_at": "2026-05-25T14:10:00Z",
+  "last_modified_at": "2026-05-25T14:12:30Z",
+  "as_of": "2026-05-25T14:12:31Z",
+  "intent_count": 4,
+  "node_count": 2,
+  "per_node_atomicity": [
+    {
+      "node": "switch1",
+      "intent_count": 3,
+      "atomicity": "atomic_via_txpipeline",
+      "atomicity_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
+      }
+    },
+    {
+      "node": "switch2",
+      "intent_count": 1,
+      "atomicity": "atomic_via_txpipeline",
+      "atomicity_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
+      }
+    }
+  ],
+  "cross_node_atomicity": {
+    "atomic": false,
+    "rationale_ref": {
+      "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#8-scope-boundaries--what-newtron-owns"
+    },
+    "operator_consequence": "If commit succeeds on switch1 and fails on switch2, switch1 is committed. Use revert to reverse switch1."
+  },
+  "intents": [
+    {
+      "intent_handle": "<opaque>",
+      "verb": "ApplyService",
+      "network": "default",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
+      "staged_at": "2026-05-25T14:10:00Z",
+      "preview_result": {
+        "validate": { "ok": true, "errors": [] },
+        "changeset": {
+          "writes": [ /* CONFIG_DB key+fields */ ],
+          "deletes": [ /* CONFIG_DB keys */ ]
+        },
+        "reference_impact": {
+          "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
+          "incremented": [],
+          "decremented": [],
+          "garbage_collected": []
+        }
+      },
+      "commit_result": null,
+      "intent_id": null,
+      "intent_url": null
+    }
+  ],
+  "aggregate_reference_impact": {
+    "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4", "ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"],
+    "incremented": [],
+    "decremented": [],
+    "garbage_collected": []
+  },
+  "latest_preview_id": "<opaque or null>",
+  "latest_dry_run_at": "2026-05-25T14:12:30Z"
+}
+```
+
+Field rules:
+
+- `per_node_atomicity[*].atomicity` is one of:
+  `atomic_via_txpipeline` (the per-Node default — newtron's batch
+  execute wraps the per-Node intents in one TxPipeline),
+  `atomic_via_replaceall` (when the per-Node bundle reduces to a full
+  `Reconcile` with `mode: "full"`; `ReplaceAll` is atomic per
+  `unified-pipeline-architecture.md` §6),
+  `atomic_via_applydrift` (when the per-Node bundle is a delta
+  `Reconcile`; `ApplyDrift` is atomic per the same section), or
+  `not_atomic_with_rationale` (reserved for verbs whose newtron HTTP
+  shape does not preserve atomicity; today empty, but the enum is
+  bounded so any future verb that breaks the per-Node guarantee
+  surfaces honestly rather than silently).
+- `cross_node_atomicity.atomic` is **always** `false` when
+  `node_count > 1`. When `node_count == 1`, the field is omitted
+  entirely (no cross-Node coordination question to answer). Setting
+  it to `true` is forbidden by the contract.
+- `intent.preview_result` is populated only after a successful
+  `/dry_run` or `/commit/preview` (whichever ran last); `null` in
+  pure-`drafting` state.
+- `intent.commit_result` is populated only after a successful
+  `/commit`; structure mirrors `per_target` entries of the commit
+  response (see below).
+- `intent.intent_id` and `intent.intent_url` are populated only
+  after commit and point to the dedicated provenance surface
+  (planned per [newtcon#5](https://github.com/aldrin-isaac/newtcon/issues/5));
+  pre-#5, `intent_url` is a forward link that resolves to 404 — the
+  field is in the contract today so that the commit shape does not
+  change when provenance lands.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure` with
+  `details.reason: "batch_unknown_or_expired"`.
+
+### `GET /api/workbench/{batch_id}/diff`
+
+Return the projection-level effect of the batch: what the
+per-Node projection looks like before vs. after the staged intents
+would be applied. Mandatory for the operator to read the substrate
+prior to commit (operator-philosophy invariant #3 "the substrate is
+the teaching surface" — counts and ChangeSets are necessary; the
+projection itself is the substrate that makes the device knowable).
+
+The projection is the typed CONFIG_DB tables produced by intent
+replay (`DESIGN_PRINCIPLES_NEWTRON` §1, §21). Diff renders the
+before-projection (current intent set) and the after-projection (with
+the batch's intents replayed on top), per-Node, per-table.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `node` | string (repeatable) | unset (all nodes in batch) | Restrict diff to one or more Nodes. |
+| `table` | string (repeatable) | unset (all touched tables) | Restrict diff to one or more CONFIG_DB tables. |
+
+**Response 200:**
+```json
+{
+  "batch_id": "<echoed>",
+  "as_of": "2026-05-25T14:13:00Z",
+  "per_node_diffs": [
+    {
+      "node": "switch1",
+      "before_projection_intent_count": 47,
+      "after_projection_intent_count": 50,
+      "table_diffs": [
+        {
+          "table": "BGP_NEIGHBOR",
+          "before_entries": [
+            { "key": "default|10.0.0.1", "fields": { "asn": "65001" } }
+          ],
+          "after_entries": [
+            { "key": "default|10.0.0.1", "fields": { "asn": "65001" } },
+            { "key": "default|10.1.0.1", "fields": { "asn": "65002" } }
+          ],
+          "delta": {
+            "added": ["default|10.1.0.1"],
+            "removed": [],
+            "modified": []
+          }
+        }
+      ]
+    }
+  ],
+  "manual_equivalent": {
+    "newtron_cli": "newtron switch1 dry-run | jq '.projection.BGP_NEIGHBOR'",
+    "newtron_http": {
+      "status": "pending_newtron_gap",
+      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/4",
+      "expected_shape": {
+        "method": "POST",
+        "path": "/network/{n}/node/{d}/projection/diff",
+        "body": { "intents": [ /* staged intents */ ] }
+      }
+    }
+  }
+}
+```
+
+**Why `pending_newtron_gap`:** newtron's batch-execute endpoint with
+`execute: false` returns a `WriteResult` (preview text + change count)
+and not a typed projection-before/after pair. The diff endpoint
+synthesizes one from two calls (current projection read + staged
+sandbox replay) until newtron exposes a single projection-diff
+endpoint. The implementer files newtron#4 when this slice starts; the
+field is on the contract today so that the shape does not change when
+the gap is filled.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure`.
+- newtron unreachable → 503 `newtron_unavailable` with
+  `details.last_known.projection_diff` carrying the most recent
+  successful diff if any.
+
+### `POST /api/workbench/{batch_id}/dry_run`
+
+Run the full batch as a sandbox replay using newtron's intent
+snapshot/restore mechanism. Per `unified-pipeline-architecture.md` §8,
+newtron's batch-execute endpoint with `execute: false` performs `Lock
+→ snapshot → fn → restore → Unlock` per Node: the intent DB and
+projection are mutated through the full Render path, then restored.
+Nothing reaches the device.
+
+The dry-run is the single mechanism the operator uses to answer
+"what would actually happen if I committed this?" — it exercises
+the same Render code path that commit does (the one-code-path
+guarantee from `DESIGN_PRINCIPLES_NEWTRON` §2 and the dry-run
+guarantee from §12). The per-target preview returned here is what the
+`GET /api/workbench/{batch_id}` `preview_result` field reflects until
+the next dry-run or commit.
+
+This is a state-changing endpoint **against newtcon-server only** (it
+mutates the batch's `latest_preview_id` and `preview_result` fields).
+Per `CLAUDE.md` §Preview Before Commit, Always: this endpoint IS the
+preview pair for commit. It produces no ChangeSet against any device,
+and the contract makes that explicit in the response.
+
+**Request:**
+```json
+{
+  "include_diff": true
+}
+```
+
+`include_diff` (default `false`): when `true`, the response embeds
+the projection diff inline (same shape as `GET .../diff`). When
+`false`, the diff is omitted and the operator fetches it separately.
+Operators with large diffs prefer the separate endpoint; UIs in
+single-screen mode prefer inline.
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "batch_id": "<echoed>",
+  "ran_at": "2026-05-25T14:13:30Z",
+  "no_device_io": true,
+  "per_target": [
+    {
+      "intent_handle": "<opaque>",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "verb": "ApplyService",
+      "validate": { "ok": true, "errors": [] },
+      "changeset": {
+        "writes": [ /* CONFIG_DB key+fields */ ],
+        "deletes": [ /* CONFIG_DB keys */ ]
+      },
+      "reference_impact": {
+        "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
+        "incremented": [],
+        "decremented": [],
+        "garbage_collected": []
+      },
+      "intent_record_preview": {
+        "key": "service|transit|Ethernet0",
+        "fields": { /* NEWTRON_INTENT record fields that would be written */ }
+      }
+    }
+  ],
+  "per_node_summaries": [
+    {
+      "node": "switch1",
+      "intent_count": 3,
+      "all_valid": true,
+      "total_writes": 14,
+      "total_deletes": 0,
+      "atomicity": "atomic_via_txpipeline"
+    }
+  ],
+  "aggregate": {
+    "all_valid": true,
+    "node_count": 2,
+    "intent_count": 4,
+    "total_writes": 16,
+    "total_deletes": 0
+  },
+  "aggregate_reference_impact": {
+    "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
+    "incremented": [],
+    "decremented": [],
+    "garbage_collected": []
+  },
+  "diff": null
+}
+```
+
+`diff` carries the projection-diff payload (same shape as `GET
+.../diff`) when `include_diff: true`; `null` otherwise.
+
+`no_device_io: true` is a load-bearing assertion, not decoration. Per
+operator-philosophy invariant #9 ("Confidence and limits are
+explicit"), the contract makes it impossible for the UI to confuse a
+dry-run with a commit. Per `unified-pipeline-architecture.md` §8, the
+dry-run path goes through Render but not Deliver; the corresponding
+pipeline trace fields (which would carry a `deliver` stage) are
+deliberately omitted from this response. The Deliver stage is
+documented as conditional in §2 of the same document, and a
+contract-level omission here matches that conditionality.
+
+Validation failures on any per-target produce a 200 with
+`aggregate.all_valid == false` and `per_target[*].validate.ok ==
+false` for the failing entries. The preview is still returned for the
+targets that validated. The operator commits a partial-validity
+preview at their own risk: commit will reject if any per-target is
+invalid (see commit response).
+
+A drift-guard refusal on any target → 409 with `kind:
+"drift_refusal"` and `details.per_target[]` listing the
+`DriftEntry[]` per affected Node. The preview is not returned.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure`.
+- Batch state is `committed` or `reverted` (terminal mutating
+  states) → 409 `precondition_failure` with `details.current_state`.
+  Dry-run on a stashed batch is allowed (and useful — the operator
+  inspects a stashed batch's effect before deciding to restore).
+- newtron unreachable for any Node → 503 `newtron_unavailable` with
+  `details.unreachable_nodes[]`. The dry-run is not partially
+  returned; either every Node's sandbox replay succeeds or the call
+  fails.
+
+### `POST /api/workbench/{batch_id}/commit/preview`
+
+Preview the commit: render the per-Node bundles that would actually
+be sent to newtron's batch-execute endpoint, in newtron's exact
+request shape, alongside the per-target shape the UI displays. This
+is the substrate-faithful preview pair that pairs with `/commit`. It
+is distinct from `/dry_run`:
+
+- `/dry_run` answers "what would the projection and CONFIG_DB look
+  like after this batch?" — the operator-facing semantic preview.
+- `/commit/preview` answers "what HTTP calls is newtcon about to
+  make to newtron, and what is each call's per-Node atomicity
+  class?" — the substrate-faithful execution preview.
+
+Both exist because the operator needs both questions answered before
+committing. Collapsing them would force one perspective on the
+operator — exactly the dependency-creating pattern
+operator-philosophy invariant #1 ("no black boxes") rejects.
+
+The commit-preview response carries a `preview_id` distinct from any
+dry-run's `preview_id`. Commit requires the commit-preview's
+`preview_id`, not a dry-run's, so that the operator cannot
+accidentally commit having only seen the semantic preview.
+
+**Request:**
+```json
+{}
+```
+
+The request body is empty. The commit-preview reads the current
+batch state and renders accordingly.
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "batch_id": "<echoed>",
+  "rendered_at": "2026-05-25T14:14:00Z",
+  "per_node_calls": [
+    {
+      "node": "switch1",
+      "atomicity": "atomic_via_txpipeline",
+      "atomicity_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
+      },
+      "intent_handles": ["<opaque>", "<opaque>", "<opaque>"],
+      "manual_equivalent": {
+        "newtron_cli": "newtron switch1 execute -x --file batch.json",
+        "newtron_http": {
+          "status": "available",
+          "method": "POST",
+          "path": "/network/default/node/switch1/execute",
+          "body": {
+            "execute": true,
+            "operations": [
+              { "action": "apply-service", "interface": "Ethernet0", "params": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 } }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "execution_order": [
+    { "step": 1, "node": "switch1", "rationale": "fewest dependents" },
+    { "step": 2, "node": "switch2", "rationale": "depends on switch1 BGP peer" }
+  ],
+  "execution_order_rationale_ref": {
+    "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#18-write-ordering-and-daemon-settling",
+    "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+  },
+  "cross_node_atomicity": {
+    "atomic": false,
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/api.md#14-batch-execution",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#8-scope-boundaries--what-newtron-owns"
+    },
+    "operator_consequence": "If step 1 succeeds and step 2 fails, step 1 is committed. Use POST /api/workbench/{batch_id}/revert to reverse step 1."
+  },
+  "disruption": {
+    "config_reload_nodes": [],
+    "bgp_restart_nodes": [],
+    "estimated_data_plane_impact": "control-plane-only",
+    "rationale": [
+      { "input": "verbs", "value": ["ApplyService"], "contribution": "control-plane-only (BGP neighbor add, no reload)" },
+      { "input": "reconcile_full_nodes", "value": [], "contribution": "none" },
+      { "input": "bgp_restart_inferred", "value": false, "contribution": "none" }
+    ]
+  },
+  "preflight": {
+    "all_nodes_reachable": true,
+    "unreachable_nodes": [],
+    "drift_guard_clean": true,
+    "drift_blocked_nodes": []
+  }
+}
+```
+
+Field rules:
+
+- `per_node_calls[*].manual_equivalent.newtron_http.status` is
+  `"available"` for every commit preview today: newtron's
+  batch-execute endpoint is the underlying call. The
+  `manual_equivalent.newtron_http.body` is the **exact** body
+  newtcon-server will POST when commit runs; the operator can copy
+  it into `curl` and execute the same call by hand. This satisfies
+  operator-philosophy invariant #2 ("manual-mode parity") — every
+  Workbench commit is exactly reproducible by hand.
+- `execution_order` declares the deterministic order in which
+  newtcon-server will issue the per-Node calls. The operator sees
+  the order before committing. Re-issuing `/commit/preview` after a
+  batch edit produces a fresh `execution_order`; the order is not
+  inherited from earlier previews.
+- `execution_order_rationale_ref` cites why the order was chosen.
+  The default ordering policy is fewest-dependents-first; per
+  `DESIGN_PRINCIPLES_NEWTRON` §18, write ordering is a load-bearing
+  property of the pipeline. The Workbench inherits that
+  consideration at the orchestration layer. v0 ordering is
+  alphabetic by Node name unless an intent declares a dependency;
+  the rationale field carries the chosen rule textually.
+- `cross_node_atomicity` MUST be present whenever
+  `len(per_node_calls) > 1`, and MUST carry `atomic: false`. The
+  contract rejects `atomic: true` for multi-Node commits on
+  principle.
+- `disruption.rationale[]` follows the same shape as the Inbox
+  action-preview's `disruption.rationale[]`: each entry names the
+  input, value, and its contribution to the verdict. A rationale
+  array empty of the inputs that justify the verdict is a contract
+  violation (per the same rule documented in the Inbox section).
+- `preflight` is a read-side check (drift guard scan +
+  reachability) performed at preview time; it is NOT a commitment
+  that the state will hold at commit time. The commit response
+  reports the actual outcome per Node.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure`.
+- Batch state not in `{drafting, previewed}` → 409
+  `precondition_failure` with `details.current_state`.
+- Any per-target failed validation in the most recent
+  `/dry_run` → 409 `precondition_failure` with
+  `details.invalid_intent_handles[]`. The operator must amend or
+  drop the failing intent before commit-preview can be regenerated.
+  Rationale: the commit-preview is the contract between the
+  operator and the about-to-be-executed plan; rendering a
+  commit-preview whose Render stage would reject mid-flight would
+  teach a false confidence.
+- newtron-server unreachable for any target Node → 503
+  `newtron_unavailable` with `details.unreachable_nodes[]`. The
+  preview is not partially rendered.
+
+### `POST /api/workbench/{batch_id}/commit`
+
+Execute a previously-rendered commit preview. Issues one newtron
+batch-execute call per Node, in the order declared by the
+commit-preview's `execution_order`. Each per-Node call is atomic per
+the newtron guarantee; the cross-Node sequence is not atomic.
+
+**Request:**
+```json
+{
+  "preview_id": "<from /commit/preview>",
+  "stop_on_first_failure": true
+}
+```
+
+`stop_on_first_failure` (default `true`): when `true`, a per-Node
+failure halts the sequence; remaining Nodes are not attempted and
+appear in the response with `status: "not_attempted"`. When `false`,
+the sequence continues through all Nodes regardless of per-Node
+outcomes. Operators choosing `false` accept the larger blast radius
+of a partially-committed multi-Node batch; the contract preserves
+their choice rather than imposing a single safe-default policy
+(operator-philosophy invariant #8: "Operator-defined automation,
+not tool-imposed automation").
+
+**Response 200:**
+```json
+{
+  "batch_id": "<echoed>",
+  "committed_at": "2026-05-25T14:15:00Z",
+  "per_target": [
+    {
+      "intent_handle": "<opaque>",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "verb": "ApplyService",
+      "status": "committed | failed | not_attempted",
+      "operation_id": "<opaque, present when status != not_attempted>",
+      "operation_url": "/api/operations/<opaque>",
+      "intent_id": "<opaque, present when status == committed>",
+      "intent_url": "/api/intents/<opaque>",
+      "pipeline": {
+        "intent":  { "stage": "complete", "at": "2026-05-25T14:15:00Z" },
+        "replay":  { "stage": "complete", "at": "2026-05-25T14:15:00Z" },
+        "render":  { "stage": "complete", "at": "2026-05-25T14:15:01Z" },
+        "deliver": { "stage": "complete", "at": "2026-05-25T14:15:02Z" }
+      },
+      "verify": {
+        "kind": "device_io_assertion",
+        "state": "in_progress",
+        "started_at": "2026-05-25T14:15:02Z"
+      },
+      "intent_record": {
+        "key": "service|transit|Ethernet0",
+        "fields": { /* NEWTRON_INTENT record actually written */ }
+      },
+      "failure": null
+    }
+  ],
+  "per_node_results": [
+    {
+      "node": "switch1",
+      "status": "committed",
+      "atomicity": "atomic_via_txpipeline",
+      "intent_count": 3,
+      "operation_ids": ["<opaque>"]
+    },
+    {
+      "node": "switch2",
+      "status": "not_attempted",
+      "atomicity": "atomic_via_txpipeline",
+      "intent_count": 1,
+      "operation_ids": []
+    }
+  ],
+  "aggregate": {
+    "outcome": "all_committed | partial | none_committed",
+    "node_count_committed": 1,
+    "node_count_failed": 0,
+    "node_count_not_attempted": 1,
+    "verify_pending_targets": 3,
+    "stop_on_first_failure_triggered": true
+  },
+  "cross_node_atomicity": {
+    "atomic": false,
+    "operator_consequence": "switch1 was committed. switch2 was not attempted because stop_on_first_failure=true and a different node failed (see per_node_results). To reverse switch1, POST /api/workbench/{batch_id}/revert.",
+    "recovery_hint": {
+      "verb": "revert",
+      "path": "/api/workbench/<batch_id>/revert/preview"
+    }
+  }
+}
+```
+
+Field rules:
+
+- `per_target[*].status`:
+  - `committed` — newtron's batch-execute returned `applied: true`
+    for this intent's per-Node bundle; verify may still be in
+    progress (post-deliver Device I/O per
+    `unified-pipeline-architecture.md` §7).
+  - `failed` — newtron's batch-execute returned a failure on this
+    intent's per-Node bundle. The whole per-Node bundle is failed
+    (per-Node atomicity); the `failure` object carries the
+    substrate-level error from newtron.
+  - `not_attempted` — the sequence was halted before this intent's
+    Node was reached (only possible when
+    `stop_on_first_failure: true`).
+- `per_target[*].pipeline` and `per_target[*].verify` mirror the
+  shape defined in [§Operations](#endpoints--operations). When
+  `status == not_attempted`, `pipeline` and `verify` are omitted.
+  When `status == failed`, `pipeline` carries the partial trace up
+  to the failed stage with the failed stage in `stage: "failed"`.
+- `per_target[*].intent_record` is the NEWTRON_INTENT record
+  actually written by the per-Node batch-execute. Per
+  `DESIGN_PRINCIPLES_NEWTRON` §1, §22, the intent record IS the
+  decision substrate; the commit response surfaces it directly so
+  the operator never has to follow a link to read what was
+  actually recorded.
+- `per_target[*].failure`, when present, has the shape:
+  ```json
+  {
+    "stage": "intent | replay | render | deliver",
+    "kind": "validation_failure | drift_refusal | precondition_failure | newtron_internal",
+    "message": "<newtron's domain-level error>",
+    "details": { /* kind-specific substrate */ }
+  }
+  ```
+  The `kind` values match newtron's substrate-level error
+  classifications, NOT HTTP status codes (per `CLAUDE.md`
+  §Operator-Honest Errors).
+- `aggregate.outcome`:
+  - `all_committed` — every per-Node result is `committed`.
+  - `partial` — at least one `committed` and at least one of
+    `{failed, not_attempted}`.
+  - `none_committed` — no Node committed (first-Node failure with
+    `stop_on_first_failure: true`, or every Node failed).
+- `cross_node_atomicity` is REQUIRED in every commit response with
+  `node_count > 1`, including the all-success case. The operator
+  must learn the model from successful commits, not only from
+  failures (operator-philosophy invariant #9: "Confidence and
+  limits are explicit").
+- `recovery_hint` is REQUIRED when `aggregate.outcome == "partial"`
+  and the operator has a meaningful next action; absent on
+  `all_committed` or `none_committed`.
+
+**Errors:**
+- Stale or already-consumed `preview_id` → 410 Gone with
+  `kind: "precondition_failure"`.
+- `preview_id` was a dry-run preview, not a commit-preview → 400
+  `validation_failure` with `details.preview_kind`. The contract
+  rejects this on principle: the operator must have seen the
+  substrate-faithful commit preview before committing.
+- Batch state is not `previewed` (commit-preview must immediately
+  precede commit) → 409 `precondition_failure`.
+- Catastrophic newtcon-server failure mid-sequence → 502 with
+  `kind: "internal"` and `details.partial_results.per_target[]`
+  carrying the per-Node results completed before the failure. The
+  batch state is left at `committed` with the partial results; the
+  operator decides recovery via revert.
+
+### `POST /api/workbench/{batch_id}/revert/preview`
+
+Preview the revert: synthesize the reverse intents for every
+committed target in the batch and render the per-Node bundles that
+would be sent to newtron. Mandatory before `/revert` per
+`CLAUDE.md` §Preview Before Commit, Always.
+
+Revert is **not** a mechanical ChangeSet reversal. Per
+`DESIGN_PRINCIPLES_NEWTRON` §15 ("Shared resources make reversal a
+domain problem"): "mechanical ChangeSet reversal is unsafe ... Every
+removal path scans CONFIG_DB for remaining consumers before deleting
+shared resources — a domain judgment that no mechanical reversal can
+replicate." The Workbench therefore issues the **symmetric verb** for
+each committed intent (`ApplyService` → `RemoveService`,
+`CreateVLAN` → `DeleteVLAN`, etc., per §15's pair table), letting
+newtron's domain logic handle shared-resource reference counting.
+
+For verbs in the `setup-*` and `set-*` families (no individual
+reverse per §16), revert is `Reconcile(mode: delta)` on the
+affected Node — also per §15's "baseline operations" clause.
+
+**Request:**
+```json
+{
+  "scope": "all_committed | per_target_handles",
+  "intent_handles": ["<opaque>", "<opaque>"]
+}
+```
+
+`scope`:
+- `all_committed` — synthesize reverses for every intent in the
+  batch with `commit_result.status == "committed"`. The default
+  scope.
+- `per_target_handles` — restrict revert to a subset of committed
+  intents named in `intent_handles[]`. Used when the operator wants
+  to reverse some targets but not others (e.g., switch1 deployed
+  successfully and the operator wants to keep it; switch2 must be
+  reverted because of a downstream issue). `intent_handles[]` is
+  required when `scope == "per_target_handles"`.
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "batch_id": "<echoed>",
+  "rendered_at": "2026-05-25T14:20:00Z",
+  "scope": "all_committed",
+  "per_target": [
+    {
+      "original_intent_handle": "<opaque>",
+      "original_verb": "ApplyService",
+      "reverse_verb": "RemoveService",
+      "reverse_strategy": "symmetric_verb | reconcile_delta | reconcile_full",
+      "reverse_strategy_rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#16-verb-vocabulary--the-name-is-the-lifecycle-contract"
+      },
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "validate": { "ok": true, "errors": [] },
+      "changeset": {
+        "writes": [ /* CONFIG_DB key+fields */ ],
+        "deletes": [ /* CONFIG_DB keys */ ]
+      },
+      "reference_impact": {
+        "created": [],
+        "incremented": [],
+        "decremented": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
+        "garbage_collected": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"]
+      },
+      "shared_resource_handling": [
+        {
+          "resource": "VRF|CUSTOMER",
+          "decision": "preserve",
+          "rationale": "still referenced by transit on switch3:Ethernet1"
+        },
+        {
+          "resource": "ACL_TABLE|PROTECT_RE_IN_1ED5F2C7",
+          "decision": "garbage_collect",
+          "rationale": "reference count reaches 0 after revert"
+        }
+      ]
+    }
+  ],
+  "per_node_calls": [
+    {
+      "node": "switch1",
+      "atomicity": "atomic_via_txpipeline",
+      "atomicity_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
+      },
+      "manual_equivalent": {
+        "newtron_cli": "newtron switch1 execute -x --file revert.json",
+        "newtron_http": {
+          "status": "available",
+          "method": "POST",
+          "path": "/network/default/node/switch1/execute",
+          "body": {
+            "execute": true,
+            "operations": [
+              { "action": "remove-service", "interface": "Ethernet0", "params": {} }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "execution_order": [
+    { "step": 1, "node": "switch1", "rationale": "reverse order of commit (no inter-Node dependency in this batch)" }
+  ],
+  "cross_node_atomicity": {
+    "atomic": false,
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/api.md#14-batch-execution",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#8-scope-boundaries--what-newtron-owns"
+    },
+    "operator_consequence": "Revert follows the same per-Node atomicity as commit. A partial revert is possible; re-issue revert with scope=per_target_handles on the unreverted subset."
+  },
+  "disruption": {
+    "config_reload_nodes": [],
+    "bgp_restart_nodes": [],
+    "estimated_data_plane_impact": "service-affecting",
+    "rationale": [
+      { "input": "verbs", "value": ["RemoveService"], "contribution": "service-affecting (removes BGP neighbor and frees IP from interface)" }
+    ]
+  },
+  "scope_unrevertable": {
+    "intent_handles": [],
+    "reason_by_handle": {}
+  }
+}
+```
+
+Field rules:
+
+- `per_target[*].reverse_strategy` is one of:
+  - `symmetric_verb` — the canonical case. The reverse verb from
+    `DESIGN_PRINCIPLES_NEWTRON` §15's pair table is dispatched
+    against newtron. Domain logic handles shared resources.
+  - `reconcile_delta` — used for baseline verbs (`setup-*`,
+    `set-*`) per §15's baseline exception. The reverse is to
+    reconcile the Node back to its declared intent set with the
+    original intent removed.
+  - `reconcile_full` — reserved for the case where the original
+    commit was itself a full `Reconcile`; the reverse is the
+    `Reconcile` against the prior intent snapshot. This requires
+    that newtcon-server captured the prior snapshot at commit
+    time; see `scope_unrevertable` below.
+- `per_target[*].shared_resource_handling[]` enumerates every
+  shared resource the reverse touches and the decision newtron's
+  domain logic will make (preserve vs. garbage-collect). Per
+  operator-philosophy invariant #1 ("no black boxes") and
+  `CLAUDE.md` §Reference-Aware Removals, the operator MUST see the
+  reference-count decisions before the revert runs.
+- `scope_unrevertable.intent_handles[]` lists committed intents
+  whose reverse cannot be synthesized (e.g., the original verb has
+  no symmetric reverse AND no prior-snapshot was captured). Each
+  appears in `reason_by_handle` with a substrate-grounded
+  explanation. An operator who wants to reverse those intents must
+  do so manually; the `manual_equivalent` field on each entry
+  carries the CLI invocation.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure`.
+- Batch state is not `committed` → 409 `precondition_failure`. A
+  batch must be committed before it can be reverted.
+- `scope == "per_target_handles"` with `intent_handles[]` referring
+  to non-committed intents → 400 `validation_failure` with
+  `details.invalid_handles[]`.
+- newtron-server unreachable for any target Node → 503
+  `newtron_unavailable` with `details.unreachable_nodes[]`.
+
+### `POST /api/workbench/{batch_id}/revert`
+
+Execute a previously-rendered revert preview. Same per-Node atomicity
+semantics as commit. The batch transitions to `reverted` on
+`all_reverted`; on partial revert, the batch remains `committed` with
+the per-target `commit_result.status` updated to `reverted` for the
+reversed subset.
+
+**Request:**
+```json
+{
+  "preview_id": "<from /revert/preview>",
+  "stop_on_first_failure": true
+}
+```
+
+`stop_on_first_failure` has the same semantics as on commit.
+
+**Response 200:**
+```json
+{
+  "batch_id": "<echoed>",
+  "reverted_at": "2026-05-25T14:21:00Z",
+  "per_target": [
+    {
+      "original_intent_handle": "<opaque>",
+      "original_verb": "ApplyService",
+      "reverse_verb": "RemoveService",
+      "node": "switch1",
+      "interface": "Ethernet0",
+      "status": "reverted | failed | not_attempted",
+      "operation_id": "<opaque, present when status != not_attempted>",
+      "operation_url": "/api/operations/<opaque>",
+      "pipeline": {
+        "intent":  { "stage": "complete", "at": "2026-05-25T14:21:00Z" },
+        "replay":  { "stage": "complete", "at": "2026-05-25T14:21:00Z" },
+        "render":  { "stage": "complete", "at": "2026-05-25T14:21:01Z" },
+        "deliver": { "stage": "complete", "at": "2026-05-25T14:21:02Z" }
+      },
+      "verify": {
+        "kind": "device_io_assertion",
+        "state": "in_progress",
+        "started_at": "2026-05-25T14:21:02Z"
+      },
+      "reverse_intent_record": {
+        "key": "remove-service|Ethernet0",
+        "fields": { /* NEWTRON_INTENT record for the reverse op */ }
+      },
+      "shared_resources_garbage_collected": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"],
+      "shared_resources_preserved": ["VRF|CUSTOMER"],
+      "failure": null
+    }
+  ],
+  "per_node_results": [
+    {
+      "node": "switch1",
+      "status": "reverted",
+      "atomicity": "atomic_via_txpipeline",
+      "intent_count": 1,
+      "operation_ids": ["<opaque>"]
+    }
+  ],
+  "aggregate": {
+    "outcome": "all_reverted | partial | none_reverted",
+    "node_count_reverted": 1,
+    "node_count_failed": 0,
+    "node_count_not_attempted": 0,
+    "verify_pending_targets": 1
+  },
+  "batch_state_after": "reverted | committed"
+}
+```
+
+`batch_state_after` is `reverted` only when every committed intent in
+the batch was reverted in this call (or in cumulative prior partial
+reverts). Partial revert leaves the batch in `committed` with the
+per-target `commit_result.status` reflecting reality.
+
+Failure semantics, pipeline shapes, and error responses mirror
+`/commit` field-for-field. The `per_target[*].failure` object has
+the same shape.
+
+### `POST /api/workbench/{batch_id}/stash/preview`
+
+Preview the consequences of stashing the batch. **No newtron
+interaction** and no newtron-side state mutation. Mandatory before
+`/stash` per `CLAUDE.md` §Preview Before Commit, Always.
+
+Stashing produces no ChangeSet (no device action) but does mutate the
+operator-visible state of the Workbench: the batch is removed from
+the active list and placed in the stash collection, where it remains
+recoverable until the stash retention window expires. The preview
+surfaces that consequence in structured form, matching the dismiss
+preview pattern used by the Inbox.
+
+**Request:**
+```json
+{
+  "note": "<operator-supplied free text, may be empty>"
+}
+```
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "batch_id": "<echoed>",
+  "consequence": {
+    "active_visibility": "hidden",
+    "stash_visibility": "listed via GET /api/workbench/stashes",
+    "retention_window": "P30D",
+    "retention_expires_at": "2026-06-24T14:22:00Z",
+    "recoverable_until": "2026-06-24T14:22:00Z",
+    "no_device_action": true,
+    "no_changeset": true,
+    "current_state_snapshot": {
+      "state": "drafting | previewed",
+      "intent_count": 4,
+      "node_count": 2
+    }
+  }
+}
+```
+
+`retention_window` is a server-side default exposed in the contract
+so the operator sees it before stashing. Operators who need a
+different retention window for a particular batch raise a Contract PR
+to introduce a per-stash retention parameter; v0 has one window.
+
+**Errors:**
+- Unknown `batch_id` → 404 `precondition_failure`.
+- Batch state is `committed` or `reverted` → 409
+  `precondition_failure`. Stash is for in-progress work; terminal
+  states are not stashable. (Operators who want to retain a
+  committed batch as a reference object use the Provenance surface
+  for that; see `intent_url`.)
+
+### `POST /api/workbench/{batch_id}/stash`
+
+Apply a previously-generated stash preview. Records the batch in the
+stash collection; the batch is no longer addressable as an active
+batch. The returned `stash_id` is the handle the operator uses to
+inspect or restore.
+
+**Request:**
+```json
+{ "preview_id": "<from /stash/preview>" }
+```
+
+**Response 200:**
+```json
+{
+  "batch_id": "<echoed>",
+  "stash_id": "<opaque>",
+  "stashed_at": "2026-05-25T14:22:00Z",
+  "retention_expires_at": "2026-06-24T14:22:00Z",
+  "note": "<from preview>"
+}
+```
+
+Stale or already-consumed `preview_id` → 410 Gone with
+`kind: "precondition_failure"`.
+
+### `GET /api/workbench/stashes`
+
+List stashed batches. Idempotent; safe to poll.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cursor` | string (opaque) | unset | Pagination cursor. |
+| `limit` | int | `50` | Page size (max 200). |
+
+**Response 200:**
+```json
+{
+  "as_of": "2026-05-25T14:23:00Z",
+  "stashes": [
+    {
+      "stash_id": "<opaque>",
+      "batch_id": "<opaque, original batch ID>",
+      "label": "<operator-supplied at stage time>",
+      "note": "<operator-supplied at stash time>",
+      "stashed_at": "2026-05-25T14:22:00Z",
+      "retention_expires_at": "2026-06-24T14:22:00Z",
+      "intent_count": 4,
+      "node_count": 2,
+      "had_state_at_stash": "drafting | previewed",
+      "summary": {
+        "verbs": ["ApplyService", "CreateVLAN"],
+        "nodes": ["switch1", "switch2"]
+      }
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+`had_state_at_stash` is preserved so that a restored batch returns to
+its prior working state, not unconditionally to `drafting`.
+
+### `GET /api/workbench/stashes/{stash_id}`
+
+Return the full content of a stashed batch — same shape as `GET
+/api/workbench/{batch_id}`, with `state: "stashed"` and an additional
+`stash` block carrying stash metadata. Idempotent.
+
+**Response 200:**
+```json
+{
+  "batch_id": "<opaque>",
+  "label": "<echoed>",
+  "state": "stashed",
+  "stash": {
+    "stash_id": "<opaque>",
+    "stashed_at": "2026-05-25T14:22:00Z",
+    "retention_expires_at": "2026-06-24T14:22:00Z",
+    "note": "<from stash time>",
+    "had_state_at_stash": "previewed"
+  },
+  "intent_count": 4,
+  "node_count": 2,
+  "per_node_atomicity": [ /* same shape as GET /api/workbench/{batch_id} */ ],
+  "cross_node_atomicity": { /* same shape */ },
+  "intents": [ /* same shape as GET /api/workbench/{batch_id}.intents */ ],
+  "latest_preview_id": null,
+  "latest_dry_run_at": "2026-05-25T14:12:30Z"
+}
+```
+
+`latest_preview_id` is always `null` for a stashed batch — preview
+IDs do not survive stash. A restored batch must re-run dry-run /
+commit-preview before commit. This is deliberate: a stash is a long-
+lived object; the live state of newtron and the network may have
+changed since stash, and the commit-preview's freshness is a
+load-bearing property (per operator-philosophy invariant #9).
+
+**Errors:**
+- Unknown `stash_id` → 404 `precondition_failure` with
+  `details.reason: "stash_unknown_or_expired"`.
+
+### `POST /api/workbench/stashes/{stash_id}/restore/preview`
+
+Preview the consequences of restoring a stashed batch to active
+state. **No newtron interaction.** Mandatory before `/restore` per
+`CLAUDE.md` §Preview Before Commit, Always.
+
+Restore produces no ChangeSet (no device action) but does mutate
+operator-visible state: the batch returns to the active list and is
+again addressable as `/api/workbench/{batch_id}`. The preview
+surfaces that consequence and flags whether the stash is still
+internally consistent against the current spec set (a stash whose
+referenced services or nodes have since been deleted is restorable
+but will fail validation on the next dry-run).
+
+**Request:**
+```json
+{}
+```
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "stash_id": "<echoed>",
+  "batch_id": "<the active batch_id the restore will produce>",
+  "consequence": {
+    "active_visibility": "listed",
+    "stash_visibility": "removed",
+    "restored_to_state": "drafting | previewed",
+    "no_device_action": true,
+    "no_changeset": true
+  },
+  "spec_consistency": {
+    "all_targets_still_valid": true,
+    "invalid_targets": [],
+    "missing_services": [],
+    "rationale": "all 2 nodes and all 4 intents reference current specs"
+  }
+}
+```
+
+`spec_consistency.all_targets_still_valid: false` is not a block on
+restore — it is an operator-facing warning. The operator can still
+restore and then amend the batch (drop or edit the invalid intents).
+`invalid_targets[]` and `missing_services[]` carry the
+substrate-level reasons (e.g., "node switch3 no longer in topology",
+"service legacy-l3 removed from spec directory").
+
+**Errors:**
+- Unknown `stash_id` → 404 `precondition_failure`.
+- Stash retention has expired → 410 Gone with
+  `kind: "precondition_failure"` and `details.expired_at`.
+
+### `POST /api/workbench/stashes/{stash_id}/restore`
+
+Apply a previously-generated restore preview. The batch reappears in
+the active list under its original `batch_id`, in the state recorded
+in `had_state_at_stash`. The stash record is removed.
+
+**Request:**
+```json
+{ "preview_id": "<from /restore/preview>" }
+```
+
+**Response 200:**
+```json
+{
+  "stash_id": "<echoed>",
+  "batch_id": "<the restored batch_id>",
+  "restored_at": "2026-05-25T14:24:00Z",
+  "restored_to_state": "previewed"
+}
+```
+
+The active batch can now be addressed via `GET
+/api/workbench/{batch_id}` for the full detail.
+
+Stale or already-consumed `preview_id` → 410 Gone with
+`kind: "precondition_failure"`.
