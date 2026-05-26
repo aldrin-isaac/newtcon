@@ -81,8 +81,25 @@ newtcon delivers exactly three operator surfaces, in this order:
    handles apply, refresh, and remove. See [`API_CONTRACT.md`](API_CONTRACT.md).
 2. **Operator Inbox** — actionable cards for drift, convergence stragglers,
    partial operations, reference-count warnings, reconcile-due signals.
-3. **Change Workbench** — staged batches of intents with dry-run preview, atomic
-   commit, stash, and revert.
+3. **Change Workbench** — staged batches of intents with dry-run preview,
+   commit, stash, and revert. The commit is **atomic per-Node** — each
+   target Node's batch lands as a single `Lock → snapshot → fn →
+   commit-or-restore → Unlock` cycle whose inner application is a Redis
+   `TxPipeline` write (see
+   `../newtron/docs/newtron/unified-pipeline-architecture.md` §8 and
+   `DESIGN_PRINCIPLES_NEWTRON.md` §8, §11, §31). When a Workbench batch
+   spans multiple Nodes, the per-Node commits are independent and
+   sequential: newtron operates per-device and exposes no cross-Node
+   atomicity primitive, so a multi-Node commit is **structured
+   best-effort**, with each Node's outcome reported separately in
+   `POST /api/workbench/{batch_id}/commit`'s `per_target[]` /
+   `per_node_atomicity[]` response and `cross_node_atomicity.atomic`
+   fixed at `false`. The operator sees, per target, whether the per-Node
+   batch committed atomically, partially failed at validate / deliver /
+   verify, or did not run because an earlier target failed and the batch
+   policy was configured to halt. Revert follows the same per-Node
+   atomicity model. See [`API_CONTRACT.md`](API_CONTRACT.md) §Change
+   Workbench, especially "The atomicity model — read this first."
 
 **Out of scope** (do not implement, do not stub, do not propose):
 
