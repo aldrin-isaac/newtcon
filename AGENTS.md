@@ -5,6 +5,22 @@ newtcon. The team is designed to operate with minimal operator involvement
 while preventing design drift, scope creep, and erosion of the principles in
 [`CLAUDE.md`](CLAUDE.md).
 
+## Scope vs roadmap
+
+The autonomous team works against newtcon's **current scope** (see
+[`CLAUDE.md`](CLAUDE.md) §Project Scope) only. Features in
+[`docs/roadmap.md`](docs/roadmap.md) (future-considered) are NOT in
+the team's work queue. Promotion of a roadmap entry to current scope
+is operator-driven via an Architecture-class PR — it is not something
+the team initiates, and the team must not design or implement
+roadmap items autonomously even if related work surfaces the
+opportunity.
+
+The Critic and Architecture Reviewer both check that PR work does not
+implement, stub, or propose roadmap-only features outside the
+promotion protocol. A PR that drifts into a roadmap item is rejected
+on scope grounds.
+
 ## Implementation
 
 This document is the **authoritative** role specification. The harness

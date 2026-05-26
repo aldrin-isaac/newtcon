@@ -103,15 +103,36 @@ newtcon delivers exactly three operator surfaces, in this order:
 
 **Out of scope** (do not implement, do not stub, do not propose):
 
-- Topology editing / blueprint drawing
+- **Drag-and-drop blueprint editor** — the Apstra paradigm. Operators
+  do not design networks in newtcon. Read-mostly topology
+  visualization is *future-considered*, not out of scope; see below.
 - Device-form configurators (per-device tabs with form fields for every CONFIG_DB table)
 - Status dashboards with green/red lights as the primary surface
 - Authentication/authorization (deferred until operator surfaces are validated)
 - Multi-tenant features
 - Mobile-first layouts
 
-If a feature is not one of the three surfaces above, it does not belong in
-newtcon. Out-of-scope work is rejected at PR review.
+If a feature is not one of the three surfaces above and not in
+`docs/roadmap.md`, it does not belong in newtcon. Out-of-scope work
+is rejected at PR review.
+
+**Future-considered** (NOT in current scope, but tracked for future
+promotion — see [`docs/roadmap.md`](docs/roadmap.md)):
+
+- **Spec authoring** — surfaces for operators to create / edit /
+  delete service specs, profiles, zones. Bounded to the spec types
+  operators commonly extend; routes through newtron's existing
+  typed verbs.
+- **Graphical topology visualization** — read-mostly tier-centric
+  concentric-ring view of the network's physical structure, sourced
+  from the topology spec. Structural changes route through spec
+  authoring; this is a visualization layer, not a blueprint editor.
+
+Future-considered items are deliberately deferred, not rejected on
+principle. They are NOT picked up by the autonomous team. Promotion
+from `docs/roadmap.md` to current scope is operator-driven via an
+Architecture-class PR that updates this section and files
+corresponding issues.
 
 ## Reference Documents
 
