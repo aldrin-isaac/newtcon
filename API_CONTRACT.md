@@ -53,12 +53,605 @@ Every non-2xx response body:
   "error": {
     "kind": "validation_failure | drift_refusal | precondition_failure | newtron_unavailable | internal",
     "message": "human-readable, domain-grounded",
-    "details": { /* kind-specific structured payload */ }
+    "details": { /* per-kind typed shape; see below */ }
   }
 }
 ```
 
 `kind` values are bounded; new kinds are a Contract PR.
+
+`message` is the domain-level summary the operator sees first. `details`
+is the substrate the operator inspects next (operator-philosophy
+invariant #7 "Errors carry the substrate" — a substrate-grounded
+explanation MUST be reachable, not summarized away). Each `kind` defines
+a typed `details` shape; the shape is binding on consumers and on every
+endpoint that returns the kind. Anywhere this contract returns
+`kind: "X"`, the `details` body matches the §`X` schema below.
+
+The same shape is used by **nested per-target failures**, not only the
+top-level `error` envelope. Endpoints that report per-target failures
+inside a 200 response (e.g., `POST /api/workbench/{batch_id}/commit`'s
+`per_target[*].failure`) MUST use the same five `kind` values and the
+matching `details` schemas defined here. A handler that invents a new
+`kind` (e.g., `newtron_internal`) for a per-target failure is a contract
+violation; the per-target failure has the same shape as the top-level
+`error` body.
+
+### Vocabulary boundaries between kinds
+
+Two pairs of kinds have overlapping conceptual territory; the contract
+draws the line as follows so handlers and consumers do not have to
+guess:
+
+- **`validation_failure.reason: "target_absent"`** vs
+  **`precondition_failure.condition: "node_unknown" | "service_unknown"`**.
+  `target_absent` is per-field within a multi-target request whose
+  body otherwise parsed (the operator named a VLAN that does not
+  exist on switch1 inside one entry of a 4-entry `targets[]`);
+  `node_unknown` / `service_unknown` are whole-request preconditions
+  on a path parameter (the operator hit `/api/services/legacy/instances`
+  for a service that does not exist in the spec). Rule:
+  request-cannot-be-attempted-at-all → `precondition_failure`;
+  request-attempted-and-one-field-refused → `validation_failure`.
+- **`validation_failure` (substrate stages)** vs
+  **`drift_refusal`**. Substrate-stage validations
+  (`validation_stage: "substrate_precondition" | "substrate_schema"`)
+  are refusals grounded in a specific named input being wrong (a VLAN
+  ID out of range, a VRF that does not exist on the device). A
+  `drift_refusal` is refusal grounded in device CONFIG_DB diverging
+  from the projection — no input is "wrong"; the substrate has moved
+  since the operator's last visit. Rule: input-is-wrong →
+  `validation_failure`; input-was-right-when-you-typed-it-but-the-device-changed
+  → `drift_refusal`.
+
+### Companion fields on every error
+
+Two fields appear on every `details` payload, regardless of `kind`:
+
+- **`correlation_id`** — REQUIRED. Server-assigned UUID per request,
+  echoed in newtcon-server logs. The operator quotes this when filing
+  ops tickets; the engineer greps logs for it. Present even when other
+  fields are sparse (`internal`, in particular, may have little else).
+- **`rationale_ref`** — OPTIONAL on `internal` (often unknown);
+  REQUIRED on `validation_failure`, `drift_refusal`,
+  `precondition_failure`, and `newtron_unavailable`. Same typed shape
+  used elsewhere in the contract: object with required `substrate`
+  (path-and-anchor into substrate docs) and required `principle`
+  (path-and-anchor into `docs/operator-philosophy.md`, `CLAUDE.md`, or
+  `DESIGN_PRINCIPLES_NEWTRON.md`). A string-only `rationale_ref` is
+  rejected at contract level (matching the convention used by
+  `available_actions[*].rationale_ref`,
+  `recommended_mode_rationale`, etc., elsewhere in this file).
+
+### `details` for `kind: "validation_failure"`
+
+A `validation_failure` is a refusal that newtcon-server can attribute to
+**a specific input that was wrong**. There are three sub-stages a
+validation can fail at, and the contract surfaces which one:
+
+- **request** — newtcon-server itself rejected the request before any
+  newtron call (malformed body, unknown enum value, missing required
+  field, query param out of range, unknown verb, target not in the spec).
+- **substrate_precondition** — newtron's `PreconditionError` per
+  `DESIGN_PRINCIPLES_NEWTRON` §13 "Two kinds of refusal": the operation's
+  subject is absent (VLAN missing, interface missing, VRF never created).
+  Distinct from `precondition_failure` (this file's `kind`), which is
+  reserved for newtcon-server-side preconditions like
+  `preview_id` staleness. Substrate preconditions come from the device.
+- **substrate_schema** — newtron's schema validation per
+  `DESIGN_PRINCIPLES_NEWTRON` §13 "Schema validation enforces data
+  format": the ChangeSet contained an out-of-range value, unknown enum,
+  bad pattern, missing required field, or wrote to an unknown table.
+  This is the fail-closed schema check that prevents the bad write from
+  reaching Redis.
+
+Shape:
+
+```json
+{
+  "error": {
+    "kind": "validation_failure",
+    "message": "BGP neighbor 10.1.0.1 rejected: peer_as out of range",
+    "details": {
+      "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "validation_stage": "request | substrate_precondition | substrate_schema",
+      "rejections": [
+        {
+          "locator": {
+            "kind": "request_field | substrate_field | parameter",
+            "request_field": {
+              "json_pointer": "/targets/0/params/peer_as",
+              "received": 4294967296
+            },
+            "substrate_field": {
+              "network": "default",
+              "node": "switch1",
+              "table": "BGP_NEIGHBOR",
+              "key": "default|10.1.0.1",
+              "field": "asn"
+            },
+            "parameter": {
+              "name": "limit",
+              "in": "query"
+            }
+          },
+          "reason": "missing_required | unknown_value | out_of_range | type_mismatch | pattern_mismatch | unknown_table | unknown_field | target_absent | target_in_use | duplicate",
+          "message": "peer_as 4294967296 exceeds 32-bit ASN range",
+          "expected": { "type": "uint32", "max": 4294967295 },
+          "actual": 4294967296,
+          "allowed": null
+        }
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#13-prevent-bad-writes-dont-just-detect-them",
+        "principle": "docs/operator-philosophy.md#7-errors-carry-the-substrate"
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`validation_stage`** is the discriminator. Exactly one of the three
+  `locator.*` sub-objects MUST be populated per rejection, and it MUST
+  match the stage: `request` → `request_field` or `parameter`;
+  `substrate_precondition` and `substrate_schema` → `substrate_field`.
+  An empty `rejections[]` is forbidden — a `validation_failure` without
+  a named rejection is opaque to the operator and violates invariant #7.
+- **`rejections[]`** is at least one entry. Multiple rejections are
+  reported together so the operator fixes a batch in one round-trip
+  rather than discovering errors one at a time. Per
+  `DESIGN_PRINCIPLES_NEWTRON` §13: "the only reliable solution is to
+  prevent the write from reaching the device at all" — the contract
+  surfaces every reason the write was refused at once.
+- **`reason`** is bounded. `target_absent` corresponds to §13's
+  "PreconditionError — the operation's subject is absent";
+  `target_in_use` corresponds to §13's "domain error — the resource
+  exists but can't be safely modified" (still surfaced as
+  `validation_failure` to the operator because it is a refusal grounded
+  in a specific input, not a system condition).
+- **`expected` / `actual` / `allowed`** populated per `reason`:
+  `out_of_range` → `expected` carries the range, `actual` carries the
+  received value; `unknown_value` → `allowed` carries the bounded enum;
+  `missing_required` → all three may be `null` (the rejection is that
+  no value was received). The frontend renders the populated subset.
+- **`message`** in each rejection is short, specific, and substrate-
+  grounded (e.g., "peer_as 4294967296 exceeds 32-bit ASN range", not
+  "Invalid value for peer_as"). A generic message is a contract smell.
+
+Existing endpoints that return `kind: "validation_failure"` per this
+contract — `/api/preview` validate failures, `/api/inbox` unknown
+`kind`/verb, `/api/workbench/stage` invalid targets,
+`/api/workbench/{batch_id}/commit` with a dry-run `preview_id`,
+`/api/workbench/{batch_id}/revert/preview` with invalid handles,
+`/api/projection/nodes/{node}` unowned `table` filter,
+`/api/rehearsal/sessions` mode/drill mismatch, `/api/rehearsal/quickrun`
+unknown `verb` — populate this schema. Free-form `details.allowed_verbs`,
+`details.invalid_targets`, `details.invalid_handles`,
+`details.owned_tables`, and `details.invalid_intent_handles` mentioned
+in those sections are surfaced inside `rejections[*]` per the schema:
+`reason: "unknown_value"` with `allowed`, or `reason: "target_absent"`
+with `substrate_field`, etc. The free-form field names in those
+sections are descriptive of the operator-visible information; the wire
+shape is the typed `rejections[]`.
+
+### `details` for `kind: "drift_refusal"`
+
+A `drift_refusal` is newtron refusing to compute or apply a ChangeSet
+because the device CONFIG_DB has diverged from the projection derived
+from its actuated intents (`unified-pipeline-architecture.md` §8 "Drift
+Guard"; `DESIGN_PRINCIPLES_NEWTRON` §1, §21). Writing on top of a
+drifted foundation is structurally unsafe: preconditions and config
+generators reason against the projection, but the device no longer
+matches the projection.
+
+Drift refusal carries the full structured drift report so the operator
+sees exactly what diverged and can navigate to the existing Inbox drift
+card to resolve it. The `DriftEntry` schema is the same one used by the
+`kind: "drift"` inbox card's `detail.drift_entries[]` (§Endpoints —
+Operator Inbox); it is not re-coined here.
+
+Shape:
+
+```json
+{
+  "error": {
+    "kind": "drift_refusal",
+    "message": "drift detected on switch1 (14 entries); reconcile before proceeding",
+    "details": {
+      "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "guard_mode": "actuated",
+      "per_target": [
+        {
+          "network": "default",
+          "node": "switch1",
+          "intent_count": 47,
+          "projection_rebuilt_at": "2026-05-25T14:13:30Z",
+          "drift_entries": [
+            {
+              "table": "VLAN",
+              "key": "Vlan100",
+              "type": "missing | extra | modified",
+              "expected": { "vlanid": "100" },
+              "actual": { "vlanid": "100", "mtu": "1500" }
+            }
+          ],
+          "drift_entry_count": 14,
+          "by_type": { "missing": 9, "extra": 2, "modified": 3 },
+          "inbox_card_url": "/api/inbox/<opaque>",
+          "drift_card_id": "<opaque>",
+          "projection_url": "/api/projection/nodes/switch1"
+        }
+      ],
+      "aggregate": {
+        "node_count": 1,
+        "total_drift_entries": 14
+      },
+      "resolution_hint": {
+        "verb": "reconcile_delta | reconcile_full",
+        "rationale": "delta is sufficient when drift_entry_count is small and a config reload is not desired; full is required when drift includes daemon-restart-class changes",
+        "stage_via": "/api/inbox/<card_id>/action/preview",
+        "rationale_ref": {
+          "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#6-delta-reconcile",
+          "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#21-reconstruct-dont-record"
+        }
+      },
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#drift-guard-actuated-mode",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`per_target[]`** has one entry per Node that drifted. Single-Node
+  operations have one entry; multi-Node operations (Composer apply,
+  Workbench commit/dry-run) may have many. A drift refusal with empty
+  `per_target[]` is a contract violation — the operator must know
+  WHICH Node refused.
+- **`drift_entries[]`** uses the `DriftEntry` schema defined by the
+  `kind: "drift"` card's `detail.drift_entries[]`
+  (§Endpoints — Operator Inbox). Same fields (`table`, `key`, `type`,
+  `expected`, `actual`); same semantics. Re-coining a different shape
+  here would teach two parallel vocabularies for the same substrate.
+- **`drift_entry_count`** and **`by_type`** are summary counts that
+  duplicate information derivable from `drift_entries[]`; they are
+  REQUIRED because UI rendering must surface counts without parsing
+  the full entries array (the entries array can be large, and the
+  operator's first view is the count).
+- **`inbox_card_url`** / **`drift_card_id`** point to the existing
+  Inbox drift card for the same `(network, node)` tuple, when one
+  exists. The operator navigates from the refusal directly to the
+  card and chooses a reconciliation verb there (operator-philosophy
+  invariant #5 "why-mode is always available" — every refusal is one
+  click from the operator's action surface). When no Inbox card has
+  been derived yet (e.g., the drift was only observed at refusal
+  time and the Inbox derivation has not run), both fields are
+  `null`; the operator polls `/api/inbox` and the card will appear
+  on the next derivation.
+- **`projection_url`** points to the Provenance projection endpoint
+  for the Node so the operator sees what newtron believed the
+  CONFIG_DB should be at refusal time — the half of the drift the
+  device cannot show directly.
+- **`guard_mode`** is `actuated` for every drift refusal in
+  practice; the contract surfaces it because
+  `unified-pipeline-architecture.md` §8 makes the mode the cause of
+  the refusal ("actuated online: device intents are authoritative —
+  the device SHOULD match its own intents"). A `topology` value is
+  reserved and not currently emitted; surfacing the enum on the wire
+  documents the substrate cause.
+- **`resolution_hint`** names a concrete next-action verb in
+  newtcon's vocabulary (`reconcile_delta` or `reconcile_full` from
+  the Inbox action verb set) AND links to the preview path that
+  stages it. The hint is NOT prescriptive — the operator may
+  choose differently — but it is concrete enough to act on without
+  reading another doc (invariant #7's "substrate-grounded
+  explanation" is binding even on the refusal).
+
+Existing endpoints that return `kind: "drift_refusal"` per this
+contract — `/api/preview` and `/api/apply` on Composer,
+`/api/inbox/{card_id}/action/preview` and `/api/inbox/{card_id}/action`
+on Inbox, `/api/workbench/{batch_id}/dry_run` on Workbench — populate
+this schema. The previously documented free-form `details.per_target[]`
+on workbench dry-run with `DriftEntry[]` is the same shape as
+`per_target[*].drift_entries[]` here.
+
+### `details` for `kind: "precondition_failure"`
+
+A `precondition_failure` is a refusal grounded in **newtcon-server-side
+state** that does not satisfy the endpoint's preconditions — the
+preview is stale, the batch is in the wrong state, the operation has
+been evicted, the addressed substrate no longer exists. This is
+distinct from `validation_failure` (which is about specific request
+inputs) and from `drift_refusal` (which is about device divergence) and
+from `newtron_unavailable` (which is about reachability).
+
+The kind is discriminated by `condition`, a bounded enum. Each
+condition defines which optional sub-fields populate `condition_details`.
+
+Shape:
+
+```json
+{
+  "error": {
+    "kind": "precondition_failure",
+    "message": "preview_id has expired (5-minute TTL); re-preview before applying",
+    "details": {
+      "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "condition": "preview_id_stale",
+      "condition_details": {
+        "preview_id": "<opaque>",
+        "issued_at": "2026-05-25T14:08:01Z",
+        "expired_at": "2026-05-25T14:13:01Z",
+        "preview_kind": "composer_preview | workbench_dry_run | workbench_commit_preview | workbench_revert_preview | workbench_stash_preview | workbench_restore_preview | inbox_dismiss_preview | inbox_action_preview | rehearsal_session_preview"
+      },
+      "next_action_hint": {
+        "verb": "re_preview",
+        "endpoint": "/api/preview",
+        "rationale": "re-issue the same preview request; the operator's intent did not change, only the TTL expired"
+      },
+      "provenance_url": null,
+      "gap_issue": null,
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  }
+}
+```
+
+Bounded enum for `condition`:
+
+| `condition` | When | `condition_details` shape |
+|-------------|------|---------------------------|
+| `preview_id_stale` | TTL elapsed since the preview was issued | `{ preview_id, issued_at, expired_at, preview_kind }` |
+| `preview_id_unknown` | `preview_id` never issued by this server (or evicted) | `{ preview_id }` |
+| `preview_id_wrong_class` | `preview_id` issued by a different endpoint than the one accepting it (e.g., dry-run preview submitted to `/commit`) | `{ preview_id, received_kind, required_kind }` |
+| `preview_id_already_consumed` | `preview_id` valid but already redeemed by a prior call | `{ preview_id, consumed_at }` |
+| `batch_state_invalid` | Workbench batch is not in a state that permits the requested operation | `{ batch_id, current_state, allowed_states[] }` |
+| `operation_unknown_or_expired` | `operation_id` not currently known | `{ operation_id }` |
+| `operation_evicted` | `operation_id` known to have existed but retention expired | `{ operation_id, evicted_at }` |
+| `intent_unknown` | `intent_id` never minted | `{ intent_id }` |
+| `intent_resolved` | `intent_id` was minted but the underlying intent record no longer exists on the device (reversed by later operation) | `{ intent_id, reversed_by_operation_id, reversed_by_operation_url }` |
+| `changeset_unknown` | `changeset_id` never minted | `{ changeset_id }` |
+| `session_unknown` | `rehearsal_session_id` never opened | `{ rehearsal_session_id }` |
+| `session_expired` | `rehearsal_session_id` was opened but TTL elapsed | `{ rehearsal_session_id, opened_at, expired_at }` |
+| `stash_unknown_or_expired` | `stash_id` never minted or retention expired | `{ stash_id, expired_at? }` |
+| `transcript_unknown_or_expired` | `transcript_id` never minted or retention expired | `{ transcript_id, expired_at? }` |
+| `node_unknown` | `node` path parameter not in the spec | `{ node, network }` |
+| `service_unknown` | `service` path parameter not in the spec | `{ service }` |
+| `card_signal_resolved` | Inbox `card_id` no longer derivable — signal resolved before operator opened it | `{ card_id, resolved_at }` |
+| `newtron_capability_missing` | newtron is reachable but does not expose a capability this endpoint requires; a Gap-Handling-Protocol issue exists | `{ capability, gap_issue_url, expected_shape }` |
+
+Catastrophic mid-sequence failures with partial results captured (e.g.,
+the Workbench commit 502 path) are NOT a `precondition_failure`. There
+is a single contract home for partial results:
+`internal.details.partial_results` (see §`details` for `kind:
+"internal"` below). Per-endpoint sections that report partial-results
+recovery point at that home; the `precondition_failure` enum does not
+duplicate it.
+
+Field rules:
+
+- **`condition`** is REQUIRED and bounded. A new condition is a Contract
+  PR.
+- **`condition_details`** populates the per-row schema above. Fields
+  not in the per-row schema for the named `condition` are absent (not
+  `null`).
+- **`next_action_hint`** is REQUIRED for every `condition` in the
+  enum. `verb` names a concrete operator action (`re_preview`,
+  `re_dry_run`, `re_commit_preview`, `stage_reconcile_delta`,
+  `inspect_operation`, `open_inbox_card`, `file_gap_followup`,
+  `retry_after_expiry`, etc.); `endpoint` points to where the verb is
+  invoked. The hint is not prescriptive but it is concrete — the
+  operator does not need to read other docs to know what to do next
+  (operator-philosophy invariant #7 plus invariant #9).
+- **`provenance_url`** points to the relevant Provenance endpoint
+  when applicable: for `intent_resolved`, the reverse operation; for
+  `operation_evicted`, `null` (the operation is gone, so there is
+  nothing to link); for `batch_state_invalid`, the batch URL itself.
+- **`gap_issue`** is REQUIRED on `newtron_capability_missing` and is
+  the URL of the filed Gap-Handling-Protocol issue. Forbidden on
+  every other `condition`. This collapses the ad-hoc
+  `details.gap_issue` field used today on the Rehearsal 501 responses
+  into the typed schema.
+
+The previously documented free-form `details.reason`, `details.current_state`,
+`details.preview_kind`, `details.expired_at`, `details.gap_issue` fields
+on existing endpoints map into `condition` + `condition_details` per the
+table above. Specifically:
+- `details.reason: "operation_unknown_or_expired"` → `condition: "operation_unknown_or_expired"`;
+- `details.reason: "signal_resolved"` → `condition: "card_signal_resolved"`;
+- `details.reason: "stash_unknown_or_expired"` → `condition: "stash_unknown_or_expired"`;
+- `details.reason: "node_unknown"` → `condition: "node_unknown"`;
+- `details.reason: "intent_unknown" | "intent_resolved"` → `condition: "intent_unknown" | "intent_resolved"`;
+- `details.reason: "changeset_unknown" | "operation_evicted"` → `condition: "changeset_unknown" | "operation_evicted"`;
+- `details.reason: "transcript_unknown_or_expired"` → `condition: "transcript_unknown_or_expired"`;
+- `details.reason: "session_unknown" | "session_expired"` → `condition: "session_unknown" | "session_expired"`;
+- `details.reason: "newtron_capability_missing"` with `details.gap_issue` →
+  `condition: "newtron_capability_missing"`, `condition_details: { capability, gap_issue_url, expected_shape }`;
+- `details.current_state` (batch in wrong state) → `condition: "batch_state_invalid"`, `condition_details.current_state`;
+- `details.preview_kind` (wrong preview class submitted to `/commit`) →
+  `condition: "preview_id_wrong_class"`, `condition_details.{received_kind, required_kind}`;
+- `details.expired_at` (stash retention expired) → `condition: "stash_unknown_or_expired"`, `condition_details.expired_at`;
+- `details.last_known` on 503 paths → not `precondition_failure`; see
+  `newtron_unavailable` below.
+
+### `details` for `kind: "newtron_unavailable"`
+
+A `newtron_unavailable` is newtcon-server's honest acknowledgement that
+it cannot reach newtron-server for the requested operation. Per
+operator-philosophy invariant #9 ("Confidence and limits are explicit"),
+this is surfaced — never silently retried, never papered over with
+stale-rendered-as-current.
+
+Shape:
+
+```json
+{
+  "error": {
+    "kind": "newtron_unavailable",
+    "message": "newtron-server unreachable: connection refused at http://127.0.0.1:8080 since 2026-05-25T14:14:00Z",
+    "details": {
+      "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "newtron_url": "http://127.0.0.1:8080",
+      "last_reachable_at": "2026-05-25T14:13:00Z",
+      "last_attempt_at": "2026-05-25T14:14:30Z",
+      "underlying_error": "connection_refused | dns_failure | tls_handshake_failure | timeout | http_5xx | upstream_unhealthy",
+      "underlying_error_message": "dial tcp 127.0.0.1:8080: connect: connection refused",
+      "affected_nodes": ["switch1", "switch2"],
+      "last_known": {
+        "kind": "operation_pipeline | verify_assertion | intent_record | projection_diff | inbox_cards | none",
+        "captured_at": "2026-05-25T14:13:00Z",
+        "payload": { /* shape per kind; opaque to this schema */ }
+      },
+      "next_action_hint": {
+        "verb": "check_newtron_health | retry_after | inspect_newtron_logs",
+        "endpoint": "/api/health",
+        "suggested_after": "PT10S",
+        "rationale": "newtcon-server's last successful newtron call was 1 minute 30 seconds ago; the upstream may be restarting"
+      },
+      "rationale_ref": {
+        "substrate": "CLAUDE.md#newtron-api-consumption-rule",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`newtron_url`** is the configured upstream URL (from
+  `--newtron-url`). Surfaced because operators running multi-newtron
+  deployments need to know which upstream failed.
+- **`last_reachable_at`** is the timestamp of the most recent
+  successful newtron-server call from newtcon-server's process
+  lifetime, or `null` if newtcon-server has never reached newtron-
+  server since startup. NOT a guarantee of newtron's actual
+  availability at that moment — only that newtcon-server got a
+  response then.
+- **`last_attempt_at`** is the timestamp of the most recent failed
+  attempt (typically very close to "now").
+- **`underlying_error`** is a bounded classification of the failure
+  mode. The classification is for the UI to render distinctively
+  (a DNS failure surfaces differently from a TLS handshake failure);
+  it is NOT a sanitized "friendly" version of the wire error.
+- **`underlying_error_message`** carries the raw wire-level error
+  string (e.g., a `*net.OpError` `.Error()` value or an HTTP body
+  excerpt for `http_5xx`). Per `CLAUDE.md` §Operator-Honest Errors
+  and operator-philosophy invariant #7, this is the substrate the
+  operator needs to diagnose; it is not paraphrased. Long bodies
+  are truncated at 4 KiB with a `...[truncated]` marker.
+- **`affected_nodes`** lists the Nodes the failing operation needed
+  to read or write. Single-Node operations have one entry; multi-Node
+  Composer/Workbench operations may have many. `null` for endpoints
+  that are not Node-scoped (e.g., `/api/services` listing).
+- **`last_known`** is the substrate snapshot newtcon-server has from
+  prior successful calls. The `kind` discriminator names what the
+  payload is so the consumer parses it correctly. Today's endpoints
+  populate `kind` as follows:
+  - `/api/operations/{operation_id}` 503 → `kind: "operation_pipeline"`,
+    `payload` is the last-observed pipeline snapshot.
+  - `/api/operations/{operation_id}/verify` 503 →
+    `kind: "verify_assertion"`, `payload` is the last-observed
+    assertion snapshot.
+  - `/api/intents/{intent_id}` 503 → `kind: "intent_record"`,
+    `payload` is the most recent record snapshot in newtcon-server's
+    request-cache window.
+  - `/api/workbench/{batch_id}/diff` 503 → `kind: "projection_diff"`,
+    `payload` is the most recent successful diff.
+  - `/api/inbox` 503 (newtron_reachable false in the body, surfaced
+    here when the endpoint chooses to 503 instead of degrading) →
+    `kind: "inbox_cards"`, `payload` is the last-observed card set.
+  - All other endpoints → `kind: "none"`, `payload` is `null`. The
+    consumer renders an unavailability state without stale
+    substrate.
+- **`next_action_hint.verb`** is bounded:
+  `check_newtron_health` (operator should hit `/api/health` to see
+  current upstream status), `retry_after` (the operation may simply
+  succeed on retry; `suggested_after` is a duration), or
+  `inspect_newtron_logs` (the failure pattern suggests an upstream
+  bug, not a transient).
+
+This schema replaces the previously documented free-form
+`details.last_known.<key>` shapes (`pipeline`, `record`, `assertion`,
+`projection_diff`, `unreachable_nodes`) and the bare
+`details.unreachable_nodes[]` field. Per-endpoint sections that mention
+"`details.last_known.<key>`" populate `last_known.payload` per the
+discriminator table above. The `details.unreachable_nodes[]` field on
+`/api/preview`, `/api/workbench/{batch_id}/dry_run`,
+`/api/workbench/{batch_id}/commit/preview`, and
+`/api/workbench/{batch_id}/revert/preview` populates the
+`affected_nodes` field of this schema (newtron unreachable for those
+specific Nodes; the rest of the network may be reachable).
+
+### `details` for `kind: "internal"`
+
+An `internal` error is the residual category — newtcon-server cannot
+attribute the failure to a recognized substrate cause. Per operator-
+philosophy invariant #7, the substrate cause MUST be exposed when it
+exists; `internal` is for the case where it is genuinely unknown to
+the server at error-emission time.
+
+This kind is deliberately MINIMAL. It does not leak stack traces,
+source file paths, internal type names, or other implementation
+substrate that would teach the operator a false model of newtcon's
+internals. The only durable handle is the `correlation_id`, which the
+operator quotes when filing an ops ticket; the engineer greps logs
+for it.
+
+Shape:
+
+```json
+{
+  "error": {
+    "kind": "internal",
+    "message": "newtcon-server failed mid-request; quote correlation_id when reporting",
+    "details": {
+      "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+      "at": "2026-05-25T14:15:32Z",
+      "phase": "request_parse | newtron_call | response_render | persistence | session_management | unknown",
+      "partial_results": null
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`correlation_id`** is REQUIRED and is the ONLY way the operator
+  reaches the underlying cause. The server logs every `internal`
+  emission against this ID with full diagnostic detail; the wire
+  carries only the ID. This is the controlled-leakage boundary:
+  internals stay in logs; the operator gets a handle.
+- **`at`** is the server-side timestamp of the failure (not "now" on
+  read — the original failure time). Operators correlate against
+  monitoring dashboards.
+- **`phase`** is a coarse hint about where in the request lifecycle
+  the failure occurred. Bounded and intentionally vague: this is
+  hint-level, not substrate. Operators reading repeated `internal`
+  errors with the same `phase` value have a starting hypothesis
+  for the ops ticket; the substrate is in logs.
+- **`partial_results`** carries any per-target results completed
+  before the catastrophic failure (used by
+  `/api/workbench/{batch_id}/commit`'s 502 path). Shape matches the
+  `per_target[]` of the originating endpoint's success response.
+  `null` when no partial work was completed.
+- **No stack trace, no exception type, no file/line.** A
+  `details.stack_trace` field is a contract violation; the
+  Architecture Reviewer rejects any addition.
+- **No `rationale_ref` requirement.** Unlike the other four kinds,
+  `internal` does not require a `rationale_ref` because by
+  construction the cause is not yet classified. When the cause IS
+  known (e.g., a known newtron-server bug class), the failure
+  should be re-classified as one of the other four kinds, not
+  emitted as `internal` with explanatory `rationale_ref` text.
 
 ## Endpoints — Service Composer (first surface)
 
@@ -234,8 +827,11 @@ Validation failures in any target produce a 200 with `validate.ok = false` for
 the failing target(s) and `aggregate.all_valid = false`. The preview is still
 returned for the targets that did validate.
 
-A drift-guard refusal on any target → 409 with `kind: "drift_refusal"` and
-structured drift details. The preview is not committed.
+A drift-guard refusal on any target → 409 with `kind: "drift_refusal"`
+and `details` per the typed schema in §Error Schema (`per_target[]`
+listing the offending Nodes and their `drift_entries[]`, plus a
+resolution hint linking to the existing Inbox card). The preview is
+not committed.
 
 ### `POST /api/apply`
 
@@ -886,13 +1482,21 @@ Field rules:
 
 A drift-guard refusal during preview (newtron refuses to compute the
 ChangeSet because the device has drifted from its declared intents) →
-409 with `kind: "drift_refusal"` and `details` carrying the
-`DriftEntry[]` returned by newtron.
+409 with `kind: "drift_refusal"` and `details` per the typed schema in
+§Error Schema. The schema's `per_target[*].drift_entries[]` carries
+exactly the `DriftEntry[]` newtron returned, in the same shape as the
+Inbox drift card's `detail.drift_entries[]`.
 
 A validation failure (the action would write invalid CONFIG_DB per
 `DESIGN_PRINCIPLES_NEWTRON` §13) → 200 with `validate.ok == false` and
 `validate.errors[]` populated; the preview is returned but
-`produces_changeset` does not imply executable.
+`produces_changeset` does not imply executable. When the validation
+failure is severe enough that newtcon-server refuses to return a
+preview at all (rather than returning it with `validate.ok == false`),
+the response is 400 with `kind: "validation_failure"` per the typed
+schema in §Error Schema, with `validation_stage: "substrate_schema"`
+or `"substrate_precondition"` per `DESIGN_PRINCIPLES_NEWTRON` §13's
+two-refusals split.
 
 ### `POST /api/inbox/{card_id}/action`
 
@@ -953,11 +1557,20 @@ omitted.
 A stale `preview_id` → 410 Gone with `kind: "precondition_failure"`.
 
 A drift-guard refusal at execution time (the device drifted between
-preview and action) → 409 with `kind: "drift_refusal"`; the operator
-must re-preview.
+preview and action) → 409 with `kind: "drift_refusal"` per the typed
+schema in §Error Schema; the operator must re-preview.
 
-A newtron failure mid-pipeline → 502 with `kind: "internal"` and
-`details` carrying the partial pipeline trace and the newtron error.
+A newtron failure mid-pipeline → 502 with `kind: "internal"` per the
+typed schema in §Error Schema. `details.partial_results` carries the
+partial per-target results completed before the failure (matching the
+shape of this endpoint's `per_target[]` success body); the
+newtron-side error that triggered the catastrophic failure is logged
+against `details.correlation_id`, not surfaced inline — the operator
+quotes the correlation ID when filing the ops ticket. (When the
+mid-pipeline failure CAN be attributed to a substrate cause, the
+correct kind is `validation_failure`, `drift_refusal`, or
+`newtron_unavailable`, not `internal`; `internal` is the residual
+category for unclassified failures.)
 
 For `clear_zombie`, the response includes a `manual_cleanup_record`
 object echoing the `note` and `performed_at` from the request and adding
@@ -1148,10 +1761,14 @@ Field rules:
 
 **Errors:**
 - Unknown or expired `operation_id` → 404 with
-  `kind: "precondition_failure"` and `details.reason: "operation_unknown_or_expired"`.
+  `kind: "precondition_failure"` per the typed schema in §Error
+  Schema, with `condition: "operation_unknown_or_expired"`.
 - newtron-server unreachable while the operation is still in-flight →
-  503 with `kind: "newtron_unavailable"`; the last-known pipeline state
-  is included in `details.last_known`.
+  503 with `kind: "newtron_unavailable"` per the typed schema in §Error
+  Schema. `details.last_known.kind` is `"operation_pipeline"` and
+  `details.last_known.payload` carries the last-observed pipeline
+  snapshot; `details.affected_nodes[]` lists the Node the operation
+  targets.
 
 ## Endpoints — Change Workbench (third surface)
 
@@ -1572,10 +2189,12 @@ proposed HTTP shape (which matches the `expected_shape` block above).
 The implementer slice for `/diff` is blocked until newtron#4 lands.
 
 **Errors:**
-- Unknown `batch_id` → 404 `precondition_failure`.
-- newtron unreachable → 503 `newtron_unavailable` with
-  `details.last_known.projection_diff` carrying the most recent
-  successful diff if any.
+- Unknown `batch_id` → 404 `precondition_failure` per the typed schema
+  in §Error Schema.
+- newtron unreachable → 503 `newtron_unavailable` per the typed schema
+  in §Error Schema. `details.last_known.kind` is `"projection_diff"`
+  and `details.last_known.payload` carries the most recent successful
+  diff if any (`kind: "none"` if none has been computed).
 
 ### `POST /api/workbench/{batch_id}/dry_run`
 
@@ -1691,8 +2310,10 @@ preview at their own risk: commit will reject if any per-target is
 invalid (see commit response).
 
 A drift-guard refusal on any target → 409 with `kind:
-"drift_refusal"` and `details.per_target[]` listing the
-`DriftEntry[]` per affected Node. The preview is not returned.
+"drift_refusal"` and `details` per the typed schema in §Error Schema.
+`details.per_target[]` lists the offending Nodes and their
+`drift_entries[]` (same `DriftEntry` shape as the Inbox drift card's
+`detail.drift_entries[]`). The preview is not returned.
 
 **Errors:**
 - Unknown `batch_id` → 404 `precondition_failure`.
@@ -1700,10 +2321,11 @@ A drift-guard refusal on any target → 409 with `kind:
   states) → 409 `precondition_failure` with `details.current_state`.
   Dry-run on a stashed batch is allowed (and useful — the operator
   inspects a stashed batch's effect before deciding to restore).
-- newtron unreachable for any Node → 503 `newtron_unavailable` with
-  `details.unreachable_nodes[]`. The dry-run is not partially
-  returned; either every Node's sandbox replay succeeds or the call
-  fails.
+- newtron unreachable for any Node → 503 `newtron_unavailable` per
+  the typed schema in §Error Schema. `details.affected_nodes[]` lists
+  the unreachable Nodes; `details.last_known.kind` is `"none"` (the
+  dry-run is not partially returned — either every Node's sandbox
+  replay succeeds or the call fails as a whole).
 
 ### `POST /api/workbench/{batch_id}/commit/preview`
 
@@ -1852,8 +2474,9 @@ Field rules:
   commit-preview whose Render stage would reject mid-flight would
   teach a false confidence.
 - newtron-server unreachable for any target Node → 503
-  `newtron_unavailable` with `details.unreachable_nodes[]`. The
-  preview is not partially rendered.
+  `newtron_unavailable` per the typed schema in §Error Schema.
+  `details.affected_nodes[]` lists the unreachable Nodes; the preview
+  is not partially rendered.
 
 ### `POST /api/workbench/{batch_id}/commit`
 
@@ -1978,14 +2601,22 @@ Field rules:
   ```json
   {
     "stage": "intent | replay | render | deliver",
-    "kind": "validation_failure | drift_refusal | precondition_failure | newtron_internal",
+    "kind": "validation_failure | drift_refusal | precondition_failure | newtron_unavailable | internal",
     "message": "<newtron's domain-level error>",
-    "details": { /* kind-specific substrate */ }
+    "details": { /* per-kind typed shape; see §Error Schema */ }
   }
   ```
-  The `kind` values match newtron's substrate-level error
-  classifications, NOT HTTP status codes (per `CLAUDE.md`
-  §Operator-Honest Errors).
+  The `kind` values are the same five values defined in §Error Schema,
+  and `details` populates the same per-kind typed shape. A per-target
+  failure is structurally identical to a top-level error envelope; the
+  only difference is wrapper-level (the per-target failure is one
+  element of a 200 response's `per_target[]`, while a top-level error
+  is the body of a non-2xx response). `kind` values match newtron's
+  substrate-level error classifications, NOT HTTP status codes (per
+  `CLAUDE.md` §Operator-Honest Errors). `stage` is in addition to the
+  `details.correlation_id` and other companion fields, and names which
+  pipeline stage produced the failure (per
+  `unified-pipeline-architecture.md` §2).
 - `aggregate.outcome`:
   - `all_committed` — every per-Node result is `committed`.
   - `partial` — at least one `committed` and at least one of
@@ -2004,17 +2635,24 @@ Field rules:
 **Errors:**
 - Stale or already-consumed `preview_id` → 410 Gone with
   `kind: "precondition_failure"`.
-- `preview_id` was a dry-run preview, not a commit-preview → 400
-  `validation_failure` with `details.preview_kind`. The contract
-  rejects this on principle: the operator must have seen the
-  substrate-faithful commit preview before committing.
+- `preview_id` was a dry-run preview, not a commit-preview → 409
+  `precondition_failure` per the typed schema in §Error Schema, with
+  `condition: "preview_id_wrong_class"` and
+  `condition_details: { preview_id, received_kind: "workbench_dry_run", required_kind: "workbench_commit_preview" }`.
+  The contract rejects this on principle: the operator must have seen
+  the substrate-faithful commit preview before committing. (HTTP 409
+  matches the precondition-failure convention used elsewhere in the
+  contract for wrong-state preview misuse, replacing the prior 400
+  which conflated this with input-validation failures.)
 - Batch state is not `previewed` (commit-preview must immediately
   precede commit) → 409 `precondition_failure`.
 - Catastrophic newtcon-server failure mid-sequence → 502 with
-  `kind: "internal"` and `details.partial_results.per_target[]`
-  carrying the per-Node results completed before the failure. The
-  batch state is left at `committed` with the partial results; the
-  operator decides recovery via revert.
+  `kind: "internal"` per the typed schema in §Error Schema.
+  `details.partial_results` carries the per-Node results completed
+  before the failure (shape matches this endpoint's success-response
+  `per_target[]`). The batch state is left at `committed` with the
+  partial results; the operator decides recovery via revert. The
+  `details.correlation_id` is the handle for the ops ticket.
 
 ### `POST /api/workbench/{batch_id}/revert/preview`
 
@@ -2187,7 +2825,8 @@ Field rules:
   to non-committed intents → 400 `validation_failure` with
   `details.invalid_handles[]`.
 - newtron-server unreachable for any target Node → 503
-  `newtron_unavailable` with `details.unreachable_nodes[]`.
+  `newtron_unavailable` per the typed schema in §Error Schema.
+  `details.affected_nodes[]` lists the unreachable Nodes.
 
 ### `POST /api/workbench/{batch_id}/revert`
 
@@ -2778,9 +3417,11 @@ Field rules:
     intent record no longer exists on the device (reversed by a
     later operation). The operator is told which.
 - newtron-server unreachable → 503 with
-  `kind: "newtron_unavailable"` and `details.last_known.record`
-  carrying the most recent cached record snapshot if newtcon-server
-  has one from a prior fetch within the request-cache window.
+  `kind: "newtron_unavailable"` per the typed schema in §Error
+  Schema. `details.last_known.kind` is `"intent_record"` and
+  `details.last_known.payload` carries the most recent cached record
+  snapshot if newtcon-server has one from a prior fetch within the
+  request-cache window (`kind: "none"` otherwise).
 
 ### `GET /api/projection/nodes/{node}`
 
@@ -3462,8 +4103,10 @@ Field rules:
   {"operation_unknown_or_expired", "operation_evicted"}` (same
   semantics as the operations endpoint).
 - newtron-server unreachable while verify is in-flight → 503 with
-  `kind: "newtron_unavailable"` and `details.last_known.assertion`
-  carrying the most recent assertion snapshot newtcon-server has.
+  `kind: "newtron_unavailable"` per the typed schema in §Error Schema.
+  `details.last_known.kind` is `"verify_assertion"` and
+  `details.last_known.payload` carries the most recent assertion
+  snapshot newtcon-server has (`kind: "none"` if none captured yet).
 
 ## Endpoints — Rehearsal (sandbox surface)
 
@@ -3899,10 +4542,11 @@ single-step**. Multi-step empty-fork rehearsal still needs newtron#7.
   endpoint (gap newtron#7) AND the requested mode requires it
   (`mode: "drill"` always; `mode: "fork_live"` and `mode: "fork_empty"`
   when the session would be multi-step) → 501 with
-  `kind: "precondition_failure"` and
-  `details.reason: "newtron_capability_missing"`,
-  `details.gap_issue: "https://github.com/aldrin-isaac/newtron/issues/7"`.
-  Single-step rehearsal (see Quickrun below) is unaffected.
+  `kind: "precondition_failure"` per the typed schema in §Error
+  Schema, with `condition: "newtron_capability_missing"` and
+  `condition_details.gap_issue_url:
+  "https://github.com/aldrin-isaac/newtron/issues/7"`. Single-step
+  rehearsal (see Quickrun below) is unaffected.
 
 ### `GET /api/rehearsal/sessions`
 
