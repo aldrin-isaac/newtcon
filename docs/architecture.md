@@ -93,8 +93,18 @@ on the boundary, the boundary is structural.
 These are not in newtcon and will not be added. If a contributor (human or
 agent) proposes them, the PR is rejected on principle:
 
-- **Topology editor.** newtcon does not draw or edit topology. Topology is
-  defined in newtron's spec files and is consumed by newtcon read-only.
+- **Drag-and-drop blueprint editor.** newtcon does not present a
+  free-form canvas where operators design networks by dragging
+  devices and drawing links. That is the Apstra paradigm newtcon is
+  built against. Topology is defined in newtron's spec files;
+  structural changes route through spec authoring (itself
+  future-considered, not in current scope — see
+  [`roadmap.md`](roadmap.md)). **Read-mostly topology
+  visualization** (a tier-centric concentric-ring view of the
+  topology spec, with operator navigation drilling into existing
+  operating surfaces) is *future-considered*, not out of scope —
+  see the roadmap entry. The non-goal here is the editor paradigm,
+  not the visualization itself.
 
 - **Per-device form configurator.** newtcon does not present a "click on
   switch, fill out CONFIG_DB form, submit" workflow. That is the Apstra
