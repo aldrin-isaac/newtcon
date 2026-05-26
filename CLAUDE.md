@@ -212,11 +212,36 @@ Apstra and similar tools are device-first. newtcon is not.
 ### Pipeline-Aware UX
 
 Every operation the UI initiates traces through newtron's pipeline
-(Intent → Replay → Render → Deliver → Verify). The UI surfaces the stage of
-each in-flight operation, not just a binary success/failure.
+(Intent → Replay → Render → [Deliver]) and, when the operation delivered to
+a device, the post-deliver Verify assertion. The UI surfaces both the
+stage of each in-flight pipeline AND the state of the verify assertion —
+not a binary success/failure, and not a single five-stage sequence.
 
-A "verify" stage that hasn't completed is shown as in-progress, not as success.
-A "deliver" stage that succeeded with verify pending is not "done."
+Two concerns are deliberately not collapsed:
+
+- **Pipeline stages.** Per
+  `../newtron/docs/newtron/unified-pipeline-architecture.md` §2, the
+  pipeline is `Intent → Replay → Render → [Deliver]` — four stages, with
+  `Deliver` conditional on whether the caller commits the ChangeSet. The
+  build stages produce expected state.
+- **Verify.** Per the same document §7 and `DESIGN_PRINCIPLES_NEWTRON.md`
+  §14, `cs.Verify(n)` is a **Device I/O operation**: it re-reads CONFIG_DB
+  and asserts that what was delivered actually landed. Verify is a
+  post-deliver assertion against the device, not a sibling of the build
+  stages. `API_CONTRACT.md` §Operations reflects that split: a
+  `pipeline` object with four stages and a separate top-level `verify`
+  object typed `device_io_assertion`.
+
+Two binding consequences for the UI:
+
+- A `verify` whose state is not yet `complete` is shown as in-progress,
+  not as success. An apply whose `deliver` stage completed but whose
+  `verify.state` is still `in_progress` is not "done" — the operator sees
+  both the pipeline trace and the verify state, and both must be terminal
+  before the operation reads as success.
+- A `deliver` stage of `skipped` is correct and expected for any
+  operation that did not commit a ChangeSet (e.g., preview-only or
+  Replay-only flows). Skipped is not failure; it is rendered as such.
 
 ### Preview Before Commit, Always
 
