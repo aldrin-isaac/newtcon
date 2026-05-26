@@ -1536,12 +1536,17 @@ the batch's intents replayed on top), per-Node, per-table.
 
 **Why `pending_newtron_gap`:** newtron's batch-execute endpoint with
 `execute: false` returns a `WriteResult` (preview text + change count)
-and not a typed projection-before/after pair. The diff endpoint
-synthesizes one from two calls (current projection read + staged
-sandbox replay) until newtron exposes a single projection-diff
-endpoint. The implementer files newtron#4 when this slice starts; the
-field is on the contract today so that the shape does not change when
-the gap is filled.
+and not a typed projection-before/after pair. The raw CONFIG_DB read
+endpoints return device-actual entries, not the typed
+projection-from-intent-replay; the composite endpoint returns counts
+and an opaque handle, not the typed composite contents. There is no
+composition of existing newtron HTTP endpoints that yields the typed
+per-table-per-key-per-field before/after projection diff this surface
+needs. The gap was filed by the newtcon Architect at the time this
+contract was written, per `CLAUDE.md` §Gap-Handling Protocol; see
+[newtron#4](https://github.com/aldrin-isaac/newtron/issues/4) for the
+proposed HTTP shape (which matches the `expected_shape` block above).
+The implementer slice for `/diff` is blocked until newtron#4 lands.
 
 **Errors:**
 - Unknown `batch_id` → 404 `precondition_failure`.
