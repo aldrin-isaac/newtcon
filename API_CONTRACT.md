@@ -6061,3 +6061,1293 @@ Every endpoint in this section MUST satisfy:
    without a reversal path leave the lab device in an unknown state;
    they are rejected on §15 grounds.
 
+
+## Endpoints — Observation History
+
+The Observation History surface is **newtcon's persistent record of what
+the substrate looked like over time, and how it changed**. It is the
+contract realization of operator-philosophy invariant #9 ("Confidence
+and limits are explicit") layered on top of invariant #1 ("No black
+boxes") and invariant #3 ("The substrate is the teaching surface"):
+the operator must be able to ask "what did this device's CONFIG_DB
+look like at 14:02:11Z yesterday?", "what changed between 14:00 and
+15:00?", and "did this change come through newtron or did someone
+edit CONFIG_DB directly?" — and receive substrate-grounded answers,
+with explicit acknowledgement of the windows during which newtcon
+could not observe.
+
+Every other surface in this contract reads live substrate at query
+time. Observation History is the **only** newtcon-owned persistent
+state, and the boundary is binding per `CLAUDE.md` §No Hidden State:
+operational state (intent, projection, ChangeSet, drift detection) is
+never cached persistently; observation history is the dedicated
+exception, and is exposed honestly with `as_of` timestamps and
+`observation_gap` markers wherever polling missed a window.
+
+### Why this lives in newtcon, not newtron
+
+A change-history layer in newtron would violate three newtron principles
+the operator's #37 issue identified directly:
+
+- **§1 ("The Node — Intent and Reality in One Object")** designs newtron
+  to eliminate the parallel-representations problem by collapsing intent
+  and reality into one object. A change-history table would be a third
+  representation alongside intent and reality, reintroducing the
+  duality §1 exists to prevent.
+- **§20 ("On-Device Intent Is Sufficient for Reconstruction")** and §21
+  ("Reconstruct, Don't Record") establish that current intent records
+  plus current specs are sufficient to reconstruct expected state. §21
+  is explicit: "Completed operation history is not intent. It belongs
+  in structured logging or an external store, not in the device's
+  configuration database." A change history says newtron's own substrate
+  isn't sufficient — for newtron's mission (reconstruct expected state,
+  detect drift, reverse operations) it IS sufficient; for newtcon's
+  operator-facing mission (observation over time, including out-of-band
+  changes) it is not, and the gap belongs to newtcon, not newtron.
+- **§27 ("Single-Owner CONFIG_DB Tables")** would be violated by an
+  on-device change-history table competing with NEWTRON_INTENT for
+  who-records-what.
+
+This is binding even though newtron's `docs/newtron/api.md` §11
+documents a `GET /network/{netID}/node/{device}/history` endpoint, a
+`POST .../rollback-history` endpoint, and a per-Node `max_history`
+device setting (schema-registered at `pkg/newtron/device/sonic/schema.go`
+as a bounded integer). These are **aspirational stubs** — they are not
+registered in `pkg/newtron/api/handler.go` `buildMux()`, the Go
+implementation has no history-tracking code in `pkg/newtron/network/`,
+and the "rollback N most recent operations" pattern they imply is
+exactly the journal-and-replay pattern §21 rejects ("A journal is a
+second copy of information that already exists in a more authoritative
+form... The reconstruction approach uses current specs by definition —
+there is no stale copy to diverge"). The newtron-side gap is not a
+gap newtcon should propose to fill, because filling it on the newtron
+side would put newtron in violation of its own principles. The history
+substrate belongs to newtcon.
+
+Change history is **observation-over-time of newtron's substrate**, and
+observation is newtcon's job. newtron has **intent records**
+(NEWTRON_INTENT, surfaced via the Provenance endpoints); newtcon adds
+**observation history**, which is broader (it covers out-of-band
+changes that produce no NEWTRON_INTENT record). The two are not
+redundant; they answer different questions over the same substrate.
+
+**Historical changes made via newtcon must be maintained by
+newtcon.** When the operator drives a Composer apply, an Inbox action,
+a Workbench commit, or a Manual-Mode-Parity intent submission, newtcon-
+server IS the agent of the change. It captures the operation's
+ChangeSet at apply time (per `CLAUDE.md` §Preview Before Commit and
+the Provenance retention contract); it records the pipeline trace and
+verify assertion (per §Endpoints — Operations); it knows the operator
+identifier and the originating surface. The historical record of those
+changes is therefore newtcon's responsibility by construction — newtron
+holds the current intent records and the current device CONFIG_DB,
+but the question "what did newtcon do, when, on whose behalf, with
+what substrate effect?" is answered from newtcon's own retained
+operation history (the `operation_url` / `intent_url` /
+`changeset_url` companions surfaced on every change entry). The
+observation polling layer is what extends that record to cover
+out-of-band changes that newtcon did not initiate. The combined
+surface — newtcon-mediated changes (authoritative) plus polled
+observations (best-effort) — is what this contract section governs.
+
+### The polling layer (operational model)
+
+The Observation History surface is read-only at the HTTP boundary. The
+records it returns are produced by a **newtcon-server-side polling
+layer** that periodically reads newtron's existing endpoints and stores
+the results in newtcon's local SQLite store. The polling layer is the
+substrate of this surface; this contract describes only its outward
+shape.
+
+Polling discipline (operator-philosophy invariant #9 made operational):
+
+- **Cadence is minutes, not seconds.** Observation history is for
+  operator review and forensics, not real-time monitoring. The default
+  per-Node interval is in minutes; the surface exposes the current
+  effective interval per Node so the operator sees how often each
+  Node is being observed (no hidden cadence).
+- **Adaptive frequency.** A Node whose snapshots are stable across
+  successive polls polls less frequently; a Node whose recent
+  snapshots showed change polls more frequently. The exact algorithm
+  is an implementation concern, but the **current effective cadence
+  is visible at the contract**.
+- **`observation_gap` markers are first-class.** When polling fails
+  (newtron-server unreachable, network partition, newtcon-server
+  process restart, configured cadence skip), the window is recorded
+  as a typed `observation_gap` entry — NOT as missing data. The
+  surface is honest about "we did not know during this window";
+  operator-philosophy invariant #9 is binding.
+
+### `source` classification — `newtron_mediated` vs `out_of_band`
+
+Every observed change is classified by `source`. The classification
+is the operator's first lever for separating "the automation did
+this" from "someone bypassed the automation."
+
+- **`newtron_mediated`** — newtcon can correlate the observed change
+  to a newtcon-known operation (one of: a Composer apply, a
+  Workbench commit, an Inbox action, a Manual-Mode-Parity intent
+  submission, a Provisioning operation reported by newtron) by
+  matching the substrate writes the operation produced against the
+  diff between the prior and current observation. The
+  `operation_url` companion field is populated.
+- **`out_of_band`** — newtcon observed a substrate change for which
+  it cannot find a correlated operation. Either someone wrote
+  CONFIG_DB directly via a non-newtcon path (a different newtron
+  client, a manual redis-cli session against the device, a
+  daemon-driven write), OR an operation completed during an
+  `observation_gap` window and newtcon never captured the pre-state
+  to correlate against. The classification surfaces honestly which
+  of these two sub-cases applies via the `out_of_band_subkind`
+  field; an out-of-band change adjacent to a gap is distinguished
+  from one observed cleanly.
+
+The classification supports the **Concrete success vision** in
+`docs/operator-philosophy.md`: the operator who suspects
+device-vs-automation disagreement reads observation history to
+identify out-of-band changes, picks the failed write, and runs it
+manually against the device using their own tools. The history
+surface is the lever that makes that workflow possible.
+
+### Storage substrate (informational, not contractual)
+
+For v0, the polling layer's substrate is **SQLite** in
+`internal/history/` (per the operator's choice in newtcon#37).
+File-based, single-process, transactional, sufficient for one
+operator's scale. The choice is an implementation concern; the
+contract surface is storage-agnostic. Migration to a different store
+(timeseries DB, embedded KV) is non-contract-breaking provided the
+HTTP shapes here are preserved.
+
+### Identifiers and retention
+
+The surface mints opaque IDs:
+
+| ID | Minted by | Resolves to (internally) |
+|----|-----------|--------------------------|
+| `change_id` | The polling layer, per detected diff between two adjacent observations on one Node | `(node, from_observation_id, to_observation_id)` |
+| `observation_id` | The polling layer, per successful snapshot capture | `(node, observed_at)` |
+| `gap_id` | The polling layer, per `observation_gap` window | `(node, gap_started_at, gap_ended_at?)` |
+
+All IDs are opaque; consumers MUST pass them back unchanged. The
+addressing tuple is documentation, not a wire contract.
+
+Retention for v0 is **not pinned in this contract**. The polling
+layer retains history as long as SQLite holds it; pruning policy,
+compression, and indexing for time-series queries are out of scope
+for newtcon#37 (the operator's issue body explicitly defers these)
+and will land in a follow-up Contract PR once the v0 surface is in
+use. Endpoints below that take a `?at=` timestamp predating the
+earliest retained observation return 404 with
+`kind: "precondition_failure"` and `condition: "observation_evicted"`
+(a new bounded condition added to the §Error Schema enum below).
+
+### Additions to §Error Schema — `precondition_failure.condition` enum
+
+The Observation History surface adds four entries to the bounded
+`precondition_failure.condition` enum defined in §Error Schema
+(`details for kind: "precondition_failure"`). These are bounded; new
+conditions are a Contract PR.
+
+| `condition` | When | `condition_details` shape |
+|-------------|------|---------------------------|
+| `observation_evicted` | A timestamp or `change_id` / `observation_id` / `gap_id` was retained at some point but has been pruned per retention policy | `{ id?, requested_at?, earliest_retained_at }` |
+| `observation_gap_at_requested_time` | The snapshot endpoint was queried for a timestamp inside an `observation_gap` window AND outside the caller's `tolerance` | `{ requested_at, nearest_observation_at, gap_id, gap_url, gap_started_at, gap_ended_at? }` |
+| `change_unknown` | `change_id` was never minted by the polling layer | `{ change_id }` |
+| `gap_unknown` | `gap_id` was never minted by the polling layer | `{ gap_id }` |
+
+`condition_details.id` populates when the precondition is on an
+opaque ID (`change_id`, `observation_id`, or `gap_id`);
+`condition_details.requested_at` populates when the precondition is on
+a `?at=` timestamp; `earliest_retained_at` is always populated on
+`observation_evicted` so the operator knows the boundary of newtcon's
+memory.
+
+The `observation_gap_at_requested_time` condition is surfaced as a
+precondition failure rather than as a silent fall-back to the
+nearest-prior observation, because the operator's question ("what was
+the substrate at time T?") has a substantively different answer when T
+falls inside a gap. Returning the nearest-prior observation without
+surfacing the gap would teach the operator that newtcon has data it
+does not have — exactly the false-confidence pattern invariant #9
+rejects.
+
+### `as_of` semantics on this surface
+
+Two timestamps appear on every Observation History response and must
+not be conflated:
+
+- **`as_of`** — when newtcon-server completed the read against its
+  local SQLite store. Reflects the freshness of the response
+  envelope, not the freshness of the underlying observation.
+- **`observed_at`** — when the polling layer captured the
+  observation from newtron. The substrate the response describes
+  was true at `observed_at`, not at `as_of`. The two are typically
+  minutes apart.
+
+A response whose `as_of` is recent but whose nearest `observed_at`
+is older than the configured cadence interval surfaces the gap via
+adjacent `observation_gap` records, not by hiding the staleness.
+Operator-philosophy invariant #9 is binding.
+
+### Companion fields and shared types
+
+This surface re-uses substrate vocabulary defined elsewhere in the
+contract, never re-coining it:
+
+- **`SubstrateLocator`** — the same `{ kind, network, node, table,
+  key, field, intent_key }` shape used by the §Rehearsal and §Error
+  Schema sections.
+- **`CliCommand`** — the same `{ tool, command, rationale,
+  rationale_ref }` shape used by the §Rehearsal `forward_cli` /
+  `reverse_cli`. The `tool` enum is the same two values
+  (`ssh_redis_cli`, `ssh_vendor_cli`); the `undo_command_sequence`
+  returned by this surface is a list of `CliCommand` entries.
+- **`DriftEntry`** — the canonical `{ table, key, type, expected,
+  actual }` shape used by `kind: "drift"` Inbox cards and by
+  `drift_refusal` errors. Diffs between observed snapshots use
+  `DriftEntry[]`, not a parallel diff type (per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §46 rule 3, "one typed diff
+  vocabulary").
+- **`rationale_ref`** — the typed `{ substrate, principle }` object
+  used everywhere else; string-only `rationale_ref` is rejected at
+  contract level.
+- **`manual_equivalent`** — the typed `{ newtron_cli, newtron_http
+  }` object with `newtron_http.status` bounded by `available |
+  pending_newtron_gap | partial_match | not_applicable`.
+
+### `GET /api/history/nodes/{node}`
+
+List observed changes on one Node, ordered most-recent-first.
+Idempotent; safe to poll. No newtron-side state mutated; no
+newtcon-server state mutated.
+
+**Path parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `node` | The Node name (e.g., `switch1`). Unknown Node → 404 `precondition_failure` with `condition: "node_unknown"`. |
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `from` | RFC 3339 timestamp | unset | Lower bound (inclusive) on `observed_at`. |
+| `to` | RFC 3339 timestamp | unset | Upper bound (inclusive) on `observed_at`. |
+| `source` | string (repeatable) | unset (all sources) | Filter by `source` classification. One of `newtron_mediated`, `out_of_band`. Unknown values → 400 `validation_failure`. |
+| `substrate_kind` | string (repeatable) | unset (all substrate kinds) | Filter to changes touching specific substrate kinds. One of `intent_record`, `configdb_key`, `projection_row`. Unknown values → 400 `validation_failure`. |
+| `table` | string (repeatable) | unset | Filter to changes touching specific CONFIG_DB tables (e.g., `BGP_NEIGHBOR`). Composes with `substrate_kind`. |
+| `include_observation_gaps` | bool | `true` | When `true`, `observation_gap` markers are interleaved with `change` entries in the timeline. When `false`, only `change` entries are returned. |
+| `cursor` | string (opaque) | unset | Pagination cursor returned in `next_cursor` of a prior response. |
+| `limit` | int | `100` | Page size (max 500). |
+
+A `from > to` request → 400 `validation_failure` with
+`rejections[*].reason == "out_of_range"`.
+
+**Response 200:**
+
+```json
+{
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "window": {
+    "from": "2026-05-26T13:00:00Z",
+    "to": "2026-05-26T14:15:32Z"
+  },
+  "poller_state": {
+    "current_interval": "PT3M",
+    "current_interval_rationale": "stable: last 6 snapshots produced no diff",
+    "last_observed_at": "2026-05-26T14:13:00Z",
+    "next_scheduled_at": "2026-05-26T14:16:00Z",
+    "active_gap": null
+  },
+  "entries": [
+    {
+      "entry_kind": "change",
+      "change_id": "<opaque>",
+      "change_url": "/api/history/changes/<opaque>",
+      "observed_at": "2026-05-26T14:13:00Z",
+      "from_observation_id": "<opaque>",
+      "to_observation_id": "<opaque>",
+      "from_observed_at": "2026-05-26T14:10:00Z",
+      "to_observed_at": "2026-05-26T14:13:00Z",
+      "source": "newtron_mediated",
+      "source_rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object",
+        "principle": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants"
+      },
+      "operator": "operator:aldrin",
+      "operation_url": "/api/operations/<opaque>",
+      "operation_verb": "ApplyService",
+      "intent_url": "/api/intents/<opaque>",
+      "changeset_url": "/api/changesets/<opaque>",
+      "out_of_band_subkind": null,
+      "diff_summary": {
+        "substrate_kinds_touched": ["configdb_key", "intent_record"],
+        "tables_touched": ["BGP_NEIGHBOR", "ROUTE_MAP", "NEWTRON_INTENT"],
+        "entry_count_total": 14,
+        "by_type": { "added": 12, "removed": 0, "modified": 2 }
+      }
+    },
+    {
+      "entry_kind": "observation_gap",
+      "gap_id": "<opaque>",
+      "gap_url": "/api/history/nodes/switch1/observation_gaps/<opaque>",
+      "gap_started_at": "2026-05-26T13:42:00Z",
+      "gap_ended_at": "2026-05-26T13:54:00Z",
+      "duration": "PT12M",
+      "cause": {
+        "kind": "newtron_unreachable | newtcon_server_restart | scheduled_skip | poller_error",
+        "underlying_error": "connection_refused | dns_failure | tls_handshake_failure | timeout | http_5xx | process_lifecycle | unknown",
+        "underlying_error_message": "dial tcp 127.0.0.1:8080: connect: connection refused",
+        "missed_poll_count": 4,
+        "expected_interval_during_gap": "PT3M"
+      },
+      "diff_across_gap": {
+        "any_change_observed_at_resume": true,
+        "diff_summary": {
+          "substrate_kinds_touched": ["configdb_key"],
+          "tables_touched": ["VLAN"],
+          "entry_count_total": 1,
+          "by_type": { "added": 0, "removed": 0, "modified": 1 }
+        },
+        "rationale": "the next successful observation at 13:54:00Z differed from the last pre-gap observation at 13:42:00Z; the change is recorded as a separate change entry adjacent to this gap, with source classification influenced by gap-adjacency",
+        "adjacent_change_id": "<opaque>",
+        "adjacent_change_url": "/api/history/changes/<opaque>"
+      },
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "totals_in_window": {
+    "change_count": 17,
+    "by_source": {
+      "newtron_mediated": 15,
+      "out_of_band": 2
+    },
+    "observation_gap_count": 1,
+    "observed_at_minimum": "2026-05-26T13:02:00Z",
+    "observed_at_maximum": "2026-05-26T14:13:00Z"
+  },
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "not_applicable",
+      "rationale": "Observation history is newtcon-owned by design (see §Endpoints — Observation History, 'Why this lives in newtcon, not newtron'). No newtron HTTP endpoint exists or will exist; an operator reproducing this view manually polls newtron's existing reads (the bulk-CONFIG_DB and bulk-intent reads, pending newtron#17 and newtron#18) at the same cadence newtcon does and computes the diffs themselves. The operator's-tools alternative is to query newtcon's SQLite store directly: `sqlite3 <newtcon-state>/history.db 'SELECT ...'`."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`entries[]`** interleaves `entry_kind: "change"` and
+  `entry_kind: "observation_gap"` records ordered by their
+  representative timestamp (`observed_at` for changes,
+  `gap_started_at` for gaps), most-recent-first. The two kinds
+  appear in one timeline because the operator's question is "what
+  did newtcon observe (or not observe) over time?" — collapsing
+  gaps into a separate stream would teach the operator to read
+  history without limits. Per invariant #9, the gap markers are
+  shown in-line.
+- **`entry_kind: "change"`** is the per-detected-diff record. The
+  `from_observation_id` / `to_observation_id` pair identifies the
+  two snapshots whose diff produced this change; consumers walk
+  from a change entry to its endpoint-snapshots via the snapshot
+  endpoint below.
+- **`source`** is the bounded classification described above.
+  `source_rationale_ref` points at the substrate principle that
+  governs the classification (§1) and the operator-philosophy
+  section that explains why the classification is binding (the
+  Concrete success vision).
+- **`operator`** is populated for `newtron_mediated` changes where
+  newtcon-server's operation history captured an operator
+  identifier (e.g., `operator:aldrin`, or `newtcon-server` when the
+  change was synthesized by an automated newtcon flow). For
+  `out_of_band` changes, `operator` is `null` (newtcon does not
+  know — and per invariant #9, does not pretend to know).
+- **`operation_url` / `intent_url` / `changeset_url`** are
+  populated for `newtron_mediated` changes whose correlated
+  newtcon-server operation is still retained (per the operations
+  retention contract; see newtcon#18). All three are `null` for
+  `out_of_band` changes. For `newtron_mediated` changes whose
+  operation has been evicted from operations retention, all three
+  are `null` and `out_of_band_subkind` is `null` (the source is
+  still `newtron_mediated` — the substrate's classification is
+  durable even when the operation trace is not).
+- **`out_of_band_subkind`** is populated only on `source:
+  "out_of_band"` entries. Bounded:
+  - `unmediated_observed` — the change was observed between two
+    successful adjacent snapshots; newtcon definitely missed no
+    polls. The change happened by a path outside newtcon's
+    knowledge (different newtron client, direct redis-cli, daemon
+    write). Confidence: high.
+  - `gap_adjacent` — the change was observed at the first
+    successful snapshot after an `observation_gap`. The change
+    MIGHT have been newtron-mediated by an operation newtcon
+    missed seeing during the gap; newtcon cannot distinguish.
+    Confidence: low; the operator interpretation is the
+    authoritative one.
+  The discriminator is binding: a UI that renders all
+  `out_of_band` entries identically would hide the
+  gap-adjacent-vs-clean distinction the operator needs to
+  interpret the substrate. Invariant #9 made literal at the per-
+  entry level.
+- **`diff_summary`** is counts-only at this level; the full
+  `DriftEntry[]` diff is reached via
+  [`GET /api/history/changes/{change_id}`](#get-apihistorychangeschange_id).
+  Per invariant #1 ("no black boxes"), counts and summaries do
+  not substitute for the substrate; this endpoint surfaces the
+  counts for timeline rendering, and the substrate is one click
+  away via `change_url`.
+- **`poller_state`** is REQUIRED and substantive. The operator
+  must see how often this Node is currently being observed and
+  why (`current_interval_rationale`). `active_gap` is non-null
+  when there is currently an open `observation_gap` for this Node
+  (the last poll failed and the gap is ongoing); the operator
+  sees that newtcon does not currently know the Node's substrate.
+  Per invariant #9, the operator never has to ask "is the data
+  up to date?" — the polling state is on every list response.
+- **`window`** echoes the requested `from` / `to` (or the
+  defaulted bounds when unset — the earliest retained observation
+  and `as_of` respectively). The operator sees the exact window
+  the response covered.
+- **`totals_in_window`** is computed over the full filtered
+  window, not over the returned page. Operators who paginate
+  through a multi-page result see the same totals on every page,
+  per `CLAUDE.md` §No Hidden State (the count is a property of
+  the substrate, not of pagination).
+
+**Errors:**
+
+- Unknown `node` → 404 `precondition_failure` with `condition:
+  "node_unknown"`.
+- `from > to` → 400 `validation_failure` with
+  `rejections[*].reason: "out_of_range"`.
+- `from` predating the earliest retained observation → 200 (the
+  response covers the retained portion of the requested window;
+  `window.from` is clamped to `earliest_retained_at` and
+  `totals_in_window` reflects the clamped window). NOT an error —
+  retention boundary is a normal condition. The frontend renders
+  a "no observation before earliest_retained_at" marker.
+- `source` or `substrate_kind` filter with unknown enum value →
+  400 `validation_failure` per the typed Error Schema.
+- newtron-server unreachable → 200 with the response served from
+  newtcon's SQLite store (the polling layer's role is to capture
+  state when newtron IS reachable; the read surface does not
+  depend on newtron at request time). `poller_state.active_gap`
+  reflects the current connectivity reality.
+
+### `GET /api/history/nodes/{node}/snapshot`
+
+Return the observed snapshot for one Node nearest to a requested
+timestamp. Idempotent; safe to poll.
+
+**Path parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `node` | The Node name. Unknown Node → 404 `precondition_failure` with `condition: "node_unknown"`. |
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `at` | RFC 3339 timestamp | REQUIRED | Target timestamp. Returns the nearest-prior observation. |
+| `tolerance` | duration | `null` (unbounded) | Maximum delta between `at` and the returned observation's `observed_at`. If the nearest-prior observation is older than `at - tolerance`, return 404 `precondition_failure` with `condition: "observation_gap_at_requested_time"`. |
+| `include_configdb` | bool | `true` | Include the captured raw CONFIG_DB snapshot in the response. When `false`, only the addressing + intent-records + projection are returned. |
+| `include_intents` | bool | `true` | Include the captured NEWTRON_INTENT records. |
+| `include_projection` | bool | `true` | Include the captured projection. |
+
+A timestamp of "now" reads the most-recent observation.
+
+**Response 200:**
+
+```json
+{
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "requested_at": "2026-05-26T14:00:00Z",
+  "observation": {
+    "observation_id": "<opaque>",
+    "observed_at": "2026-05-26T13:58:00Z",
+    "observation_age_at_request": "PT2M",
+    "preceded_by_gap_id": null,
+    "configdb": {
+      "VLAN": {
+        "Vlan100": { "vlanid": "100" }
+      },
+      "BGP_NEIGHBOR": {
+        "default|10.0.0.1": { "asn": "65001", "local_addr": "10.0.0.0" }
+      }
+    },
+    "intents": [
+      {
+        "resource_key": "interface|Ethernet0",
+        "fields": { "op": "apply-service", "name": "transit", "state": "actuated" }
+      }
+    ],
+    "projection": {
+      "tables": [
+        {
+          "table": "BGP_NEIGHBOR",
+          "entries": [
+            {
+              "key": "default|10.0.0.1",
+              "fields": { "asn": "65001", "local_addr": "10.0.0.0" },
+              "owning_intent_resource_key": "interface|Ethernet0"
+            }
+          ]
+        }
+      ],
+      "intent_count": 47
+    },
+    "drift_at_observation": {
+      "drift_entries": [],
+      "summary": {
+        "entry_count": 0,
+        "by_type": { "missing": 0, "extra": 0, "modified": 0 }
+      },
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#drift-guard-actuated-mode",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      }
+    },
+    "source_reads": [
+      {
+        "newtron_endpoint": "GET /network/default/node/switch1/configdb",
+        "newtron_endpoint_status": "pending_newtron_gap",
+        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/17",
+        "captured_at": "2026-05-26T13:58:00Z"
+      },
+      {
+        "newtron_endpoint": "GET /network/default/node/switch1/intents",
+        "newtron_endpoint_status": "pending_newtron_gap",
+        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/18",
+        "captured_at": "2026-05-26T13:58:00Z"
+      },
+      {
+        "newtron_endpoint": "GET /network/default/node/switch1/projection",
+        "newtron_endpoint_status": "pending_newtron_gap",
+        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/5",
+        "captured_at": "2026-05-26T13:58:00Z"
+      }
+    ]
+  },
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "pending_newtron_gap",
+      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/17",
+      "expected_shape": {
+        "method": "GET",
+        "path": "/network/default/node/switch1/configdb",
+        "query": { "table": "<repeatable>", "owned_only": "true" }
+      }
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`observation.observation_age_at_request`** is the duration
+  between `requested_at` and `observed_at`. The operator sees how
+  closely newtcon's nearest snapshot matched the requested
+  timestamp; per invariant #9, the operator never has to compute
+  staleness themselves.
+- **`observation.preceded_by_gap_id`** is non-null when this
+  observation is the first successful snapshot after an
+  `observation_gap`. The operator inspecting a snapshot
+  immediately post-gap sees the gap reference inline. The gap's
+  full detail is reached via `gap_url` on the
+  `observation_gap` entry in the timeline endpoint.
+- **`observation.configdb`** is the raw `RawConfigDB` shape
+  documented in newtron#17 — `table → key → field → value`. Same
+  shape returned by the proposed newtron endpoint. Per §46, the
+  wire shape mirrors the substrate.
+- **`observation.intents[*]`** carries the raw NEWTRON_INTENT
+  record fields per newtron#18.
+- **`observation.projection`** is the projection captured at
+  observation time per newtron#5. The shape is the same as the
+  current `GET /api/projection/nodes/{node}` response under the
+  `tables` key.
+- **`observation.drift_at_observation`** is the diff between
+  `configdb` and `projection` at observation time, captured by
+  the polling layer so the operator sees what newtron's drift
+  detection would have reported at that moment. NOT computed at
+  request time — that would conflate "what newtron's drift
+  detection said then" with "what newtron's drift detection says
+  now."
+- **`source_reads[]`** documents which newtron endpoint produced
+  each portion of the observation. Per `CLAUDE.md` §No Hidden
+  State, observation history is honest about its inputs. Each
+  read carries the same `newtron_endpoint_status` discriminator
+  used elsewhere (`available | pending_newtron_gap |
+  partial_match | not_applicable`) so the operator knows which
+  newtron capability is currently exercised.
+
+**Errors:**
+
+- Unknown `node` → 404 `precondition_failure` with `condition:
+  "node_unknown"`.
+- Missing `at` → 400 `validation_failure` with
+  `rejections[*].reason: "missing_required"`.
+- `at` predating the earliest retained observation → 404
+  `precondition_failure` with `condition: "observation_evicted"`
+  and `condition_details.earliest_retained_at`.
+- `at` inside an `observation_gap` window AND beyond `tolerance`
+  → 404 `precondition_failure` with `condition:
+  "observation_gap_at_requested_time"`.
+- `at` after the most recent observation (e.g., querying for a
+  time in the future) → 200 returning the most recent
+  observation with `observation_age_at_request` negative; NOT an
+  error. The operator who queries "now" sees the latest captured
+  snapshot.
+
+### `GET /api/history/nodes/{node}/diff`
+
+Return the diff between any two observed snapshots on one Node.
+Idempotent; safe to poll.
+
+**Path parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `node` | The Node name. Unknown Node → 404. |
+
+**Query parameters (exactly one of the two addressing pairings):**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `from` | RFC 3339 timestamp | Lower bound; the diff's "before" snapshot is the nearest-prior observation. |
+| `to` | RFC 3339 timestamp | Upper bound; the diff's "after" snapshot is the nearest-prior observation. |
+| `from_observation_id` | string (opaque) | Alternative addressing: name the "before" snapshot directly. |
+| `to_observation_id` | string (opaque) | Alternative addressing: name the "after" snapshot directly. |
+
+Mixing the two addressing modes in one request → 400
+`validation_failure`.
+
+Additional query parameters:
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `substrate_kind` | string (repeatable) | unset (all kinds) | Restrict the diff to one or more substrate kinds (`intent_record`, `configdb_key`, `projection_row`). |
+| `table` | string (repeatable) | unset (all tables) | Restrict CONFIG_DB-key diffs to specific tables. |
+
+**Response 200:**
+
+```json
+{
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "from": {
+    "observation_id": "<opaque>",
+    "observed_at": "2026-05-26T13:00:00Z",
+    "snapshot_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T13:00:00Z"
+  },
+  "to": {
+    "observation_id": "<opaque>",
+    "observed_at": "2026-05-26T14:13:00Z",
+    "snapshot_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T14:13:00Z"
+  },
+  "gaps_in_window": [
+    {
+      "gap_id": "<opaque>",
+      "gap_url": "/api/history/nodes/switch1/observation_gaps/<opaque>",
+      "gap_started_at": "2026-05-26T13:42:00Z",
+      "gap_ended_at": "2026-05-26T13:54:00Z",
+      "duration": "PT12M"
+    }
+  ],
+  "changes_in_window": [
+    {
+      "change_id": "<opaque>",
+      "change_url": "/api/history/changes/<opaque>",
+      "observed_at": "2026-05-26T14:13:00Z",
+      "source": "newtron_mediated",
+      "operation_url": "/api/operations/<opaque>"
+    }
+  ],
+  "configdb_diff": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "key": "default|10.1.0.1",
+      "type": "missing | extra | modified",
+      "expected": { "asn": "65002", "local_addr": "10.1.0.0" },
+      "actual": { "asn": "65003", "local_addr": "10.1.0.0" }
+    }
+  ],
+  "intent_diff": [
+    {
+      "resource_key": "interface|Ethernet0",
+      "type": "added | removed | modified",
+      "from_fields": null,
+      "to_fields": { "op": "apply-service", "name": "transit", "state": "actuated" }
+    }
+  ],
+  "projection_diff": [
+    {
+      "table": "ROUTE_MAP",
+      "key": "TRANSIT_IN_A1B2C3D4",
+      "type": "missing | extra | modified",
+      "expected": null,
+      "actual": { "match_prefix_list": "TRANSIT_PFX_C9E1B7A4" }
+    }
+  ],
+  "summary": {
+    "configdb_diff_count": 4,
+    "intent_diff_count": 2,
+    "projection_diff_count": 3,
+    "tables_touched": ["BGP_NEIGHBOR", "ROUTE_MAP", "NEWTRON_INTENT"],
+    "by_source_in_window": {
+      "newtron_mediated": 1,
+      "out_of_band": 0
+    }
+  },
+  "honesty": {
+    "spans_observation_gap": true,
+    "spans_observation_gap_rationale": "the diff window contains a 12-minute observation_gap during which newtcon did not poll; changes that occurred entirely within the gap are NOT recorded as discrete change_id entries and contribute to the diff only insofar as their effects were observed at the first successful post-gap snapshot. The operator interpreting this diff must account for that limit.",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+      "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`configdb_diff`, `intent_diff`, `projection_diff`** are
+  computed at request time from the two captured snapshots
+  identified in `from` and `to`. Per `DESIGN_PRINCIPLES_NEWTRON.md`
+  §46 rule 3 ("one typed diff vocabulary"), `configdb_diff` and
+  `projection_diff` use the `DriftEntry` shape (`table`, `key`,
+  `type`, `expected`, `actual`). `intent_diff` uses an analogous
+  per-intent shape since intent records are not table+key
+  substrate at newtron's vocabulary; the shape is
+  `{ resource_key, type, from_fields, to_fields }`. The
+  `from_fields` / `to_fields` are the raw NEWTRON_INTENT hashes
+  before/after.
+- **`gaps_in_window[]`** lists every `observation_gap` whose
+  window overlaps `[from.observed_at, to.observed_at]`. The
+  operator sees explicitly which gaps the diff straddles before
+  interpreting it; per invariant #9, the diff is presented with
+  its limits inline.
+- **`changes_in_window[]`** lists the discrete change records
+  that fall inside the diff's window, ordered by
+  `observed_at`. Each change is one observed transition; the
+  aggregate diff between `from` and `to` is the composition of
+  these changes. The operator who needs the per-change view
+  follows `change_url`.
+- **`honesty.spans_observation_gap`** is `true` when any entry
+  in `gaps_in_window` exists. The `rationale` field is REQUIRED
+  when `spans_observation_gap == true` and explains the limit
+  to the operator in domain terms; an empty rationale violates
+  invariant #9.
+
+**Errors:**
+
+- Unknown `node` → 404 `precondition_failure` with `condition:
+  "node_unknown"`.
+- Mixed `from` / `to` and `from_observation_id` /
+  `to_observation_id` → 400 `validation_failure`.
+- Either timestamp or `observation_id` predating earliest
+  retention → 404 `precondition_failure` with `condition:
+  "observation_evicted"`.
+- `from > to` (or `from_observation_id` corresponding to a
+  later observation than `to_observation_id`) → 400
+  `validation_failure` with `rejections[*].reason:
+  "out_of_range"`.
+
+### `GET /api/history/changes/{change_id}`
+
+Return the full substrate-level detail for one observed change,
+including the pre- and post-state substrate, the derived undo
+command sequence, and the source classification rationale.
+
+Idempotent; safe to poll. No state mutated.
+
+**Path parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `change_id` | Opaque ID minted by the polling layer. Unknown → 404 `precondition_failure` with `condition: "change_unknown"`. Evicted → 404 `precondition_failure` with `condition: "observation_evicted"`. |
+
+**Response 200:**
+
+```json
+{
+  "change_id": "<echoed>",
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "observed_at": "2026-05-26T14:13:00Z",
+  "from_observation_id": "<opaque>",
+  "from_observation_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T14:10:00Z",
+  "to_observation_id": "<opaque>",
+  "to_observation_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T14:13:00Z",
+  "from_observed_at": "2026-05-26T14:10:00Z",
+  "to_observed_at": "2026-05-26T14:13:00Z",
+  "source": "newtron_mediated",
+  "source_classification": {
+    "source": "newtron_mediated",
+    "correlation": {
+      "operation_id": "<opaque>",
+      "operation_url": "/api/operations/<opaque>",
+      "operation_verb": "ApplyService",
+      "operation_completed_at": "2026-05-26T14:12:50Z",
+      "match_method": "changeset_writes_match_observed_diff",
+      "match_confidence": "high"
+    },
+    "rationale": "the operation's captured ChangeSet writes exactly match the observed substrate diff; no out-of-band writes were detected between the two snapshots",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+      "principle": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants"
+    }
+  },
+  "out_of_band_subkind": null,
+  "operator": "operator:aldrin",
+  "intent_url": "/api/intents/<opaque>",
+  "changeset_url": "/api/changesets/<opaque>",
+  "substrate_before": {
+    "configdb_relevant_subset": {
+      "BGP_NEIGHBOR": {}
+    },
+    "intents_relevant_subset": [],
+    "projection_relevant_subset": {
+      "tables": []
+    }
+  },
+  "substrate_after": {
+    "configdb_relevant_subset": {
+      "BGP_NEIGHBOR": {
+        "default|10.1.0.1": { "asn": "65002", "local_addr": "10.1.0.0" }
+      }
+    },
+    "intents_relevant_subset": [
+      {
+        "resource_key": "interface|Ethernet0",
+        "fields": { "op": "apply-service", "name": "transit", "state": "actuated" }
+      }
+    ],
+    "projection_relevant_subset": {
+      "tables": [
+        {
+          "table": "BGP_NEIGHBOR",
+          "entries": [
+            {
+              "key": "default|10.1.0.1",
+              "fields": { "asn": "65002", "local_addr": "10.1.0.0" },
+              "owning_intent_resource_key": "interface|Ethernet0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "configdb_diff": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "key": "default|10.1.0.1",
+      "type": "missing",
+      "expected": null,
+      "actual": { "asn": "65002", "local_addr": "10.1.0.0" }
+    }
+  ],
+  "intent_diff": [
+    {
+      "resource_key": "interface|Ethernet0",
+      "type": "added",
+      "from_fields": null,
+      "to_fields": { "op": "apply-service", "name": "transit", "state": "actuated" }
+    }
+  ],
+  "projection_diff": [
+    {
+      "table": "BGP_NEIGHBOR",
+      "key": "default|10.1.0.1",
+      "type": "missing",
+      "expected": null,
+      "actual": { "asn": "65002", "local_addr": "10.1.0.0" }
+    }
+  ],
+  "undo_command_sequence": {
+    "kind": "derived_from_pre_change_state",
+    "kind_rationale_ref": {
+      "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
+      "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+    },
+    "commands": [
+      {
+        "tool": "ssh_redis_cli",
+        "command": "redis-cli -h switch1 -p 6379 DEL 'BGP_NEIGHBOR|default|10.1.0.1'",
+        "rationale": "remove the BGP_NEIGHBOR entry added by this change",
+        "rationale_ref": {
+          "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+          "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#4-sonic-is-a-database--treat-it-as-one"
+        }
+      },
+      {
+        "tool": "ssh_redis_cli",
+        "command": "redis-cli -h switch1 -p 6379 DEL 'NEWTRON_INTENT|interface|Ethernet0'",
+        "rationale": "remove the NEWTRON_INTENT record that was written for this change so newtron's drift detection does not re-attempt the BGP_NEIGHBOR write on the next reconcile",
+        "rationale_ref": {
+          "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object",
+          "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#27-single-owner-config_db-tables"
+        }
+      }
+    ],
+    "honesty": {
+      "is_authoritative_reversal": false,
+      "is_authoritative_reversal_rationale": "the undo sequence is mechanically derived from the observed diff; it reproduces the pre-change CONFIG_DB and NEWTRON_INTENT state but does NOT re-run newtron's symmetric-reverse pipeline (per DESIGN_PRINCIPLES_NEWTRON §15, the canonical reverse is the inverse operation rendered by newtron, not a mechanical undo). The mechanical undo is correct as a substrate reversal but does not produce a newtron operation trace, an intent record reversal, or a verify assertion. Operators who need the canonical reverse stage it via Workbench using the §15 symmetric-reverse verb; the undo_command_sequence is the manual-mode operator-tools alternative when newtron is unavailable.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
+        "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+      }
+    }
+  },
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "not_applicable",
+      "rationale": "Per-change detail is computed by newtcon from its captured observations and the newtcon-server operations log; newtron has no equivalent endpoint because the change-history substrate (observation-over-time) is not newtron's substrate. The operator who reproduces this view manually polls the underlying newtron reads (newtron#17, newtron#18, newtron#5) and computes the diff themselves; or, when newtron is unavailable, runs the `undo_command_sequence` above against the device directly."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`substrate_before` / `substrate_after`** are the per-change
+  endpoint snapshots, scoped to the substrate the diff touches
+  ("relevant_subset"). The full snapshots are reachable via
+  `from_observation_url` / `to_observation_url`. Per invariant #1,
+  the operator sees the substrate, not a summary; the
+  scoping-to-relevant-subset is a rendering accommodation, not a
+  substrate elision.
+- **`source_classification.match_method`** is bounded:
+  - `newtcon_initiated_authoritative` — newtcon-server initiated
+    the operation itself (Composer apply, Inbox action, Workbench
+    commit, Manual-Mode-Parity intent submission). The
+    correlation is not inferential; newtcon was the agent of the
+    change and captured the operation_id at apply time. The
+    observed diff is validated against the captured ChangeSet
+    writes for substrate-consistency, but the correlation itself
+    is authoritative — "historical changes made via newtcon must
+    be maintained by newtcon" is operationalized at this level.
+    Confidence: high.
+  - `changeset_writes_match_observed_diff` — newtcon's captured
+    ChangeSet for the operation exactly matches the observed
+    substrate diff. Used when the operation was reported by
+    newtron (e.g., a topology-driven provisioning operation
+    surfaced via newtron's substrate, OR a newtcon-initiated
+    operation whose direct trace was lost and the diff had to be
+    correlated against the ChangeSet retention store).
+    Confidence: high.
+  - `intent_record_addition_matches` — the observed diff added a
+    NEWTRON_INTENT record whose `operation` and `resource_key`
+    match a newtcon-known operation. Used when only the intent
+    record is observable (not the full ChangeSet). Confidence:
+    high.
+  - `partial_match_with_residual` — the operation's ChangeSet
+    overlaps the observed diff but residual substrate writes
+    remain unexplained. The change is classified
+    `newtron_mediated` with confidence `medium`; the residual is
+    surfaced as a separate `out_of_band` change adjacent to this
+    one.
+  - `temporal_only` — newtcon has no captured ChangeSet for the
+    operation (operations retention evicted it) but the
+    operation's completion time falls within the diff window.
+    Confidence: low; the classification is best-effort.
+- **`source_classification.match_confidence`** is bounded:
+  `high | medium | low`. Per invariant #9 ("confidence and
+  limits are explicit"), the operator sees how strongly the
+  classification is supported, not just the verdict.
+- **`undo_command_sequence`** is a list of `CliCommand` entries
+  (same shape as §Rehearsal). The sequence is mechanically
+  derived from the observed `substrate_before` / `substrate_after`
+  pair: removed entries get DEL commands; added entries get HSET
+  commands restoring the pre-change fields; modified entries get
+  HSET commands restoring the prior field values. The sequence is
+  ordered for a clean manual replay (NEWTRON_INTENT records
+  removed last on additions, restored first on removals, so the
+  device's intent-projection coherence is maintained at each step
+  if the operator stops mid-sequence).
+- **`undo_command_sequence.honesty.is_authoritative_reversal`**
+  is `false` for every entry in v0. The honest framing — this
+  sequence is a substrate reversal, not a newtron-canonical
+  symmetric reverse — is binding per invariant #9 and per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §15. An operator who needs the
+  canonical reverse uses Workbench to stage the symmetric reverse
+  verb; the undo command sequence is the operator's-own-tools
+  fallback when newtcon or newtron is unavailable. The honest
+  framing is part of the contract, not a footnote.
+- **`out_of_band_subkind`** is populated only on
+  `source: "out_of_band"` entries; same bounded enum as the
+  list endpoint.
+
+**Errors:**
+
+- Unknown `change_id` → 404 `precondition_failure` with
+  `condition: "change_unknown"`.
+- Evicted `change_id` → 404 `precondition_failure` with
+  `condition: "observation_evicted"`.
+
+### `GET /api/history/nodes/{node}/observation_gaps`
+
+List `observation_gap` markers for one Node, ordered most-recent
+first. Idempotent; safe to poll. The endpoint exists because the
+operator must be able to ask the explicit question "what windows
+does newtcon not know about?" without inferring it from interleaved
+timeline reads (invariant #9 — confidence and limits are explicit
+as a first-class surface, not a secondary effect).
+
+**Path parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `node` | The Node name. Unknown → 404. |
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `from` | RFC 3339 timestamp | unset | Lower bound on `gap_started_at`. |
+| `to` | RFC 3339 timestamp | unset | Upper bound on `gap_started_at`. |
+| `include_active` | bool | `true` | When `true`, an open gap (one with `gap_ended_at: null`) is returned. When `false`, only closed gaps. |
+| `cursor` | string (opaque) | unset | Pagination cursor. |
+| `limit` | int | `100` | Page size (max 500). |
+
+**Response 200:**
+
+```json
+{
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "active_gap": null,
+  "gaps": [
+    {
+      "gap_id": "<opaque>",
+      "gap_url": "/api/history/nodes/switch1/observation_gaps/<opaque>",
+      "gap_started_at": "2026-05-26T13:42:00Z",
+      "gap_ended_at": "2026-05-26T13:54:00Z",
+      "duration": "PT12M",
+      "cause": {
+        "kind": "newtron_unreachable",
+        "underlying_error": "connection_refused",
+        "underlying_error_message": "dial tcp 127.0.0.1:8080: connect: connection refused",
+        "missed_poll_count": 4,
+        "expected_interval_during_gap": "PT3M"
+      },
+      "diff_across_gap": {
+        "any_change_observed_at_resume": true,
+        "adjacent_change_id": "<opaque>",
+        "adjacent_change_url": "/api/history/changes/<opaque>"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "totals_in_window": {
+    "gap_count": 1,
+    "total_duration": "PT12M",
+    "any_change_observed_at_resume_count": 1,
+    "by_cause_kind": { "newtron_unreachable": 1 }
+  }
+}
+```
+
+Field rules:
+
+- **`active_gap`** is non-null when there is currently an open
+  gap for this Node. The operator polling this endpoint sees
+  whether newtcon knows the Node's state RIGHT NOW. Per
+  invariant #9, current observability is on the response, not
+  inferred.
+- **`gaps[*].diff_across_gap.any_change_observed_at_resume`** is
+  the operator's "did anything change while we were not
+  looking?" answer. When `true`, the change is recorded as a
+  separate `change_id` adjacent to the gap with
+  `out_of_band_subkind: "gap_adjacent"` (the change MIGHT have
+  been newtron-mediated by an operation newtcon missed during
+  the gap; newtcon cannot distinguish, per the list endpoint's
+  documentation of the subkind). The classification limit is
+  surfaced honestly.
+
+**Errors:**
+
+- Unknown `node` → 404 `precondition_failure` with `condition:
+  "node_unknown"`.
+
+### `GET /api/history/nodes/{node}/observation_gaps/{gap_id}`
+
+Return the full detail for one observation gap. Same shape as
+the per-entry shape in the list endpoint, with two additions
+(`last_observation_before_gap`, `first_observation_after_gap`)
+and the REQUIRED `honesty` block.
+
+**Response 200:**
+
+```json
+{
+  "gap_id": "<echoed>",
+  "node": "switch1",
+  "network": "default",
+  "as_of": "2026-05-26T14:15:32Z",
+  "gap_started_at": "2026-05-26T13:42:00Z",
+  "gap_ended_at": "2026-05-26T13:54:00Z",
+  "duration": "PT12M",
+  "cause": {
+    "kind": "newtron_unreachable",
+    "underlying_error": "connection_refused",
+    "underlying_error_message": "dial tcp 127.0.0.1:8080: connect: connection refused",
+    "missed_poll_count": 4,
+    "expected_interval_during_gap": "PT3M"
+  },
+  "last_observation_before_gap": {
+    "observation_id": "<opaque>",
+    "observation_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T13:42:00Z",
+    "observed_at": "2026-05-26T13:42:00Z"
+  },
+  "first_observation_after_gap": {
+    "observation_id": "<opaque>",
+    "observation_url": "/api/history/nodes/switch1/snapshot?at=2026-05-26T13:54:00Z",
+    "observed_at": "2026-05-26T13:54:00Z"
+  },
+  "diff_across_gap": {
+    "any_change_observed_at_resume": true,
+    "adjacent_change_id": "<opaque>",
+    "adjacent_change_url": "/api/history/changes/<opaque>",
+    "configdb_diff_count": 1,
+    "intent_diff_count": 0,
+    "projection_diff_count": 1
+  },
+  "honesty": {
+    "what_newtcon_does_not_know": "Any changes that occurred AND were reverted entirely within the gap window are invisible to newtcon. The diff across the gap reflects only the net substrate difference between last_observation_before_gap and first_observation_after_gap; intermediate states are NOT reconstructable from observation history alone. Operators investigating an incident that occurred during the gap should consult newtron's own logs, the device's vendor logs, or any external audit log.",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+      "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`honesty.what_newtcon_does_not_know`** is REQUIRED on every
+  gap detail response. The wording is operator-facing and names
+  the limit in domain terms — invariant #9 made literal at the
+  per-gap level. A generic placeholder like "data unavailable"
+  violates the contract.
+
+**Errors:**
+
+- Unknown `node` → 404 `precondition_failure` with `condition:
+  "node_unknown"`.
+- Unknown `gap_id` → 404 `precondition_failure` with `condition:
+  "gap_unknown"`.
+
+### Out of scope for v0 (deferred Contract PRs)
+
+The following extensions are deliberately deferred. They are not
+in scope for newtcon#37 (the operator's issue body explicitly
+defers indexing strategy, compression/retention, and pruning).
+
+- **Cross-Node aggregate views.** A `GET /api/history` endpoint
+  scoped across the entire network ("show me every out-of-band
+  change anywhere in the last hour"). Deferred until a concrete
+  operator workflow demands it; v0 surfaces are per-Node because
+  the operator's mental model in newtron is per-Node
+  (`DESIGN_PRINCIPLES_NEWTRON.md` §8, §31).
+- **Per-resource (sub-Node) history.** A path like
+  `/api/history/nodes/{node}/configdb/{table}/{key}` returning
+  the history of one CONFIG_DB key over time, or
+  `/api/history/intents/{intent_id}/observed` returning observed
+  state per intent. The current per-Node endpoints with `table`
+  / `substrate_kind` filters cover the forensic use cases; the
+  dedicated per-resource path is a refinement to land once
+  operator usage shows the cross-cutting filter is
+  insufficient.
+- **Push-based change notifications.** Server-Sent Events or
+  WebSocket subscriptions for live change feeds. Out of scope
+  for v0; observation history is for forensics, not real-time
+  monitoring (per the operator's issue: "cadence is minutes,
+  not seconds"). A future surface may add live notifications,
+  but it does not replace the historical surface.
+- **Retention policy contract.** Pruning, compression, indexing
+  for time-series queries. The operator's #37 issue defers
+  these to a follow-up once v0 is in use. The current contract
+  surfaces `observation_evicted` as a precondition failure so
+  the surface remains honest about its memory boundary even
+  before the retention policy is pinned.
+- **Operator-driven snapshots.** A `POST` endpoint for the
+  operator to force a snapshot capture out-of-cadence (useful
+  before a high-risk change). Deferred; v0's polling cadence is
+  sufficient for the operator workflows newtcon#37 names. When
+  this lands, it will be a write endpoint (mutating newtcon's
+  observation store), and will require the same preview/apply
+  pairing as every other state-changing endpoint in this
+  contract per `CLAUDE.md` §Preview Before Commit, Always.
+
+### Hard contract guarantees (binding)
+
+Every endpoint in this section MUST satisfy:
+
+1. **Read-only at the HTTP boundary.** Every endpoint is `GET`.
+   The polling layer mutates newtcon's SQLite store on a
+   background schedule, never in response to a request on this
+   surface. A contributor who proposes a `POST` on this surface
+   is making the case for an operator-driven snapshot — see Out
+   of Scope above; that is a future Contract PR.
+2. **`observation_gap` markers are first-class.** No endpoint
+   silently fills a polling gap with the nearest-prior
+   observation, the nearest-next observation, or extrapolated
+   data. Gaps are returned as typed records, named explicitly
+   on every response that traverses one, and surfaced via the
+   dedicated `/observation_gaps` endpoint. Invariant #9 is
+   binding.
+3. **`source` classification is present on every change.** No
+   change record omits `source`. When the classification is
+   uncertain (gap-adjacent, partial-match), the uncertainty is
+   typed via `out_of_band_subkind` and `match_confidence`, not
+   elided.
+4. **Substrate is exposed, not summarized.** Per-change detail
+   returns the full `substrate_before` / `substrate_after`
+   relevant subsets and the full per-substrate diffs. Counts
+   appear alongside the substrate, never instead of it
+   (`DESIGN_PRINCIPLES_NEWTRON.md` §46 rule 1).
+5. **One typed diff vocabulary.** `configdb_diff` and
+   `projection_diff` use the `DriftEntry` shape; `intent_diff`
+   uses the per-intent shape defined in this section, not a
+   parallel summary type. The list-endpoint `diff_summary`
+   counts derive from these typed diffs, not from a separate
+   summary computation.
+6. **`as_of` and `observed_at` are deliberately separate.**
+   `as_of` is when newtcon-server completed the read; the
+   captured observation's `observed_at` is when the polling
+   layer captured the substrate. Conflating the two would hide
+   how stale the underlying observation is at request time.
+7. **Honest `manual_equivalent` framing.** Every endpoint
+   declares `manual_equivalent.newtron_http.status` as one of
+   the four bounded values. For observation history, the
+   typical answer is `not_applicable` (the substrate is
+   newtcon's, not newtron's) — but the rationale field names
+   the operator's-tools alternative (poll newtron's reads
+   directly, or query newtcon's SQLite store). Operator-
+   philosophy invariant #2 is binding: the operator can do this
+   without newtcon, and the surface teaches the operator-tools
+   path.
+8. **Substrate vocabulary, not coined.** This surface uses
+   `SubstrateLocator`, `CliCommand`, `DriftEntry`,
+   `rationale_ref` as defined elsewhere in this contract. No
+   parallel vocabulary is introduced; if a new term seems
+   needed, the Architecture Reviewer rejects on principle (per
+   `CLAUDE.md` §Design Principles, "Where newtron has a word for
+   something, newtcon uses that word").
