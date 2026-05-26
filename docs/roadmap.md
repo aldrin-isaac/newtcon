@@ -87,17 +87,51 @@ operators at "deploy what's already in the catalog" rather than
 "extend what the catalog can do."
 
 **What it is:** newtcon surface(s) for operators to create, edit, and
-delete:
+delete network-scoped specs that newtron owns
+(`../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` §7):
 
 - Service specs (`spec.ServiceSpec`).
 - Device profiles (`spec.DeviceProfile`).
 - Zones (`spec.ZoneSpec`).
+- **Topology** — devices (`spec.TopologyDevice`) and links
+  (`spec.TopologyLink`) in `topology.json`. Adding, removing, or
+  rewiring devices is operator work, not the Apstra-paradigm
+  canvas (`docs/architecture.md` §Non-Goals).
 
-Each edit lands through newtron-server's existing typed verbs
-(`POST /network/{netID}/create-service`, `/create-profile`,
-`/create-zone`, and their `delete-*` / `add-*` / `remove-*`
-counterparts). The persistence happens server-side via the existing
-`Network.SaveService` / `SaveProfile` / `SaveZone` methods.
+For services, profiles, and zones, edits land through newtron-server's
+**existing** typed verbs (`POST /network/{netID}/create-service`,
+`/create-profile`, `/create-zone`, and their `delete-*` / `add-*` /
+`remove-*` counterparts). Persistence happens via
+`Network.SaveService` / `SaveProfile` / `SaveZone`, which call
+`spec.Loader.SaveNetwork`.
+
+For **topology**, the underlying persistence
+(`spec.Loader.SaveTopology` — temp-file + atomic rename) **already
+exists** in newtron, but newtron-server exposes no HTTP endpoints to
+invoke it. The gaps:
+
+- `GET /network/{netID}/topology` — full typed topology read (only
+  `/topology/node` exists today, and it returns device names only).
+- Topology node CRUD: `POST /create-node`, `DELETE /node/{device}`,
+  `PUT /node/{device}` for property updates.
+- Topology link CRUD: `POST /create-link`, `DELETE /link/{from}/{to}`.
+
+These are filed as Gap-Handling Protocol issues against newtron
+(operator-driven, since the autonomous team does not touch newtron).
+Promotion of the topology portion of this entry to `scoped`
+depends on those newtron gaps landing.
+
+**Infrastructure consequence for topology edits:**
+
+Adding or removing a device has consequences outside newtron's spec
+layer. In **lab mode**, newtlab re-deploys (starts/stops VMs,
+configures bridges). In **production**, the operator performs the
+physical rack-and-cable step (or removes a switch from service).
+newtcon's spec-authoring surface does not invoke newtlab and does
+not perform physical operations — it mediates the spec edit and
+shows the operator what downstream steps are required (in lab mode:
+"run `newtlab deploy` to reflect this change"; in production: "this
+edit assumes the physical device is present").
 
 **What it is NOT:**
 
@@ -215,10 +249,14 @@ preferences, not as topology spec changes — viz preferences are
 newtcon-owned, not newtron-owned).
 
 **Editing in this surface** routes through the Spec authoring
-surface (entry 1). The topology view is a navigation and
-visualization layer; structural changes (adding a device,
-adding a link) happen through spec authoring with the topology view
-as one feedback surface among several.
+surface (entry 1, widened to include topology). The topology view is
+a navigation and visualization layer; structural changes (adding a
+device, adding a link) happen through spec authoring with the
+topology view as one feedback surface among several. The visual edit
+gesture (e.g., clicking "add a device" in the graph) opens the spec-
+authoring affordance for `topology.json`, with substrate visibility,
+schema validation, and the manual-equivalent CLI shown — never a
+free-form canvas action that bypasses the spec layer.
 
 **What it is NOT:**
 

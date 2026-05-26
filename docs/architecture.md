@@ -96,15 +96,24 @@ agent) proposes them, the PR is rejected on principle:
 - **Drag-and-drop blueprint editor.** newtcon does not present a
   free-form canvas where operators design networks by dragging
   devices and drawing links. That is the Apstra paradigm newtcon is
-  built against. Topology is defined in newtron's spec files;
-  structural changes route through spec authoring (itself
-  future-considered, not in current scope — see
-  [`roadmap.md`](roadmap.md)). **Read-mostly topology
+  built against. **The rejected paradigm is the canvas, not the
+  topology lifecycle.** Topology is a network-scoped definition
+  newtron owns (`../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` §7);
+  adding, removing, or rewiring devices via **typed verbs** (with
+  substrate visibility, schema validation, and the
+  manual-equivalent CLI shown) is legitimate operator work and a
+  future-considered surface — see the **Spec authoring** entry in
+  [`roadmap.md`](roadmap.md) (widened to include topology). Topology
+  changes have infrastructure implications: in lab mode, newtlab
+  re-deploys the affected device(s); in production, the operator
+  performs the physical rack-and-cable step. newtcon's role across
+  both modes is the same — mediate the spec edit through newtron's
+  typed verbs and surface the substrate. **Read-mostly topology
   visualization** (a tier-centric concentric-ring view of the
   topology spec, with operator navigation drilling into existing
-  operating surfaces) is *future-considered*, not out of scope —
-  see the roadmap entry. The non-goal here is the editor paradigm,
-  not the visualization itself.
+  operating surfaces) is also future-considered. The non-goal here
+  is the canvas paradigm — not the topology lifecycle and not the
+  visualization itself.
 
 - **Per-device form configurator.** newtcon does not present a "click on
   switch, fill out CONFIG_DB form, submit" workflow. That is the Apstra
