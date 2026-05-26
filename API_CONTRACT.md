@@ -175,7 +175,7 @@ Shape:
               "in": "query"
             }
           },
-          "reason": "missing_required | unknown_value | out_of_range | type_mismatch | pattern_mismatch | unknown_table | unknown_field | target_absent | target_in_use | duplicate",
+          "reason": "missing_required | unknown_value | out_of_range | type_mismatch | pattern_mismatch | unknown_table | unknown_field | target_absent | target_in_use | duplicate | newtron_owned_table_forbidden",
           "message": "peer_as 4294967296 exceeds 32-bit ASN range",
           "expected": { "type": "uint32", "max": 4294967295 },
           "actual": 4294967296,
@@ -211,6 +211,14 @@ Field rules:
   exists but can't be safely modified" (still surfaced as
   `validation_failure` to the operator because it is a refusal grounded
   in a specific input, not a system condition).
+  `newtron_owned_table_forbidden` is the substrate-grounded refusal of
+  a direct CONFIG_DB write addressed to a table newtron owns: the
+  table IS recognized (so `unknown_table` would teach the wrong
+  semantics), but direct writes are architecturally forbidden per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §1 — the operator must use intent
+  submission instead. `locator.substrate_field.table` names the
+  refused table; the rejection's `message` points the operator at
+  `/api/intents/preview`.
 - **`expected` / `actual` / `allowed`** populated per `reason`:
   `out_of_range` → `expected` carries the range, `actual` carries the
   received value; `unknown_value` → `allowed` carries the bounded enum;
@@ -3213,8 +3221,8 @@ line between them:
   tables, vendor extensions, operator-side custom tables — where
   newtron's intent abstraction does not apply by construction. The
   surface exposes these as
-  `POST /api/configdb/{node}/{table}/{key}/write/preview` +
-  `POST /api/configdb/{node}/{table}/{key}/write`, both
+  `POST /api/configdb/{network}/{node}/{table}/{key}/write/preview` +
+  `POST /api/configdb/{network}/{node}/{table}/{key}/write`, both
   `pending_newtron_gap` against newtron's HTTP API today (see
   [newtron#10](https://github.com/aldrin-isaac/newtron/issues/10)).
 
@@ -3663,10 +3671,15 @@ Field rules:
   invariant #2's "same surface" requirement, the manual path and the
   automation path produce the same provenance.
 - **`per_intent[*].pipeline`** and **`per_intent[*].verify`** mirror
-  the shape defined in [§Operations](#endpoints--operations).
-  `pipeline.deliver.target` is `"device"` (vs.
-  `"rehearsal_fork"` for Rehearsal-scoped manual submissions, see
-  the Rehearsal section).
+  the shape defined in [§Operations](#endpoints--operations) exactly:
+  four pipeline stages, plus a top-level `verify` typed
+  `device_io_assertion`. Deliver lands on the real device — there is
+  no `target` discriminator on the production shape. (The
+  Rehearsal-scoped sibling under
+  [§Endpoints — Rehearsal](#endpoints--rehearsal-sandbox-surface)
+  ADDS `pipeline.deliver.target: "rehearsal_fork"` to mark the
+  envelope's fork-vs-device boundary; production responses do not
+  carry the field.)
 - **`per_intent[*].intent_record.fields`** is the NEWTRON_INTENT
   record actually written, including the resolved params half. Per
   `DESIGN_PRINCIPLES_NEWTRON.md` §1, §22, the intent record IS the
@@ -3890,15 +3903,20 @@ Field rules:
 
 - **`table` is in newtron's owned-tables set** → 400
   `validation_failure` with `details.rejections[*].reason ==
-  "unknown_table"` (re-used here to mean "this table is owned by
-  newtron and direct writes are forbidden — use intent submission
-  instead") and `details.rationale_ref.principle ==
+  "newtron_owned_table_forbidden"`,
+  `details.rejections[*].locator.substrate_field.table` naming the
+  refused table, and `details.rationale_ref.principle ==
   "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"`.
-  The operator is told which endpoint to use instead:
+  The rejection's `message` points the operator at
   `POST /api/intents/preview` with an `operation` that targets the
   table's owning intent. Per operator-philosophy invariant #7
   ("errors carry the substrate"), the refusal is teaching, not
-  scolding — it points the operator at the correct manual path.
+  scolding — it names the substrate reason (the table is known AND
+  newtron-owned, so direct write is architecturally forbidden) and
+  points the operator at the correct manual path. `unknown_table`
+  is reserved for its substrate meaning (the named table is not
+  recognized at all); `newtron_owned_table_forbidden` is the
+  dedicated reason for this refusal.
 - **Unknown `network`, `node`, or `table` not present on the
   device** → 400 `validation_failure` with the appropriate
   `details.rejections[*].locator.substrate_field`.
@@ -4029,8 +4047,8 @@ of intent submissions, in order, that would reproduce it.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `operation_kind` | string | One of `composer_preview`, `composer_apply`, `inbox_action_preview`, `inbox_action`, `workbench_commit_preview`, `workbench_commit`, `workbench_revert_preview`, `workbench_revert`, `intent_submission_preview`, `intent_submission`. Bounded enum. |
-| `operation_id` | string (opaque) | The newtcon-side ID of the operation to decompose. For `composer_apply`/`inbox_action`/`workbench_commit`/`intent_submission`, the `operation_id` minted by the corresponding apply endpoint. For preview-class kinds, the `preview_id`. |
+| `operation_kind` | string | One of `composer_preview`, `composer_apply`, `inbox_action_preview`, `inbox_action`, `workbench_commit_preview`, `workbench_commit`, `workbench_revert_preview`, `workbench_revert`, `intent_submission_preview`, `intent_submission`, `configdb_write_preview`, `configdb_write`. Bounded enum. The two `configdb_write*` kinds decompose direct CONFIG_DB writes — typically a single step at `decomposition_level: per_configdb_keys` (the write IS its own substrate), and `equivalence_to_original.kind == "exact"` because no further decomposition exists. |
+| `operation_id` | string (opaque) | The newtcon-side ID of the operation to decompose. For `composer_apply`/`inbox_action`/`workbench_commit`/`intent_submission`/`configdb_write`, the `operation_id` minted by the corresponding apply endpoint. For preview-class kinds, the `preview_id`. |
 
 **Query parameters:**
 
