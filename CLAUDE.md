@@ -20,10 +20,15 @@ produces pilots who cannot fly when it fails is a defect; a network
 automation tool that produces operators who cannot operate the network
 manually when the automation fails has the same defect.
 
-**The litmus test:** an operator who uses newtcon for a year and then
-has to manage a SONiC fabric without it must be **more capable** than
-they were when they started. Less capable → newtcon has failed its
-purpose.
+**The litmus test:** an operator who uses newtcon for a year must be
+**more capable** than they were when they started. The strongest
+expression of "more capable" is operators who file PRs at the method
+level, not tickets at the symptom level — operators who have become
+participants in the automation, not its consumers. Less capable →
+newtcon has failed its purpose. See
+[`docs/operator-philosophy.md`](docs/operator-philosophy.md) §The
+litmus test and §Concrete success vision: operators as participants
+for the full statement.
 
 **Aesthetic discipline is co-equal with capability.** newtcon must be
 beautiful, elegant, simple at first sight, and powerful one step in.
@@ -40,7 +45,9 @@ that govern presentation):
 
 1. No black boxes — every automated action is fully inspectable.
 2. Manual-mode parity — anything automation does, the operator can do
-   by hand through the same surface.
+   by hand using their own tools (ssh + redis-cli + vendor CLI)
+   directly against the device. newtcon teaches and exposes; it does
+   not provide the manual surface.
 3. The substrate is the teaching surface — intent records, projection,
    drift state, pipeline traces are legible and navigable.
 4. Show before do — every action previews in domain terms before acting.
@@ -369,9 +376,13 @@ Node C did not run" — survives all the way to the operator.
 
 ### No Hidden State
 
-The UI displays what newtron's intent/projection actually says. Caches in the
-UI server are explicit, time-bounded, and visible (e.g., "data as of 12:04:21").
-Stale data is never rendered as current.
+No hidden state — the UI displays what newtron's intent/projection
+actually says, sourced live from newtron at query time. newtcon's only
+persistent state is observation history (snapshots, diffs, change
+records over time) — and even this state is exposed honestly, with
+timestamps and `observation_gap` markers for any window where polling
+missed updates. Stale data is never rendered as current; cached
+operational state never substitutes for a live read.
 
 ## Allowed Commands
 
