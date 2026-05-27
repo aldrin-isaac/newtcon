@@ -183,7 +183,7 @@ Shape:
               "in": "query"
             }
           },
-          "reason": "missing_required | unknown_value | out_of_range | type_mismatch | pattern_mismatch | unknown_table | unknown_field | target_absent | target_in_use | duplicate | newtron_owned_table_forbidden",
+          "reason": "missing_required | unknown_value | out_of_range | type_mismatch | pattern_mismatch | unknown_table | unknown_field | target_absent | target_in_use | duplicate",
           "message": "peer_as 4294967296 exceeds 32-bit ASN range",
           "expected": { "type": "uint32", "max": 4294967295 },
           "actual": 4294967296,
@@ -218,15 +218,18 @@ Field rules:
   `target_in_use` corresponds to §13's "domain error — the resource
   exists but can't be safely modified" (still surfaced as
   `validation_failure` to the operator because it is a refusal grounded
-  in a specific input, not a system condition).
-  `newtron_owned_table_forbidden` is the substrate-grounded refusal of
-  a direct CONFIG_DB write addressed to a table newtron owns: the
-  table IS recognized (so `unknown_table` would teach the wrong
-  semantics), but direct writes are architecturally forbidden per
-  `DESIGN_PRINCIPLES_NEWTRON.md` §1 — the operator must use intent
-  submission instead. `locator.substrate_field.table` names the
-  refused table; the rejection's `message` points the operator at
-  `/api/intents/preview`.
+  in a specific input, not a system condition). There is no
+  `newtron_owned_table_forbidden` reason in this enum: newtcon does
+  not expose a direct CONFIG_DB write endpoint, so there is no place
+  in the contract that refuses such a write. The operator who wants
+  to write a CONFIG_DB key directly does so via ssh + redis-cli
+  against the device themselves; the
+  [§Endpoints — Manual-Mode Parity (teaching surface)](#endpoints--manual-mode-parity-teaching-surface)
+  surface teaches the command and surfaces the load-bearing caution
+  about newtron-owned substrate (drift on the next reconcile),
+  honoring operator-philosophy invariants #7 ("errors carry the
+  substrate") and #9 ("confidence and limits are explicit") at the
+  teach surface rather than at a refusal envelope.
 - **`expected` / `actual` / `allowed`** populated per `reason`:
   `out_of_range` → `expected` carries the range, `actual` carries the
   received value; `unknown_value` → `allowed` carries the bounded enum;
@@ -437,8 +440,11 @@ Bounded enum for `condition`:
 | `changeset_unknown` | `changeset_id` never minted | `{ changeset_id }` |
 | `stash_unknown_or_expired` | `stash_id` never minted or retention expired | `{ stash_id, expired_at? }` |
 | `walkthrough_unknown` | `walkthrough_id` not in the Rehearsal teaching catalog | `{ walkthrough_id }` |
+| `scenario_unknown` | `scenario_id` not in the Manual-Mode Parity scenario catalog | `{ scenario_id }` |
 | `node_unknown` | `node` path parameter not in the spec | `{ node, network }` |
 | `service_unknown` | `service` path parameter not in the spec | `{ service }` |
+| `table_unknown` | `table` path parameter not in newtron's known-table catalog (used by the Manual-Mode Parity CONFIG_DB-key teach endpoint) | `{ network, node, table }` |
+| `teach_content_unauthored` | the addressed substrate (service / table) is known to newtron but has no teach content authored against it yet in the Manual-Mode Parity catalog | `{ service?, table?, content_version }` |
 | `card_signal_resolved` | Inbox `card_id` no longer derivable — signal resolved before operator opened it | `{ card_id, resolved_at }` |
 | `newtron_capability_missing` | newtron is reachable but does not expose a capability this endpoint requires; a Gap-Handling-Protocol issue exists | `{ capability, gap_issue_url, expected_shape }` |
 
@@ -1304,7 +1310,7 @@ captured preview pointer, `/api/workbench/{batch_id}/dry_run`,
 `/api/workbench/{batch_id}/commit/preview`,
 `/api/workbench/{batch_id}/revert/preview`,
 `/api/inbox/{card_id}/action/preview`,
-`/api/intents/preview`, `/api/changesets/{changeset_id}`,
+`/api/changesets/{changeset_id}`,
 `/api/rehearsal/walkthroughs/{walkthrough_id}` Composer-shaped
 exhibits). Per `DESIGN_PRINCIPLES_NEWTRON.md` §11 ("The ChangeSet
 Is the Universal Contract") and §46 ("HTTP API Boundary — Wire
@@ -1528,7 +1534,7 @@ Field rules:
   bounded set as §Error Schema's
   (`missing_required | unknown_value | out_of_range | type_mismatch |
   pattern_mismatch | unknown_table | unknown_field | target_absent |
-  target_in_use | duplicate | newtron_owned_table_forbidden`).
+  target_in_use | duplicate`).
 - **No discriminator field** appears on the row — the array the row
   is in IS the discriminator (preconditions[] vs
   schema_violations[]). This mirrors the operator's mental model:
@@ -1676,13 +1682,6 @@ Appears on:
 - `POST /api/inbox/{card_id}/action/preview` per-target when
   `verb ∈ {"rollback_zombie", "retire_policy"}` (the two
   reverse-class Inbox verbs).
-- `POST /api/intents/preview` per-intent when the intent's
-  `operation` is a remove-class verb per §15's pair table
-  (`RemoveService`, `DeleteVLAN`, `DeleteVRF`, `UnbindACL`,
-  `UnbindIPVPN`, `UnbindMACVPN`, `RemoveVLANMember`,
-  `RemoveBGPPeer`, `RemoveBGPEVPNPeer`, `DeleteACL`,
-  `DeletePortChannel`, `UnconfigureInterface`, `RemoveIRB`,
-  `RemoveStaticRoute`, `RemoveQoS`).
 
 `null` on every other preview class (apply, refresh; baseline
 verbs whose reverse is `Reconcile` carry the reverse_strategy in
@@ -4450,1195 +4449,1209 @@ The active batch can now be addressed via `GET
 Stale or already-consumed `preview_id` → 410 Gone with
 `kind: "precondition_failure"`.
 
-## Endpoints — Manual-Mode Parity
+## Endpoints — Manual-Mode Parity (teaching surface)
 
-The Manual-mode parity surface is **the operator's first-class lever
-for hand-authoring intents and reading the manual decomposition of any
-automated action.** It is the contract realization of
-operator-philosophy invariant #2 ("Manual-mode parity"), declared in
+The Manual-Mode Parity surface is **the operator's discovery ground
+for the device-level equivalent of any newtron-mediated action.** It
+is the contract realization of operator-philosophy invariant #2
+("Manual-mode parity") as refined in
 [`docs/operator-philosophy.md`](docs/operator-philosophy.md):
 
-> Anything the automation can do, the operator can do by hand through
-> the same surface. Automation is an accelerator on top of manual
-> control, not a replacement for it. The same UI elements that drive
-> automated actions can drive manual ones; the operator chooses which
-> lever to pull. There is no "advanced mode" hidden behind a flag —
-> there is one mode, with automation as an opt-in convenience.
+> Anything the automation can do, the operator can do by hand using
+> their existing tools (ssh + redis-cli + vendor CLI + console)
+> directly against the device, **without newtron or newtcon in the
+> path**. newtcon's contribution to manual-mode parity is to **teach**
+> the device-level equivalent of every automated operation and to
+> **expose** the substrate (CONFIG_DB tables, keys, fields, device
+> addresses, vendor doc links) so the operator can act independently.
+>
+> newtcon does NOT provide a "manual mode," an "escape hatch," an
+> embedded terminal, or any path that mediates device access. It would
+> not be parity if the manual path required newtcon, because newtcon
+> being unavailable is one of the failure modes parity exists to
+> handle. The manual capability must be in the operator's own tools,
+> not in newtcon's affordances.
 
-Without this surface, newtcon is automation-only — which the
-philosophy explicitly rejects as "autopilot whose pilots cannot fly the
-plane when the autopilot fails" (the litmus test in
-`docs/operator-philosophy.md`). The surface is therefore load-bearing
-on the whole capability-amplification thesis of newtcon, not optional.
+The reframing — and what it means for the contract. The earlier shape
+of this surface (PR #33) was a newtcon-mediated set of state-changing
+endpoints: `POST /api/intents/preview` + `POST /api/intents` for
+operator-authored raw intent submission, `POST /api/configdb/.../write/preview`
++ `POST /api/configdb/.../write` for direct CONFIG_DB writes, and
+`GET /api/manual_decomposition/...` for the step-by-step manual
+decomposition of an automated action. The operator review filed as
+#9 (reopened 2026-05-26) and the refined invariant #2 in #35 rejected
+that shape on a non-negotiable invariant: **if the manual path goes
+through newtcon, it does not rehearse the case where newtron and
+newtcon are themselves the failure mode.** The autopilot's vendor does
+not bundle the yoke; the yoke is part of the aircraft, separate from
+the autopilot, so that pilots train on it independently and it
+remains operable when the autopilot is gone. ssh + redis-cli + the
+vendor CLIs are part of SONiC, not part of newtron or newtcon. The
+operator's manual capability lives in those tools, used directly
+against the device; newtcon's contribution is to **teach** the
+device-level equivalent and **expose** the substrate so the operator
+can act independently.
 
-### How this surface differs from per-verb `manual_equivalent`
+The honest realization of invariant #2 is therefore two-sided:
 
-Every state-changing endpoint in this contract already carries a
-`manual_equivalent.newtron_http` block — the `curl` invocation that
-reproduces THAT endpoint's effect by hand. That per-verb block is the
-"this is the manual analogue of THIS automated action" annotation.
+- **newtcon's contribution: teaching.** This surface exposes teaching
+  content that is substrate-grounded — for any service instance, any
+  CONFIG_DB key, and a catalog of common day-job manual operations,
+  it returns the substrate locator (CONFIG_DB table / key / fields),
+  the operator's-own-tools CLI commands to inspect / modify / remove
+  the substrate manually, and pointers to vendor documentation for
+  the daemons that consume the substrate. The teaching content is
+  static, authored by the Architect against newtron's documented
+  substrate. It is not a sandbox; it is not a runtime; it is not a
+  newtcon-mediated execution path.
+- **The operator's contribution: own-tools execution.** The teach
+  responses point at the operator's-own-tools workflow: the operator
+  opens their ssh session to the device, runs the `redis-cli`,
+  `vtysh`, `show`, or `config` commands the teaching content names,
+  observes the device's response, and proceeds. newtcon is not in
+  the execution path. The operator's existing device-credential
+  management governs ssh access; newtcon does not mediate it.
 
-The Manual-mode parity SURFACE is one level up: it is the operator's
-first-class action surface for hand-authoring an intent **without first
-choosing an automated verb to read off of**. The operator opens this
-surface to write an intent record directly, not to inspect what a
-service-spec apply would do manually.
+This split matches the refined invariant #6 (Rehearsal): newtcon's
+contribution to manual-mode readiness is to teach the substrate; the
+operator practices on real tools against real (or full-fidelity-
+emulated) devices. Where the Rehearsal surface
+([§Endpoints — Rehearsal (teaching surface)](#endpoints--rehearsal-teaching-surface))
+teaches named **failure scenarios** as ordered walkthroughs (drift
+recovery, zombie cleanup, verify-failure triage), this surface
+teaches the **day-job manual equivalent** of any newtron-mediated
+action — a discovery surface the operator opens when they want to do
+something by hand and need to know how. The two surfaces compose; see
+the composition section at the end of this section.
 
-Both exist because both are needed. The per-verb annotation teaches the
-operator "if I had clicked Apply, here is the `curl` I could run
-instead." The surface teaches the operator "if I want to do something
-the automation does not propose at all, here is the hand-authoring
-ground." Operator-philosophy invariant #2 demands the latter; the
-former is necessary but not sufficient.
+The surface is **read-only**. No endpoint mutates newtron state,
+device state, or newtcon-server state. There are no sessions, no
+preview/apply pairs, no embedded terminals, no escape hatches. Every
+endpoint is `GET`. Every response is teaching content addressable by
+ID. The operator copies the CLI commands into their own ssh session
+and executes against the device themselves.
 
-### Two paths: typed-intent submission and per-CONFIG_DB-key writes
+### What the surface returns
 
-The substrate has two write paths, and newtron's design draws a hard
-line between them:
+Three endpoint families, each a read-only `GET`:
 
-- **Typed intent submission.** The operator constructs a NEWTRON_INTENT
-  record (operation, resource key, user params, parents) and submits it
-  to be replayed through the pipeline (`Intent → Replay → Render →
-  Deliver`). Per `DESIGN_PRINCIPLES_NEWTRON.md` §1, §20, this is the
-  canonical write path; every newtron-owned CONFIG_DB entry comes from
-  an intent replay. The Manual-mode parity surface exposes typed intent
-  submission as `POST /api/intents/preview` + `POST /api/intents`.
-- **Per-CONFIG_DB-key write (non-newtron-owned tables only).** The
-  operator addresses a single CONFIG_DB table+key+field-set directly,
-  with no NEWTRON_INTENT record produced. Per
-  `DESIGN_PRINCIPLES_NEWTRON.md` §1, this path is architecturally
-  forbidden for newtron-owned tables (it would create state newtron
-  cannot reconstruct, drift-detect, or symmetrically reverse). It is
-  surfaced for tables newtron does NOT own — third-party-managed
-  tables, vendor extensions, operator-side custom tables — where
-  newtron's intent abstraction does not apply by construction. The
-  surface exposes these as
-  `POST /api/configdb/{network}/{node}/{table}/{key}/write/preview` +
-  `POST /api/configdb/{network}/{node}/{table}/{key}/write`, both
-  `pending_newtron_gap` against newtron's HTTP API today (see
-  [newtron#10](https://github.com/aldrin-isaac/newtron/issues/10)).
+- **Service-instance teach** — `GET /api/manual/services/{service}/instances/{network}/{node}/{interface}/teach`.
+  "I have service X on this node/interface; teach me the substrate
+  it produces and the device-level commands to inspect, modify (with
+  appropriate caution about newtron ownership), and remove it by
+  hand."
+- **CONFIG_DB-key teach** — `GET /api/manual/configdb/{network}/{node}/{table}/{key}/teach`.
+  "I'm looking at this CONFIG_DB key; teach me what it represents,
+  which daemons consume it, the operator's-own-tools commands to
+  read it, and the appropriate caution if I want to write it
+  directly."
+- **Scenario teach** — `GET /api/manual/scenarios` and
+  `GET /api/manual/scenarios/{scenario_id}`. A catalog of common
+  day-job manual operations (clearing a stale BGP_NEIGHBOR entry,
+  inspecting MAC-learning, etc.) as ordered command sequences the
+  operator runs on the device themselves.
 
-Both paths share the same preview/apply pairing, the same per-target
-result shape, the same per-Node atomicity classification, the same
-4-stage pipeline trace + Verify-as-Device-I/O assertion, the same Error
-schema, and the same companion `intent_url` / `changeset_url` /
-`operation_url` navigation links as Composer, Inbox, and Workbench.
-The operator practices identical mechanics across surfaces — that
-identity is what makes Manual-mode parity a parity surface, not a
-parallel parallel-universe surface.
+Each response carries: substrate locators (CONFIG_DB / NEWTRON_INTENT
+addresses) in the same `SubstrateLocator` shape defined by
+[§Endpoints — Rehearsal §Field shapes — shared types](#field-shapes--shared-types-used-below);
+operator's-own-tools commands in the same `CliCommand` shape; pointers
+to vendor and newtron documentation; and a load-bearing
+`operator_environment_pointers` block naming what the operator needs
+in their own environment (ssh access, redis-cli on the device, etc.).
 
-### Third path: manual decomposition browser
+### How this surface differs from per-operation `cli_command` annotations
 
-For every automated action the operator might invoke through Composer,
-Inbox, or Workbench, the Manual-mode parity surface also exposes
-`GET /api/manual_decomposition` — the step-by-step decomposition of
-that action into the sequence of intent submissions (or
-per-CONFIG_DB-key writes) the operator would execute by hand to
-reproduce the same effect. The operator opens this endpoint not to
-DO the manual sequence, but to REHEARSE it — to learn how the
-automation decomposes into manual steps, so that when the automation
-fails the operator can step through the decomposition themselves.
+Every substrate-operation event in this contract's streaming surface
+(`per_write[*].cli_command`, see
+[§Streaming substrate-operation events](#streaming-substrate-operation-events))
+already carries the literal `ssh <device>` + `redis-cli` /
+`redis-del` / `redis-hgetall` command that reproduces THAT
+substrate-operation by hand. That per-substrate-op annotation is the
+"this is the device-level command equivalent to THIS specific write"
+teaching, surfaced inline at the moment the operation executes.
 
-This is the operationalization of "the operator can do it by hand":
-not just "there exists a manual path" but "here is the exact manual
-path, step by step, that this automated action would have taken."
-Operator-philosophy invariant #2's "anything the automation can do,
-the operator can do by hand" is binding only if the operator can SEE
-the decomposition; the surface makes the decomposition first-class.
+The Manual-Mode Parity teaching surface is one level up. It is the
+operator's **discovery ground** for the device-level equivalent of an
+action the operator wants to perform manually, **before any newtron
+operation runs and independent of whether one will**:
+
+- "I have service `transit` on switch1 Ethernet0; teach me how to
+  inspect it, modify it, and remove it by hand."
+- "I am looking at CONFIG_DB key `BGP_NEIGHBOR|default|10.1.0.1`;
+  teach me what it represents, how to read it, and what I would have
+  to be careful about if I wrote it directly."
+- "I want to manually clear a stale BGP_NEIGHBOR entry the daemons
+  are still referencing; teach me the day-job procedure."
+
+Both layers exist because both are needed. The per-substrate-op
+annotation teaches "when this stream emitted, here is the command-line
+equivalent for the write that just happened." The discovery surface
+teaches "before any operation runs, how would I do this by hand at
+all?" Operator-philosophy invariant #2 (refined) binds: the operator
+must be able to act manually independent of newtron and newtcon;
+discovery teaching is necessary so the operator can find the
+device-level path without a newtcon stream pointing the way.
+
+### Vocabulary
+
+The surface reuses the shared types defined by
+[§Endpoints — Rehearsal (teaching surface)](#endpoints--rehearsal-teaching-surface),
+§Field shapes — shared types — `SubstrateLocator` and `CliCommand`.
+Neither is re-coined here. The vocabulary of the surface adds three
+teaching-content types:
+
+- **Teach response** — the JSON object returned by every `GET` on
+  this surface. Carries: the substrate the teaching is grounded in
+  (one or more `SubstrateLocator` entries), the daemons that consume
+  it, the operator's-own-tools inspect / modify / remove command
+  sequences (lists of `CliCommand`), pointers to vendor and newtron
+  documentation, and the caution notes the operator should read
+  before acting.
+- **Scenario** — a named, substrate-grounded day-job manual operation
+  (e.g., "Manually clear a stale BGP_NEIGHBOR entry that newtron does
+  not know about"). Each scenario carries an ordered sequence of
+  `CliCommand` steps with substrate locators and rationale. Scenarios
+  are addressable by `scenario_id` and are static teaching content,
+  not parameterized by live state.
+- **Caution note** — a typed warning attached to teaching content
+  whose execution can interact with newtron's ownership of the
+  substrate (e.g., "writing to BGP_NEIGHBOR directly will land state
+  newtron cannot reconstruct via Replay; the next reconcile may
+  remove your change"). Caution notes are substrate-grounded; they
+  cite the principle that explains the warning.
+
+Newtron's domain vocabulary is reused throughout (`CONFIG_DB`,
+`NEWTRON_INTENT`, `Replay`, `Drift Guard`, `Reconcile`,
+`ChangeSet`). No new operator-facing terminology is coined.
 
 ### Identifiers
 
-- `intent_id` — opaque, server-assigned at intent-submission preview
-  time, stable through commit. After successful apply, the same
-  `intent_id` resolves via [`GET /api/intents/{intent_id}`](#get-apiintentsintent_id)
-  on the Provenance surface — manual intent submissions are
-  indistinguishable from any other intent on the substrate.
-- `preview_id` — opaque, returned by every `*/preview` endpoint, valid
-  for 5 minutes. Same shape and TTL as elsewhere in the contract.
-- `operation_id` — opaque, server-assigned on apply. Resolves via
-  [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id)
-  on the Operations surface.
+- `scenario_id` — opaque-typed stable string, server-assigned at
+  scenario authorship. Stable across newtcon-server restarts; bound
+  to the scenario catalog, not to an operator session. Example
+  shape: `manually-clear-stale-bgp-neighbor`.
 
-### `POST /api/intents/preview`
+Both teach endpoints addressed by domain identifiers
+(`service`, `network`, `node`, `interface`, `table`, `key`) use the
+substrate's own vocabulary; no surrogate teach-content ID is minted
+for them.
 
-Preview a raw, operator-authored intent submission. **No newtron-side
-mutation.** Returns the ChangeSet the intent would produce, the
-reference impact, the per-Node atomicity, the pipeline-stage trace,
-and the projection rebuild that would result. Mandatory before
-`POST /api/intents` per `CLAUDE.md` §Preview Before Commit, Always.
+### Static content; no `as_of` envelope; `content_version`
 
-The request is shaped to mirror newtron's NEWTRON_INTENT record
-(`../newtron/docs/newtron/intents.md` §1 "Intent Record Structure"):
-the operator addresses the intent by the same fields newtron uses
-internally. There is no operator-facing summarization of the
-substrate; the operator authors the intent in the substrate's own
-vocabulary, per operator-philosophy invariant #3 ("the substrate is
-the teaching surface") and invariant #1 ("no black boxes").
+Teaching content is authored by the Architect, not derived from
+live newtron state. The surface therefore does NOT carry an `as_of`
+field — there is no live observation to time-stamp. Each response
+carries a `content_version` (the teach catalog version the response
+was authored against). When a substrate-evolution Contract PR retires
+teaching content or changes a CLI command, the `content_version`
+moves; consumers see the new content on next fetch.
 
-**Request:**
-```json
-{
-  "intents": [
-    {
-      "operation": "apply-service",
-      "network": "default",
-      "node": "switch1",
-      "resource_key": "interface|Ethernet0",
-      "name": "transit",
-      "state": "actuated",
-      "user_params": {
-        "service": "transit",
-        "ip_address": "10.1.0.0/31",
-        "peer_as": 65002
-      },
-      "parents": ["vrf|Vrf_TRANSIT", "service|transit"],
-      "resolved_params_strategy": "let_newtron_resolve",
-      "resolved_params": null
-    }
-  ],
-  "atomicity_intent": "per_node | per_intent"
-}
-```
+This mirrors the Rehearsal teaching surface's static-content
+discipline (see §Endpoints — Rehearsal §Static content). An `as_of`
+field would imply the teaching is being computed against observed
+state, which would imply newtron-mediated inspection, which is
+exactly what the refined invariant #2 rejects.
 
-Field rules:
+Note one boundary case: the **service-instance** and **CONFIG_DB-key**
+teach endpoints address substrate the operator has named at request
+time (a service instance on a node, a CONFIG_DB key on a node). The
+endpoints validate that the named substrate has a teach-content
+mapping defined in the catalog (e.g., the service spec is known, the
+CONFIG_DB table is known), but they **do not query newtron for live
+state** to compose the response. The teach content is what newtron's
+documented substrate says about the named addresses, not what
+newtron's projection currently is. If the operator wants the live
+state, they read [§Endpoints — Provenance](#endpoints--provenance-why-mode-surface)
+or run the inspection `CliCommand` from the teach response in their
+own ssh session.
 
-- **`intents[]`** — one or more intent submissions. A submission of
-  multiple intents on the same Node bundles them into one per-Node
-  call. Submissions across multiple Nodes inherit Workbench's
-  per-Node atomicity model (per-Node atomic, cross-Node sequential).
-  Empty `intents[]` → 400 `validation_failure`.
-- **`operation`** is the Op constant from
-  `../newtron/docs/newtron/intents.md` §1.1 (e.g., `"apply-service"`,
-  `"create-vlan"`). The newtron vocabulary; not paraphrased. Bounded
-  by the active newtron version's intent catalog; unknown values →
-  400 `validation_failure` with `details.rejections[*].reason ==
-  "unknown_value"` and `details.rejections[*].allowed` carrying the
-  catalog.
-- **`resource_key`** is the DAG-key the intent addresses
-  (e.g., `interface|Ethernet0`). Validated against the operation per
-  `../newtron/docs/newtron/intents.md` §7 (e.g., `apply-service`
-  requires `interface|*`). Mismatch → 400 `validation_failure`.
-- **`name`** is the spec reference per `intents.md` §1.1. Bound by
-  the operation; for verbs that have no `name` (e.g., `create-vlan`),
-  this field is the empty string or absent.
-- **`state`** defaults to `actuated`. `unrealized` is admitted for
-  the operator-declared-but-not-yet-applied case
-  (`intents.md` §1.2). `in-flight` is forbidden in submissions — that
-  state is owned by newtron's `writeIntent` internally.
-- **`user_params`** is the dual-purpose intent's user-params half per
-  `DESIGN_PRINCIPLES_NEWTRON.md` §22. REQUIRED on every submission.
-  Per §22, snapshot reads user params for reconstruction; the
-  operator hand-authors the same shape automation would synthesize.
-- **`parents`** is the declared parent set, validated against
-  `intents.md` §2 invariant I4 (parents must exist) at preview-render
-  time. Missing parents → 400 `validation_failure` with
-  `details.rejections[*].reason == "target_absent"` and
-  `details.rejections[*].locator.substrate_field` naming the missing
-  parent's resource key.
-- **`resolved_params_strategy`** is the discriminator for how the
-  dual-purpose intent's resolved-params half is computed:
-  - `let_newtron_resolve` (default) — newtron resolves specs and
-    computes resolved params, identical to the typed-verb path. The
-    operator stops at user params.
-  - `use_supplied` — operator provides `resolved_params` explicitly.
-    Used when the operator is intentionally overriding spec
-    resolution. The resolved params land in the intent record
-    verbatim, per §22.
-- **`resolved_params`** is REQUIRED when
-  `resolved_params_strategy == "use_supplied"`, FORBIDDEN otherwise.
-  An empty object when supplied is rejected with 400
-  `validation_failure` — the operator must name the override
-  substrate, not implicitly elide it.
-- **`atomicity_intent`** is the operator's explicit choice between
-  `per_node` (default — bundle per-Node intents into one
-  TxPipeline-atomic call, matching Workbench's model) and
-  `per_intent` (each intent is a separate per-Node call; intents on
-  the same Node still serialize per the per-device actor in
-  `DESIGN_PRINCIPLES_NEWTRON.md` §31, but they do not share atomicity).
-  Operator-philosophy invariant #8 ("operator-defined automation, not
-  tool-imposed automation") binds: newtcon does not impose the safer
-  default silently; the operator chooses.
+### `GET /api/manual/services/{service}/instances/{network}/{node}/{interface}/teach`
 
-**Response 200:**
-```json
-{
-  "preview_id": "<opaque, valid for 5 minutes>",
-  "rendered_at": "2026-05-26T14:08:00Z",
-  "per_intent": [
-    {
-      "intent_index": 0,
-      "operation": "apply-service",
-      "network": "default",
-      "node": "switch1",
-      "resource_key": "interface|Ethernet0",
-      "intent_id": "<opaque>",
-      "intent_url": null,
-      "validate": { /* Validate object — see §POST /api/preview "Validate (typed)" */ },
-      "changeset": { /* ChangeSet object — see §POST /api/preview "ChangeSet (typed)" */ },
-      "intent_record_preview": {
-        "key": "interface|Ethernet0",
-        "fields": { /* NEWTRON_INTENT record that would be written, including user + resolved params */ }
-      },
-      "resolved_params_origin": "newtron_resolved | operator_supplied",
-      "reference_impact": {
-        "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
-        "incremented": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"],
-        "decremented": [],
-        "garbage_collected": []
-      },
-      "confidence": { /* Confidence object — see §POST /api/preview "Confidence (typed)" */ },
-      "reverses": null,
-      "dag_context_preview": {
-        "parents_resolved": [
-          {
-            "resource_key": "vrf|Vrf_TRANSIT",
-            "intent_id": "<opaque>",
-            "intent_url": "/api/intents/<opaque>",
-            "exists_in_intent_db": true
-          },
-          {
-            "resource_key": "service|transit",
-            "intent_id": "<opaque>",
-            "intent_url": "/api/intents/<opaque>",
-            "exists_in_intent_db": true
-          }
-        ],
-        "children_after_apply": []
-      }
-    }
-  ],
-  "per_node_calls": [
-    {
-      "node": "switch1",
-      "intent_count": 1,
-      "atomicity": "atomic_via_txpipeline",
-      "atomicity_rationale_ref": {
-        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
-        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
-      },
-      "manual_equivalent": {
-        "newtron_cli": "newtron switch1 intent submit --file intent.json",
-        "newtron_http": {
-          "status": "pending_newtron_gap",
-          "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/9",
-          "expected_shape": {
-            "method": "POST",
-            "path": "/network/default/node/switch1/intent",
-            "query": { "dry_run": "false" },
-            "body": {
-              "operation": "apply-service",
-              "resource_key": "interface|Ethernet0",
-              "name": "transit",
-              "state": "actuated",
-              "user_params": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 },
-              "parents": ["vrf|Vrf_TRANSIT", "service|transit"],
-              "resolved_params_strategy": "let_newtron_resolve"
-            }
-          }
-        }
-      }
-    }
-  ],
-  "execution_order": [
-    { "step": 1, "node": "switch1", "rationale": "single Node" }
-  ],
-  "cross_node_atomicity": null,
-  "aggregate": {
-    "all_valid": true,
-    "intent_count": 1,
-    "node_count": 1,
-    "total_writes": 14,
-    "total_deletes": 0
-  },
-  "aggregate_reference_impact": {
-    "created": ["ROUTE_MAP|TRANSIT_IN_A1B2C3D4"],
-    "incremented": ["ACL_TABLE|PROTECT_RE_IN_1ED5F2C7"],
-    "decremented": [],
-    "garbage_collected": []
-  },
-  "disruption": {
-    "config_reload_nodes": [],
-    "bgp_restart_nodes": [],
-    "estimated_data_plane_impact": "control-plane-only",
-    "rationale": [
-      { "input": "operations", "value": ["apply-service"], "contribution": "control-plane-only (BGP neighbor add, no reload)" },
-      { "input": "bgp_restart_inferred", "value": false, "contribution": "none" }
-    ]
-  },
-  "preflight": {
-    "all_nodes_reachable": true,
-    "unreachable_nodes": [],
-    "drift_guard_clean": true,
-    "drift_blocked_nodes": []
-  }
-}
-```
+Return teaching content for an instance of a service on one node and
+one interface. Idempotent; safe to poll. No newtron-side state is
+mutated; no newtron-side state is read at request time.
 
-Field rules:
+The endpoint is addressed by the same identifiers the operator uses
+elsewhere — `service` is the service-spec name (e.g., `transit`,
+`peering`); `network` / `node` / `interface` are the substrate
+addresses. The teach content names the CONFIG_DB substrate the
+service's `apply-service` verb writes for an instance at this
+address, the daemons that consume that substrate, and the
+operator's-own-tools commands for inspecting, modifying, and removing
+the substrate by hand.
 
-- **`per_intent[*]`** is one entry per submitted intent. The shape
-  is symmetric with Workbench's `dry_run` `per_target[]` so the
-  frontend reuses its rendering logic — `validate`, `changeset`,
-  `reference_impact`, `confidence`, and `reverses` are the same
-  fields with the same semantics. `validate` is the typed
-  **Validate** object (preconditions + schema_violations split);
-  `changeset` is the typed **ChangeSet** object (writes / deletes
-  / intent_records); `confidence` is the typed **Confidence**
-  object; `reverses` is the typed **Reverses** object — `null` on
-  apply-class intents; non-null on remove-class intents per §15's
-  pair table. All four are defined in §POST /api/preview.
-- **`per_intent[*].intent_record_preview`** is the NEWTRON_INTENT
-  record that would be written, with both user and resolved params
-  visible. Per operator-philosophy invariant #1 ("no black boxes"),
-  the operator MUST see the full intent record at preview time —
-  including whatever newtron's spec resolver computed for resolved
-  params when `resolved_params_strategy == "let_newtron_resolve"`.
-  The operator who submits a raw intent should never be surprised by
-  what landed.
-- **`per_intent[*].resolved_params_origin`** discriminates
-  `newtron_resolved` (newtron's spec resolution computed the
-  resolved-params half) from `operator_supplied` (the operator
-  supplied them verbatim). The discriminator is load-bearing at
-  inspection time: an operator looking at the intent in the
-  Provenance surface a year later must be able to tell whether the
-  resolved params came from spec resolution at apply time (subject
-  to spec drift) or from the operator's explicit override (subject
-  to operator authorship).
-- **`per_intent[*].dag_context_preview.parents_resolved[*].exists_in_intent_db`**
-  carries the I4 check result. `false` here corresponds to a 400
-  refusal at submission time (`writeIntent` would fail I4); the
-  preview surfaces the failure ahead of submission so the operator
-  can either author the missing parent first or fix the resource
-  key.
-- **`per_node_calls[*]`** uses the same shape as Workbench's
-  `/commit/preview` `per_node_calls[*]`: per-Node atomicity
-  classification, atomicity rationale_ref, and the
-  `manual_equivalent` block carrying the exact `curl` body the
-  operator could submit. The `manual_equivalent.newtron_http.status`
-  is `"pending_newtron_gap"` against newtron#9 until newtron exposes
-  the raw-intent endpoint; today, the substrate-faithful manual
-  equivalent is the typed-verb endpoint chosen by the operation
-  (e.g., `apply-service` → newtron's existing `apply-service`
-  endpoint), surfaced as `partial_match` in
-  [§Decomposition Browser](#get-apimanual_decompositionoperation_kindoperation_id)
-  below.
-- **`execution_order`** follows Workbench's ordering policy: in v0,
-  alphabetic by Node name unless an intent declares a parent on a
-  different Node (cross-Node parents are forbidden by newtron's DAG
-  per `intents.md` §2 — parents are device-local — so v0's policy
-  reduces to alphabetic ordering for multi-Node submissions).
-- **`cross_node_atomicity`** is `null` when `node_count == 1`
-  (matching Workbench's omission rule). When `node_count > 1`, it
-  carries `atomic: false` and the same operator-consequence
-  explanation Workbench's commit-preview uses.
-- **`disruption.rationale[]`** follows the same shape as elsewhere:
-  each entry names the input, its value, and the contribution to
-  the verdict. A rationale array empty of the inputs that justify
-  the verdict is a contract violation.
-- **`preflight`** mirrors Workbench's commit-preview preflight: a
-  read-side check at preview time; the apply response reports actual
-  outcome.
-
-A drift-guard refusal on any target → 409 with
-`kind: "drift_refusal"` and `details` per the typed schema in §Error
-Schema. `details.per_target[*].drift_entries[]` carries the
-`DriftEntry[]` shape (same as Inbox drift card). The preview is not
-returned.
-
-A validation failure (the intent fails I4, the operation is unknown,
-the resource key violates `intents.md` §7) → 400 with
-`kind: "validation_failure"` and `details` per the typed schema in
-§Error Schema. The operator fixes the submission before re-preview.
-
-**Errors:**
-- Unknown `operation` or invalid `resource_key` → 400
-  `validation_failure` per the typed schema.
-- I4 failure (declared parent does not exist on the Node) → 400
-  `validation_failure` with `details.rejections[*].reason ==
-  "target_absent"` and
-  `details.rejections[*].locator.substrate_field` naming the missing
-  parent.
-- I5 implications (the operation would create children that already
-  exist with different parents) → 400 `validation_failure` with the
-  conflict surfaced.
-- Unknown `node` → 404 `precondition_failure` with `condition:
-  "node_unknown"`.
-- newtron-server unreachable → 503 `newtron_unavailable` per the
-  typed schema in §Error Schema.
-
-### `POST /api/intents`
-
-Apply a previously-generated intent submission preview. Atomicity
-follows the operator's `atomicity_intent` choice and the per-Node
-guarantee documented in [§Workbench](#endpoints--change-workbench-third-surface)
-— each per-Node call is atomic via TxPipeline; the cross-Node sequence
-is not atomic. Returns one `operation_id` per intent (or per per-Node
-bundle, when `atomicity_intent == "per_node"`), with the full pipeline
-trace + Device I/O verify assertion per intent.
-
-**Request:**
-```json
-{
-  "preview_id": "<from POST /api/intents/preview>",
-  "stop_on_first_failure": true
-}
-```
-
-`stop_on_first_failure` has identical semantics to Workbench's commit:
-`true` (default) halts the cross-Node sequence on a per-Node failure;
-`false` continues. Within a per-Node bundle, the TxPipeline is atomic
-regardless of this flag — a failure inside the bundle rolls back the
-bundle (per `unified-pipeline-architecture.md` §8 Lock/snapshot/restore
-cycle).
-
-**Response 200:**
-```json
-{
-  "applied_at": "2026-05-26T14:09:00Z",
-  "per_intent": [
-    {
-      "intent_index": 0,
-      "operation": "apply-service",
-      "network": "default",
-      "node": "switch1",
-      "resource_key": "interface|Ethernet0",
-      "status": "applied | failed | not_attempted",
-      "intent_id": "<opaque>",
-      "intent_url": "/api/intents/<opaque>",
-      "operation_id": "<opaque, present when status != not_attempted>",
-      "operation_url": "/api/operations/<opaque>",
-      "pipeline": {
-        "intent":  { "stage": "complete", "at": "2026-05-26T14:09:00Z" },
-        "replay":  { "stage": "complete", "at": "2026-05-26T14:09:00Z" },
-        "render":  { "stage": "complete", "at": "2026-05-26T14:09:01Z" },
-        "deliver": { "stage": "complete", "at": "2026-05-26T14:09:02Z" }
-      },
-      "verify": {
-        "kind": "device_io_assertion",
-        "state": "in_progress",
-        "started_at": "2026-05-26T14:09:02Z",
-        "verify_url": "/api/operations/<opaque>/verify",
-        "confidence": { /* Confidence object — see §POST /api/preview "Confidence (typed)" */ }
-      },
-      "intent_record": {
-        "key": "interface|Ethernet0",
-        "fields": { /* NEWTRON_INTENT record actually written, including resolved params */ }
-      },
-      "resolved_params_origin": "newtron_resolved",
-      "confidence": { /* Confidence object — see §POST /api/preview "Confidence (typed)" */ },
-      "failure": null
-    }
-  ],
-  "per_node_results": [
-    {
-      "node": "switch1",
-      "status": "applied",
-      "atomicity": "atomic_via_txpipeline",
-      "intent_count": 1,
-      "operation_ids": ["<opaque>"]
-    }
-  ],
-  "aggregate": {
-    "outcome": "all_applied | partial | none_applied",
-    "node_count_applied": 1,
-    "node_count_failed": 0,
-    "node_count_not_attempted": 0,
-    "verify_pending_intents": 1,
-    "stop_on_first_failure_triggered": false,
-    "confidence": { /* Aggregated Confidence; see §POST /api/preview "Confidence (typed)" */ }
-  },
-  "cross_node_atomicity": null
-}
-```
-
-Field rules:
-
-- **`per_intent[*].status`**:
-  - `applied` — newtron's write returned success for this intent's
-    per-Node bundle; verify may still be in progress (post-deliver
-    Device I/O per `unified-pipeline-architecture.md` §7).
-  - `failed` — newtron's write failed on this intent's per-Node
-    bundle. The whole per-Node bundle is failed (per-Node atomicity);
-    the `failure` object carries the substrate-level error.
-  - `not_attempted` — the cross-Node sequence was halted before this
-    intent's Node was reached (only possible when
-    `stop_on_first_failure: true`).
-- **`per_intent[*].intent_id`** and **`per_intent[*].intent_url`**
-  are the durable navigation links to the dedicated Provenance surface
-  at [`GET /api/intents/{intent_id}`](#get-apiintentsintent_id). A
-  manually-submitted intent is indistinguishable from any other
-  intent in the Provenance surface — the operator clicks through and
-  inspects the substrate the same way. Per operator-philosophy
-  invariant #2's "same surface" requirement, the manual path and the
-  automation path produce the same provenance.
-- **`per_intent[*].pipeline`** and **`per_intent[*].verify`** mirror
-  the shape defined in [§Operations](#endpoints--operations) exactly:
-  four pipeline stages, plus a top-level `verify` typed
-  `device_io_assertion`. Deliver always lands on the real device;
-  there is no `target` discriminator because newtcon does not provide
-  a tool-mediated rehearsal sandbox — rehearsal is the operator
-  practicing on their own lab device with their own tools (see
-  [§Endpoints — Rehearsal](#endpoints--rehearsal-teaching-surface)
-  for the teaching content).
-- **`per_intent[*].intent_record.fields`** is the NEWTRON_INTENT
-  record actually written, including the resolved params half. Per
-  `DESIGN_PRINCIPLES_NEWTRON.md` §1, §22, the intent record IS the
-  decision substrate; the apply response surfaces it directly so the
-  operator never has to follow a link to read what was actually
-  recorded.
-- **`per_intent[*].resolved_params_origin`** is the discriminator
-  echoed from the preview. Per §22, the operator (and any future
-  reader) can tell whether the resolved params were spec-derived or
-  operator-supplied at submission time.
-- **`per_intent[*].failure`** uses the same five-`kind` typed shape
-  as Workbench's per-target failure (see §Error Schema). The
-  `kind` values match newtron's substrate-level error
-  classifications; `stage` names which pipeline stage produced the
-  failure (`intent | replay | render | deliver`).
-- **`aggregate.outcome`** semantics: `all_applied` (every per-Node
-  result is `applied`), `partial` (at least one applied and at least
-  one of `{failed, not_attempted}`), `none_applied` (no Node
-  applied).
-- **`cross_node_atomicity`** is `null` when `node_count == 1` and
-  carries `atomic: false` with operator-consequence explanation
-  when `node_count > 1`. The contract rejects `atomic: true` on
-  principle, matching Workbench.
-
-**Errors:**
-- Stale or already-consumed `preview_id` → 410 Gone with
-  `kind: "precondition_failure"`.
-- `preview_id` was issued by a different endpoint than this one (a
-  wrong-class preview) → 409 `precondition_failure` with
-  `condition: "preview_id_wrong_class"`,
-  `condition_details: { preview_id, received_kind, required_kind: "intent_submission_preview" }`.
-- newtron unreachable for any target Node → 503
-  `newtron_unavailable` per the typed schema in §Error Schema.
-- A drift-guard refusal mid-pipeline → 409 `drift_refusal`. The
-  operator re-previews.
-- Catastrophic newtcon-server failure mid-sequence → 502 with
-  `kind: "internal"`. `details.partial_results` carries the per-Node
-  results completed before the failure (shape matches this
-  endpoint's success-response `per_intent[]`).
-
-### `POST /api/configdb/{network}/{node}/{table}/{key}/write/preview`
-
-Preview a direct CONFIG_DB key write against a non-newtron-owned
-table. **No newtron-side mutation.** Returns the would-be entry, the
-prior fields (if the key currently exists), the per-Node atomicity
-classification, and the substrate-grounded refusal of any write that
-targets a newtron-owned table. Mandatory before
-`POST .../write` per `CLAUDE.md` §Preview Before Commit, Always.
-
-**Why this endpoint exists.** Per `DESIGN_PRINCIPLES_NEWTRON.md` §1,
-every newtron-owned write flows through `writeIntent` so the intent DB
-stays authoritative. But SONiC's CONFIG_DB contains tables newtron does
-NOT own (third-party-managed tables, vendor extensions, operator-side
-custom tables). For non-newtron-owned tables, the substrate-truth
-write path is `redis-cli HSET` on the device — a path newtcon would
-otherwise be unable to surface (the newtron HTTP boundary forbids
-direct Redis access from newtcon, per `CLAUDE.md` §newtron-api-consumption-rule).
-Operator-philosophy invariant #2 binds: the operator who must SSH to
-the device for one third-party table is a Manual-mode parity gap.
-
-This endpoint surfaces the gap honestly: the substrate path lives in
-newtron (see [newtron#10](https://github.com/aldrin-isaac/newtron/issues/10)),
-and newtcon's contract surface is `pending_newtron_gap` until that
-endpoint lands.
+The endpoint does NOT require that the named service instance
+currently exist on the device. The teach content is what the
+substrate WOULD look like for the named address, derived from the
+service spec; the operator may be asking either because the instance
+exists and they want to operate on it, or because they want to know
+what hand-applying the service would look like without running an
+operation. The discriminator is in the operator's intent, not the
+contract.
 
 **Path parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `network` | string | Network name (the same `network` the operator scopes elsewhere). |
-| `node` | string | Node name. |
-| `table` | string | CONFIG_DB table name. MUST be a non-newtron-owned table; the endpoint refuses newtron-owned tables (see below). |
-| `key` | string | CONFIG_DB key inside the table. URL-encoded (Redis `|` separators in keys are `%7C` on the wire). |
+| `service` | string | Service-spec name. Must be a service in newtcon's spec catalog (the same catalog `GET /api/services` lists). Unknown → 404 `precondition_failure` with `condition: "service_unknown"`. |
+| `network` | string | Network name (same value the operator uses elsewhere). Validated against newtron's network catalog. |
+| `node` | string | Node name. Validated against newtron's node catalog. |
+| `interface` | string | Interface name on the node. URL-encoded; values like `Ethernet0` are unescaped. |
 
-**Request:**
+**Response 200:**
 ```json
 {
-  "operation": "set | delete",
-  "fields": { "field1": "value1", "field2": "value2" },
-  "non_newtron_owned_attestation": {
-    "operator_acknowledges": true,
-    "rationale": "<free text the operator supplies explaining why a non-newtron-owned table is being written>"
-  }
-}
-```
-
-Field rules:
-
-- **`operation`** is the discriminator: `set` (HSET fields on the
-  key) or `delete` (DEL the key). Bounded enum.
-- **`fields`** is REQUIRED when `operation == "set"`, FORBIDDEN
-  otherwise. An empty `fields` object on `set` is rejected with 400
-  `validation_failure` (the operator must name what is being set,
-  not implicitly clear).
-- **`non_newtron_owned_attestation`** is the operator's explicit
-  acknowledgement that the write is outside newtron's domain. Per
-  operator-philosophy invariant #9 ("confidence and limits are
-  explicit"), the contract makes the operator's choice visible
-  rather than silently implying it. The `rationale` is captured for
-  operations-history audit; an empty rationale is rejected with 400
-  `validation_failure`.
-
-**Response 200 (preview of an allowed write):**
-```json
-{
-  "preview_id": "<opaque, valid for 5 minutes>",
+  "content_version": "2026-05-26.1",
+  "service": "transit",
   "network": "default",
   "node": "switch1",
-  "table": "DEVICE_METADATA_VENDOR_EXT",
-  "key": "vendor-token",
-  "operation": "set",
-  "would_write_fields": { "field1": "value1", "field2": "value2" },
-  "prior_fields": { "field1": "older_value" },
-  "delta": {
-    "added_fields": [],
-    "removed_fields": [],
-    "modified_fields": ["field1"],
-    "unchanged_fields": []
+  "interface": "Ethernet0",
+  "service_summary": {
+    "name": "transit",
+    "summary": "BGP transit peering on a single interface with an upstream provider; renders BGP_NEIGHBOR, INTERFACE, ACL, ROUTE_MAP entries; consumed by bgpd and the SONiC swss daemon.",
+    "service_spec_doc_url": "newtron/docs/newtron/specs/service-transit.md"
   },
-  "ownership": {
-    "newtron_owned": false,
-    "owning_subsystem": "vendor-extension (operator-asserted)",
-    "newtron_drift_detection_applies": false,
-    "newtron_intent_record_produced": false
-  },
-  "per_node_atomicity": {
-    "atomicity": "atomic_via_redis_hset",
-    "atomicity_rationale_ref": {
+  "substrate_produced_when_applied": [
+    {
+      "kind": "configdb_key",
+      "network": "default",
+      "node": "switch1",
+      "table": "BGP_NEIGHBOR",
+      "key": "default|<peer-address>",
+      "fields_authored_by_service": ["asn", "local_addr", "name"],
+      "fields_inferred_from_spec": ["holdtime", "keepalive"],
+      "consumed_by_daemon": "bgpd",
+      "daemon_doc_url": "https://github.com/sonic-net/SONiC/blob/master/doc/quagga/Quagga-Setup.md"
+    },
+    {
+      "kind": "configdb_key",
+      "network": "default",
+      "node": "switch1",
+      "table": "INTERFACE",
+      "key": "Ethernet0|<address>/<prefix>",
+      "fields_authored_by_service": ["NULL"],
+      "fields_inferred_from_spec": [],
+      "consumed_by_daemon": "swss",
+      "daemon_doc_url": "https://github.com/sonic-net/sonic-swss/blob/master/doc/swss-readme.md"
+    },
+    {
+      "kind": "intent_record",
+      "network": "default",
+      "node": "switch1",
+      "intent_key": "service|transit|Ethernet0",
+      "consumed_by_daemon": null,
+      "daemon_doc_url": null
+    }
+  ],
+  "manual_inspect": [
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 redis-cli -n 4 HGETALL 'BGP_NEIGHBOR|default|10.1.0.1'",
+      "rationale": "Read the BGP_NEIGHBOR entry bgpd consumes. The asn field carries the upstream peer's ASN; local_addr carries this node's address on the peering link. Substitute the peer address into the key.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#4-sonic-is-a-database--treat-it-as-one"
+      }
+    },
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 redis-cli -n 4 HGETALL 'NEWTRON_INTENT|service|transit|Ethernet0'",
+      "rationale": "Read the NEWTRON_INTENT record newtron writes when apply-service runs. The resolved_params half carries the values newtron will re-assert on next reconcile. The intent record IS the substrate of newtron's decision.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#intent-record-shape",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      }
+    },
+    {
+      "tool": "ssh_vendor_cli",
+      "command": "ssh switch1 vtysh -c 'show ip bgp neighbors'",
+      "rationale": "Inspect the live BGP session state (peer up/down, prefixes exchanged, hold timer). This is dataplane-side observation; the CONFIG_DB state above is the control-plane side bgpd reads.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/hld.md#node-as-device",
+        "principle": "docs/operator-philosophy.md#3-the-substrate-is-the-teaching-surface"
+      }
+    }
+  ],
+  "manual_modify_in_place_caution": {
+    "kind": "newtron_owned_substrate_warning",
+    "message": "BGP_NEIGHBOR, INTERFACE, ACL, and ROUTE_MAP entries this service writes are newtron-owned substrate. A direct redis-cli HSET against any of these keys will land state newtron cannot reconstruct via Replay (the change has no corresponding NEWTRON_INTENT update). The next reconcile will treat your change as drift and either revert it or surface it on the Inbox drift card. If you intend to modify the service's substrate, the substrate-faithful path is to issue an apply-service or refresh-service through newtron — see manual_remove below for an example of invoking newtron on the device shell directly.",
+    "rationale_ref": {
       "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
-      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#31-node-as-device-isolation-boundary"
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
     }
   },
-  "disruption": {
-    "config_reload": false,
-    "bgp_restart": false,
-    "estimated_data_plane_impact": "unknown (non-newtron-owned table; newtron has no semantic model)",
-    "rationale": [
-      { "input": "table", "value": "DEVICE_METADATA_VENDOR_EXT", "contribution": "unknown (operator-asserted non-newtron-owned)" }
-    ]
-  },
-  "verify_intent": {
-    "supported": false,
-    "rationale": "newtron's Verify (Device I/O assertion, unified-pipeline-architecture.md §7) re-reads the ChangeSet and diffs against captured-expected. A direct CONFIG_DB write produces no ChangeSet provenance newtron can re-assert against. The operator is responsible for verifying the write by hand (newtcon will re-read the key after apply and surface the post-write fields).",
-    "verify_rationale_ref": {
-      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
-      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
-    }
-  },
-  "manual_equivalent": {
-    "newtron_cli": "redis-cli -h switch1 -p 6379 HSET 'DEVICE_METADATA_VENDOR_EXT|vendor-token' 'field1' 'value1' 'field2' 'value2'",
-    "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/10",
-      "expected_shape": {
-        "method": "POST",
-        "path": "/network/default/node/switch1/configdb/DEVICE_METADATA_VENDOR_EXT/vendor-token",
-        "query": { "dry_run": "false" },
-        "body": {
-          "fields": { "field1": "value1", "field2": "value2" },
-          "non_newtron_owned_attestation": { "operator_acknowledges": true, "rationale": "<echoed>" }
-        }
+  "manual_remove": [
+    {
+      "tool": "ssh_vendor_cli",
+      "command": "ssh switch1 newtron switch1 interface Ethernet0 remove-service",
+      "rationale": "newtron's own CLI, invoked directly on the device (newtron's CLI binary is installed on the switch). This is the device-level equivalent of newtcon's Composer remove — it writes a tombstone intent and renders the reverse ChangeSet. Use this when newtcon is unreachable but newtron-on-the-device is available; the operator drives newtron from the device shell directly.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#9-symmetric-operations",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+      }
+    },
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 'redis-cli -n 4 DEL BGP_NEIGHBOR|default|10.1.0.1 && redis-cli -n 4 DEL INTERFACE|Ethernet0|10.1.0.0/31 && redis-cli -n 4 DEL NEWTRON_INTENT|service|transit|Ethernet0'",
+      "rationale": "Substrate-only removal: HDEL the keys this service authored, including the NEWTRON_INTENT record so newtron's projection-on-next-replay no longer asserts the service. Use ONLY when neither newtcon nor newtron-on-the-device is available; this is the foul-weather floor. After running, run the inspect commands above to confirm the daemons have caught up.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
       }
     }
-  }
-}
-```
-
-Field rules:
-
-- **`would_write_fields`** is what `set` would HSET (or, for
-  `delete`, omitted with `prior_fields` documenting what would be
-  removed).
-- **`prior_fields`** is captured at preview-render time; `null` when
-  the key does not currently exist. Per
-  `unified-pipeline-architecture.md` §8's
-  `Lock → snapshot → fn → commit-or-restore → Unlock` cycle,
-  prior-state capture is a substrate property of the write path; the
-  preview exposes it so the operator sees what would change.
-- **`delta`** is the field-level diff between `prior_fields` and
-  `would_write_fields`. For `delete`, only `removed_fields` is
-  populated (all of `prior_fields.keys()`).
-- **`ownership.newtron_owned`** is `false` for every successful
-  preview — the endpoint refuses newtron-owned writes (see Errors).
-  Surfaced as a load-bearing field so the consumer renders the
-  "outside newtron's domain" semantics distinctively.
-- **`ownership.newtron_drift_detection_applies`** is `false` because
-  drift detection (`unified-pipeline-architecture.md` §8 Drift Guard)
-  operates against newtron-owned tables only. The operator is told
-  explicitly: writes to this key will not trip drift refusals on
-  subsequent newtron operations, AND newtron will not detect
-  external mutations to this key.
-- **`ownership.newtron_intent_record_produced`** is `false` — no
-  NEWTRON_INTENT record is written. The write is recorded in
-  newtcon-server's operation history with a `raw_configdb_write`
-  classification, and (per newtron#10's expected design) in
-  newtron's own history as well.
-- **`per_node_atomicity.atomicity`** is `atomic_via_redis_hset` for
-  `set` operations (the per-Node TxPipeline wraps the HSET in the
-  same Lock/Unlock cycle as every other write).
-  `atomic_via_redis_del` for `delete`. The enum extends the existing
-  `per_node_atomicity.atomicity` enum used by Workbench
-  (`atomic_via_txpipeline`, `atomic_via_replaceall`,
-  `atomic_via_applydrift`, `not_atomic_with_rationale`) with these
-  two new values, bounded.
-- **`disruption.estimated_data_plane_impact`** is
-  `"unknown (non-newtron-owned table; newtron has no semantic
-  model)"` for every preview of this kind. Per operator-philosophy
-  invariant #9, the contract is honest: newtron cannot predict
-  service-affecting impact on a table whose semantics it does not
-  model. The operator owns the disruption assessment.
-- **`verify_intent`** is the contract's surface-level acknowledgment
-  that newtron's Verify (Device I/O assertion) does not apply to
-  this write. `supported: false` is binding; consumers must NOT
-  render a "verified" status on direct-write applies.
-- **`manual_equivalent.newtron_cli`** is the literal `redis-cli`
-  command the operator could run if they SSH'd to the device. Per
-  operator-philosophy invariant #2, the manual ground-truth path is
-  surfaced verbatim.
-
-**Errors (refusals at preview time):**
-
-- **`table` is in newtron's owned-tables set** → 400
-  `validation_failure` with `details.rejections[*].reason ==
-  "newtron_owned_table_forbidden"`,
-  `details.rejections[*].locator.substrate_field.table` naming the
-  refused table, and `details.rationale_ref.principle ==
-  "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"`.
-  The rejection's `message` points the operator at
-  `POST /api/intents/preview` with an `operation` that targets the
-  table's owning intent. Per operator-philosophy invariant #7
-  ("errors carry the substrate"), the refusal is teaching, not
-  scolding — it names the substrate reason (the table is known AND
-  newtron-owned, so direct write is architecturally forbidden) and
-  points the operator at the correct manual path. `unknown_table`
-  is reserved for its substrate meaning (the named table is not
-  recognized at all); `newtron_owned_table_forbidden` is the
-  dedicated reason for this refusal.
-- **Unknown `network`, `node`, or `table` not present on the
-  device** → 400 `validation_failure` with the appropriate
-  `details.rejections[*].locator.substrate_field`.
-- **Empty `fields` on a `set` operation, or empty `rationale` on
-  the attestation** → 400 `validation_failure`.
-- **newtron-server reachable but does not expose the direct-write
-  endpoint** (the typical case today, until newtron#10 lands) →
-  501 with `kind: "precondition_failure"`,
-  `condition: "newtron_capability_missing"`,
-  `condition_details.gap_issue_url:
-  "https://github.com/aldrin-isaac/newtron/issues/10"`. The preview
-  is not returned. Per `CLAUDE.md` §Gap-Handling Protocol, the
-  endpoint is contractually defined here but operationally blocked
-  until newtron exposes the substrate path.
-- newtron-server unreachable → 503 `newtron_unavailable`.
-
-### `POST /api/configdb/{network}/{node}/{table}/{key}/write`
-
-Apply a previously-generated direct CONFIG_DB write preview.
-Atomicity follows the per-Node guarantee — the write goes through
-newtron's per-device actor and shares the same Lock/Unlock cycle as
-every other write to that Node. A failure inside the cycle is rolled
-back per `unified-pipeline-architecture.md` §8.
-
-**Request:**
-```json
-{
-  "preview_id": "<from POST .../write/preview>"
-}
-```
-
-**Response 200:**
-```json
-{
-  "network": "default",
-  "node": "switch1",
-  "table": "DEVICE_METADATA_VENDOR_EXT",
-  "key": "vendor-token",
-  "operation": "set",
-  "applied_at": "2026-05-26T14:10:00Z",
-  "operation_id": "<opaque>",
-  "operation_url": "/api/operations/<opaque>",
-  "applied_fields": { "field1": "value1", "field2": "value2" },
-  "prior_fields": { "field1": "older_value" },
-  "newtcon_post_write_readback": {
-    "captured_at": "2026-05-26T14:10:01Z",
-    "fields": { "field1": "value1", "field2": "value2" },
-    "matches_intent": true
-  },
-  "ownership": {
-    "newtron_owned": false,
-    "newtron_drift_detection_applies": false,
-    "newtron_intent_record_produced": false
-  },
-  "verify": {
-    "kind": "device_io_assertion",
-    "state": "skipped",
-    "skip_reason": "non_newtron_owned_table",
-    "skip_reason_rationale_ref": {
-      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
-      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else"
+  ],
+  "operator_environment_pointers": {
+    "ssh_access": "You will need ssh access to the device. Device-credential management is owned by your existing operator toolchain (typically the same one that manages newtron-server's access to the device); newtcon does not provision or store device credentials.",
+    "redis_cli_on_device": "redis-cli ships with SONiC and is present on every device by default at /usr/bin/redis-cli; CONFIG_DB is at -n 4. No additional installation is required.",
+    "vendor_cli_on_device": "vtysh ships with the FRR package in SONiC and is invokable as `vtysh`. SONiC's own `show` and `config` commands are at /usr/bin/sonic-cli equivalents.",
+    "see_also_lab_setup": {
+      "kind": "rehearsal_walkthrough_pointer",
+      "rationale": "If you have not practiced on a lab device before, run the most relevant Rehearsal walkthrough (see /api/rehearsal/walkthroughs) on a lab device you own before issuing these commands on a production node. Rehearsal teaches the substrate; this surface teaches the day-job manual equivalent."
     }
   },
-  "operator_attestation_recorded": {
-    "rationale": "<from preview>",
-    "recorded_at": "2026-05-26T14:10:00Z"
-  }
+  "see_also": [
+    {
+      "kind": "newtcon_surface",
+      "name": "Composer apply for service transit",
+      "endpoint": "/api/preview",
+      "rationale": "newtron-mediated path: stage the service via Composer; the apply produces the NEWTRON_INTENT record and renders the BGP_NEIGHBOR / INTERFACE / etc. ChangeSet."
+    },
+    {
+      "kind": "rehearsal_walkthrough",
+      "walkthrough_id": "drift-bgp-asn-modified-recovery",
+      "endpoint": "/api/rehearsal/walkthroughs/drift-bgp-asn-modified-recovery",
+      "rationale": "Walkthrough teaching how to detect and recover from an externally-modified asn on this service's BGP_NEIGHBOR entry; practice on a lab device before doing it on production."
+    },
+    {
+      "kind": "newtron_principle",
+      "name": "DESIGN_PRINCIPLES_NEWTRON.md §1 — The Node = intent and reality in one object",
+      "url": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object",
+      "rationale": "Substrate basis for the manual_modify_in_place_caution above: direct CONFIG_DB writes to newtron-owned tables break the intent-and-reality invariant the Node depends on."
+    }
+  ]
 }
 ```
 
 Field rules:
 
-- **`applied_fields`** is what was actually HSET (echo of
-  `would_write_fields`).
-- **`prior_fields`** is what was overwritten — the pre-write
-  snapshot from preview, captured by newtron's
-  `Lock → snapshot → fn → commit → Unlock` cycle.
-- **`newtcon_post_write_readback`** is a courtesy re-read of the
-  key after apply, performed by newtcon-server. It is NOT a Verify
-  in newtron's sense (which is an assertion against a ChangeSet) —
-  it is a substrate-readback the operator can compare against
-  `applied_fields`. `matches_intent` is `true` when every field in
-  `applied_fields` is present in `fields` with the same value;
-  `false` otherwise. Per operator-philosophy invariant #1 ("no
-  black boxes"), the readback is surfaced so the operator can spot
-  a daemon-rejected write even though Verify-proper does not apply.
-- **`verify.state`** is **always `"skipped"`** with
-  `skip_reason: "non_newtron_owned_table"`. Verify is a Device I/O
-  assertion against a ChangeSet (`unified-pipeline-architecture.md`
-  §7); this write has no ChangeSet to assert against. Surfacing
-  `verify.state == "complete"` would teach the operator a false
-  model of where verification provenance lives — per
-  operator-philosophy invariant #1, forbidden.
-- **`operator_attestation_recorded`** echoes the rationale from
-  preview and records the server-side timestamp. The operator's
-  narrative survives the write, queryable from the operations
-  endpoint for the operation's retention window.
+- **`substrate_produced_when_applied[]`** is the canonical list of
+  CONFIG_DB substrate the service's `apply-service` verb writes. Each
+  entry is a `SubstrateLocator` (see §Endpoints — Rehearsal §Field
+  shapes) extended with `fields_authored_by_service[]` (the fields
+  the service explicitly sets), `fields_inferred_from_spec[]` (the
+  fields newtron's resolver fills from spec defaults), and
+  `consumed_by_daemon` + `daemon_doc_url` for the daemon that reads
+  the entry on the device. Per operator-philosophy invariant #3 ("the
+  substrate is the teaching surface") and #5 ("why-mode is always
+  available"), every substrate entry the service produces is named in
+  full; collapsing into "BGP and interface configuration" is a
+  contract smell.
+- **`manual_inspect[]`** is the operator's-own-tools sequence for
+  reading the substrate. Every command is a `CliCommand` (see
+  §Endpoints — Rehearsal §Field shapes — shared types). Tools are
+  `ssh_redis_cli` or `ssh_vendor_cli` exclusively per the same
+  binding as Rehearsal's `forward_cli`; the command never references
+  `newtron-server`, `newtcon`, or `newtcon-server` as the point of
+  execution. Substituting concrete values
+  (`10.1.0.1`, `Ethernet0`) into the command for the requested
+  service instance is the teach-content author's job; the consumer
+  pastes verbatim, then adapts for their own peering addresses if
+  needed.
+- **`manual_modify_in_place_caution`** is REQUIRED on every service
+  instance teach response. The `kind` enumerates the substrate-level
+  warning: `newtron_owned_substrate_warning` for tables newtron owns
+  (the modification will be treated as drift),
+  `daemon_state_warning` for tables whose direct modification can
+  desynchronize daemon state without warning, `dataplane_disruption_warning`
+  for fields whose modification can cause control- or
+  dataplane-disruption. The `message` is the substrate-grounded
+  explanation in the operator's domain language; the `rationale_ref`
+  cites the principle. Per operator-philosophy invariants #7 ("errors
+  carry the substrate") and #9 ("confidence and limits are
+  explicit"), the teaching is honest about what going around newtron
+  costs.
+- **`manual_remove[]`** is the operator's-own-tools sequence for
+  tearing down the service substrate by hand. Per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §15 (symmetric operations), every
+  service that can be applied can be removed; the teaching content
+  surfaces the manual symmetric reverse. Each `CliCommand` carries
+  the rationale that distinguishes the foul-weather floor
+  (substrate-only HDEL) from the substrate-faithful path
+  (`newtron <node> ... remove-service` invoked directly on the
+  device shell, which still produces a NEWTRON_INTENT tombstone and
+  a rendered reverse ChangeSet — newtron's manual lever on the
+  device, not newtcon's mediated path).
+- **`operator_environment_pointers`** is REQUIRED on every teach
+  response. It names what the operator needs in their own
+  environment to execute the commands: ssh access, the tools that
+  ship by default on SONiC, and a pointer to the Rehearsal surface
+  for lab practice. Per the refined invariant #2, the operator's
+  capability is in their own tools; the contract acknowledges what
+  those tools are and where they live. A teach response that does
+  not name the operator's prerequisite environment is treating
+  newtcon as the execution venue, which is exactly what the refined
+  invariant rejects.
+- **`see_also[]`** cross-links to (a) the newtron-mediated surface
+  (Composer apply / refresh / remove) so the operator can compare
+  the manual path against the automated one; (b) the relevant
+  Rehearsal walkthrough so the operator can practice on a lab
+  device; (c) the underlying newtron principle so the operator can
+  read the substrate basis directly. Per operator-philosophy
+  invariant #5, every teach response surfaces the principle it
+  operationalizes.
+- **`content_version`** is the monotonically-increasing version
+  string of the teach catalog. Same shape and discipline as
+  Rehearsal's `content_version`. Consumers caching teach responses
+  see a changed `content_version` when any teach content is added,
+  removed, or modified.
 
 **Errors:**
-- Stale or already-consumed `preview_id` → 410 Gone with
-  `kind: "precondition_failure"`.
-- newtron-server unreachable mid-apply → 503 `newtron_unavailable`.
-- The write succeeded but post-write readback shows a mismatch
-  (daemon rejection) → 200 with `newtcon_post_write_readback.matches_intent
-  == false` and `applied_fields` reflecting the readback. The
-  operator is told what landed; no error is raised because the
-  write itself succeeded — the daemon's reaction is a downstream
-  substrate event the operator interprets.
+- Unknown `service` → 404 with `kind: "precondition_failure"`,
+  `condition: "service_unknown"`,
+  `condition_details: { service }`,
+  `next_action_hint: { verb: "list_services", endpoint: "/api/services" }`.
+- Unknown `network` or `node` → 404 with
+  `kind: "precondition_failure"` and the appropriate `condition`
+  per §Error Schema (`node_unknown`).
+- The service exists in the catalog but no teach content has been
+  authored against it yet → 404 with
+  `kind: "precondition_failure"`,
+  `condition: "teach_content_unauthored"`,
+  `condition_details: { service, content_version }`,
+  `next_action_hint: { verb: "consult_service_spec_directly", endpoint: null, rationale: "the substrate the service produces is documented at <service_spec_doc_url>; teach content for this service is on the authoring backlog" }`.
+  Per operator-philosophy invariant #9 ("confidence and limits are
+  explicit"), the surface is honest about which services it teaches
+  and which it does not.
 
-### `GET /api/manual_decomposition/{operation_kind}/{operation_id}`
+### `GET /api/manual/configdb/{network}/{node}/{table}/{key}/teach`
 
-Return the step-by-step manual decomposition of an automated action —
-the sequence of intent submissions (or per-CONFIG_DB-key writes) the
-operator would execute by hand to reproduce the same effect. Idempotent;
-safe to poll. No newtron-side state is mutated.
+Return teaching content for one CONFIG_DB key on one node. Idempotent;
+safe to poll. No newtron-side state is mutated; no newtron-side state
+is read at request time.
 
-**Why this endpoint exists.** Operator-philosophy invariant #2's
-"anything the automation can do, the operator can do by hand" is
-binding only if the operator can SEE the decomposition. Without this
-endpoint, a Composer apply that writes 8 intent records (one
-ApplyService, plus VRF/ACL/route-map derived intents) is opaque at
-the manual level — the operator knows it ran but cannot rehearse
-the manual sequence that would have done the same. With this
-endpoint, the operator opens any operation and reads the exact list
-of intent submissions, in order, that would reproduce it.
+The endpoint is the operator's discovery affordance for "I'm looking
+at this CONFIG_DB key; teach me what it represents and how to
+interact with it manually." The teach content names what the table
+and key represent in SONiC, which daemons consume it, what the fields
+mean, the operator's-own-tools commands to read and (when
+appropriate) write it, and the load-bearing caution about whether the
+table is newtron-owned.
 
 **Path parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `operation_kind` | string | One of `composer_preview`, `composer_apply`, `inbox_action_preview`, `inbox_action`, `workbench_commit_preview`, `workbench_commit`, `workbench_revert_preview`, `workbench_revert`, `intent_submission_preview`, `intent_submission`, `configdb_write_preview`, `configdb_write`. Bounded enum. The two `configdb_write*` kinds decompose direct CONFIG_DB writes — typically a single step at `decomposition_level: per_configdb_keys` (the write IS its own substrate), and `equivalence_to_original.kind == "exact"` because no further decomposition exists. |
-| `operation_id` | string (opaque) | The newtcon-side ID of the operation to decompose. For `composer_apply`/`inbox_action`/`workbench_commit`/`intent_submission`/`configdb_write`, the `operation_id` minted by the corresponding apply endpoint. For preview-class kinds, the `preview_id`. |
+| `network` | string | Network name. |
+| `node` | string | Node name. |
+| `table` | string | CONFIG_DB table name. Validated against newtron's known-table catalog (the union of newtron-owned tables and the tables newtron's documentation describes as third-party-managed). |
+| `key` | string | CONFIG_DB key inside the table. URL-encoded (Redis `\|` separators in keys are `%7C` on the wire). |
+
+**Response 200:**
+```json
+{
+  "content_version": "2026-05-26.1",
+  "network": "default",
+  "node": "switch1",
+  "table": "BGP_NEIGHBOR",
+  "key": "default|10.1.0.1",
+  "table_summary": {
+    "name": "BGP_NEIGHBOR",
+    "summary": "Per-peer BGP neighbor configuration consumed by bgpd. Keys are 'vrf|peer-address'; fields include asn (peer AS), local_addr (this node's address on the peering link), name (operator-facing label), holdtime, keepalive.",
+    "table_doc_url": "https://github.com/sonic-net/SONiC/blob/master/doc/swss/swss-config.md#bgp_neighbor"
+  },
+  "fields_typical": [
+    { "field": "asn", "type": "string (numeric ASN, 1-4294967295)", "meaning": "Peer ASN." },
+    { "field": "local_addr", "type": "string (IPv4 or IPv6)", "meaning": "This node's address on the peering link." },
+    { "field": "name", "type": "string", "meaning": "Operator-facing label, surfaced by show ip bgp summary." },
+    { "field": "holdtime", "type": "string (seconds)", "meaning": "BGP hold timer; default 180." },
+    { "field": "keepalive", "type": "string (seconds)", "meaning": "BGP keepalive timer; default 60." }
+  ],
+  "consumed_by_daemons": [
+    {
+      "daemon": "bgpd",
+      "daemon_doc_url": "https://github.com/sonic-net/SONiC/blob/master/doc/quagga/Quagga-Setup.md",
+      "rationale": "FRR's bgpd reads BGP_NEIGHBOR via the swss orchestrator; changes propagate to the running BGP session within seconds via vtysh-equivalent reconfiguration."
+    }
+  ],
+  "ownership": {
+    "newtron_owned": true,
+    "owned_when": "When a NEWTRON_INTENT record exists for the key's owning service (e.g., an apply-service intent for an interface address that resolves to this peer-address), the entry is newtron-owned and asserted on every reconcile. When no owning intent exists, the entry may be operator-authored or third-party-authored; newtron treats it as drift relative to its projection (no intent records the entry).",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+    }
+  },
+  "manual_inspect": [
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 redis-cli -n 4 HGETALL 'BGP_NEIGHBOR|default|10.1.0.1'",
+      "rationale": "Read all fields of this BGP_NEIGHBOR entry.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#4-sonic-is-a-database--treat-it-as-one"
+      }
+    },
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 'redis-cli -n 4 KEYS NEWTRON_INTENT* | xargs -I {} redis-cli -n 4 HGET {} resolved_params | grep -l 10.1.0.1'",
+      "rationale": "Find the NEWTRON_INTENT record (if any) whose resolved_params claim ownership of this peer address. If a match is found, the entry is newtron-owned; if none, the entry is drift or operator-authored.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#intent-record-shape",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      }
+    },
+    {
+      "tool": "ssh_vendor_cli",
+      "command": "ssh switch1 vtysh -c 'show ip bgp neighbors 10.1.0.1'",
+      "rationale": "Inspect bgpd's view of the session (peer state, message counters, prefixes received). This is the dataplane-side observation; the CONFIG_DB entry above is the control-plane input.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/hld.md#node-as-device",
+        "principle": "docs/operator-philosophy.md#3-the-substrate-is-the-teaching-surface"
+      }
+    }
+  ],
+  "manual_modify_caution": {
+    "kind": "newtron_owned_substrate_warning",
+    "message": "BGP_NEIGHBOR is a newtron-owned table when an apply-service intent claims the peer. A direct redis-cli HSET against this key bypasses newtron's intent path: no NEWTRON_INTENT update is produced, so Replay cannot reconstruct your change. The next reconcile will treat your change as drift and either revert it (delta reconcile against the intent's resolved asn) or surface it on the Inbox drift card. If you intend to change this peer's parameters, the substrate-faithful path is to issue refresh-service (newtron will re-resolve and re-render) — see manual_write_if_unavoidable below. If you must write directly (e.g., emergency mitigation when newtron is unavailable), expect drift on the next reconcile; the surface acknowledges this honestly.",
+    "rationale_ref": {
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+      "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+    }
+  },
+  "manual_write_if_unavoidable": [
+    {
+      "tool": "ssh_vendor_cli",
+      "command": "ssh switch1 newtron switch1 interface Ethernet0 refresh-service --param asn=65003",
+      "rationale": "Substrate-faithful path: invoke newtron's refresh-service on the device shell; newtron re-resolves spec, updates the NEWTRON_INTENT resolved_params, and renders the new ChangeSet (one BGP_NEIGHBOR HSET, the field-level diff). The intent record stays in sync; the next reconcile is a no-op. Use this whenever newtron-on-the-device is reachable.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#9-symmetric-operations",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      }
+    },
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65003",
+      "rationale": "Foul-weather direct write: HSET the field. The change lands; bgpd picks it up within seconds; the NEWTRON_INTENT record is now stale (resolved_params still says the old asn). On the next reconcile, newtron treats this as drift; you must follow up with refresh-service (above) once newtron is reachable, or accept the drift card the Inbox will surface. Use ONLY when newtron-on-the-device is unreachable.",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+        "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+      }
+    }
+  ],
+  "manual_delete_if_unavoidable": [
+    {
+      "tool": "ssh_redis_cli",
+      "command": "ssh switch1 redis-cli -n 4 DEL 'BGP_NEIGHBOR|default|10.1.0.1'",
+      "rationale": "Delete the entry; bgpd tears down the session within seconds. If a NEWTRON_INTENT record still claims this peer, the next reconcile will recreate the entry. To remove the entry permanently, run the service's remove-service on the device shell (see /api/manual/services/<service>/instances/.../teach for the service-instance teach).",
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+      }
+    }
+  ],
+  "operator_environment_pointers": {
+    "ssh_access": "You will need ssh access to the device. Device-credential management is owned by your existing operator toolchain; newtcon does not provision or store device credentials.",
+    "redis_cli_on_device": "redis-cli ships with SONiC at /usr/bin/redis-cli; CONFIG_DB is at -n 4.",
+    "vendor_cli_on_device": "vtysh ships with FRR in SONiC.",
+    "see_also_lab_setup": {
+      "kind": "rehearsal_walkthrough_pointer",
+      "rationale": "If you have not practiced writes to this table on a lab device, run the most relevant Rehearsal walkthrough (see /api/rehearsal/walkthroughs?category=drift) on a lab device you own before writing to this key on a production node."
+    }
+  },
+  "see_also": [
+    {
+      "kind": "newtcon_surface",
+      "name": "Provenance — projection for this node",
+      "endpoint": "/api/projection/nodes/switch1",
+      "rationale": "Read what newtron's projection says this key SHOULD contain right now (the resolved_params derived from intent replay). Compare against the redis-cli HGETALL output to spot drift."
+    },
+    {
+      "kind": "rehearsal_walkthrough",
+      "walkthrough_id": "drift-bgp-asn-modified-recovery",
+      "endpoint": "/api/rehearsal/walkthroughs/drift-bgp-asn-modified-recovery",
+      "rationale": "Walkthrough teaching the substrate-mechanics of drift on this exact table; practice before writing manually."
+    },
+    {
+      "kind": "newtron_principle",
+      "name": "DESIGN_PRINCIPLES_NEWTRON.md §1",
+      "url": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object",
+      "rationale": "Substrate basis for the manual_modify_caution: the Node holds intent AND reality in one object; a write that bypasses the intent path breaks the invariant."
+    }
+  ]
+}
+```
+
+Field rules:
+
+- **`table_summary`** is the substrate-grounded description of what
+  the table represents and which daemons consume it. The
+  `table_doc_url` points at SONiC's own documentation; the surface
+  does not paraphrase what SONiC already documents.
+- **`fields_typical[]`** is the catalog-known field shape. Per
+  operator-philosophy invariant #1 ("no black boxes"), every field
+  the operator might read or write is named. Empty
+  `fields_typical[]` is admissible only for opaque tables where the
+  field shape is operator-domain-specific (third-party tables
+  newtron's catalog does not characterize); in that case
+  `fields_typical[]` is omitted entirely and `table_summary.summary`
+  acknowledges the gap.
+- **`consumed_by_daemons[]`** names every daemon that reads the
+  entry, with documentation pointers. Per operator-philosophy
+  invariant #3 ("the substrate is the teaching surface"), the
+  operator who reads this teach must come away knowing which
+  daemons are downstream of a write to this key.
+- **`ownership`** is the load-bearing field for the operator's
+  decision about how to write. `newtron_owned: true` triggers the
+  `manual_modify_caution` (writing directly bypasses the intent
+  path); `newtron_owned: false` removes the caution but the surface
+  still names the daemon-state warning if appropriate. The
+  `owned_when` field is the substrate-grounded explanation of when
+  ownership applies (typically: when an intent record claims the
+  key).
+- **`manual_inspect[]`** mirrors the service-instance teach's
+  inspect block: read both the CONFIG_DB entry and (when relevant)
+  the corresponding NEWTRON_INTENT record so the operator sees both
+  halves of the substrate.
+- **`manual_modify_caution`** is REQUIRED on every teach response.
+  Its `kind` is one of the bounded enum (`newtron_owned_substrate_warning`,
+  `daemon_state_warning`, `dataplane_disruption_warning`,
+  `no_warning_applicable`). `no_warning_applicable` is reserved for
+  tables newtron neither owns nor reads (operator-side custom
+  tables); even then, the rationale documents why no warning
+  applies.
+- **`manual_write_if_unavoidable[]`** is the two-tier teaching: the
+  substrate-faithful path first (`newtron` on the device shell, when
+  newtron-on-the-device is available), then the foul-weather direct
+  HSET path. The ordering is intentional — operator-philosophy
+  invariant #9 ("confidence and limits are explicit") binds: the
+  surface teaches the right path first and the floor path second,
+  with explicit acknowledgment that the floor produces drift the
+  operator must reconcile later.
+- **`manual_delete_if_unavoidable[]`** is the symmetric counterpart
+  for removal. Notably, the surface does NOT recommend a foul-
+  weather direct DEL as the primary delete path — for newtron-owned
+  tables, the substrate-faithful delete is the service's
+  remove-service (cross-linked); the direct DEL is named because
+  the operator needs to know it exists, but the teach steers them to
+  the service-instance teach for the canonical removal.
+- **`see_also[]`** cross-links to Provenance (so the operator can
+  read newtron's projection for the same key), to a relevant
+  Rehearsal walkthrough (so the operator can practice writes to
+  this table-class on a lab device), and to the substrate principle.
+
+**Errors:**
+- Unknown `network` or `node` → 404 with
+  `kind: "precondition_failure"` and `condition: "node_unknown"` per
+  §Error Schema.
+- The table is not in newtron's known-table catalog → 404 with
+  `kind: "precondition_failure"`,
+  `condition: "table_unknown"`,
+  `condition_details: { network, node, table }`,
+  `next_action_hint: { verb: "consult_sonic_swss_config_doc", endpoint: null, rationale: "SONiC's swss documentation enumerates CONFIG_DB tables; if the table exists in SONiC but is not in newtron's catalog, teach content for it has not been authored" }`.
+  Per operator-philosophy invariant #9, the surface is honest about
+  the boundaries of what it teaches.
+- The table is known but no teach content has been authored against
+  it yet → 404 with
+  `kind: "precondition_failure"`,
+  `condition: "teach_content_unauthored"`,
+  `condition_details: { table, content_version }`,
+  `next_action_hint: { verb: "consult_table_documentation_directly", endpoint: null, rationale: "the table is documented in SONiC's swss config doc; teach content for this table is on the authoring backlog" }`.
+
+### `GET /api/manual/scenarios`
+
+List the available manual-operation scenarios. Idempotent; safe to
+poll. Returns the catalog summary; per-scenario detail is at
+[`GET /api/manual/scenarios/{scenario_id}`](#get-apimanualscenariosscenario_id).
+
+Scenarios cover common day-job manual operations the operator runs
+against the device directly — clearing a stale BGP neighbor entry,
+inspecting MAC-learning state, force-clearing a daemon's transient
+cache, capturing a packet on a transit interface. They are NOT
+failure-recovery walkthroughs — those live in
+[§Endpoints — Rehearsal](#endpoints--rehearsal-teaching-surface). The
+two surfaces compose: Rehearsal teaches failure-scenario walkthroughs
+the operator practices on a lab device; this surface teaches day-job
+manual operations the operator runs on the device (lab or production)
+as part of normal hand-operation.
 
 **Query parameters:**
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `decomposition_level` | string | `intent_submissions` | One of `intent_submissions` (the operator's first-class manual lever), `per_configdb_keys` (the lowest-level decomposition; expands intent submissions into the per-table-per-key writes they produce; useful for forensic-level inspection of what a write actually does in CONFIG_DB), `verb_endpoints` (the per-verb newtron HTTP endpoints; a middle-ground for operators who prefer the typed-verb path over raw-intent submission). |
+| `category` | string | _omitted_ | Filter to one category. One of `bgp`, `interface`, `vlan`, `vrf`, `mac_learning`, `dataplane_inspection`. Unknown → 400 `validation_failure`. |
 
 **Response 200:**
 ```json
 {
-  "operation_kind": "composer_apply",
-  "operation_id": "<echoed>",
-  "operation_url": "/api/operations/<opaque>",
-  "decomposition_level": "intent_submissions",
-  "as_of": "2026-05-26T14:11:00Z",
-  "steps": [
+  "content_version": "2026-05-26.1",
+  "categories": [
+    { "category": "bgp", "name": "BGP manual operations", "scenario_count": 3 },
+    { "category": "interface", "name": "Interface manual operations", "scenario_count": 2 },
+    { "category": "vlan", "name": "VLAN manual operations", "scenario_count": 1 },
+    { "category": "mac_learning", "name": "MAC-learning inspection", "scenario_count": 2 },
+    { "category": "dataplane_inspection", "name": "Dataplane inspection", "scenario_count": 2 }
+  ],
+  "scenarios": [
     {
-      "step": 1,
-      "purpose": "Create parent VRF intent (newtron's spec resolution decided this was required because the service spec declared a VRF that did not yet exist).",
-      "purpose_rationale_ref": {
-        "substrate": "newtron/docs/newtron/intents.md#724-applyservice",
-        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
-      },
-      "newtcon_endpoint": {
-        "method": "POST",
-        "path": "/api/intents/preview",
-        "body": {
-          "intents": [
-            {
-              "operation": "create-vrf",
-              "network": "default",
-              "node": "switch1",
-              "resource_key": "vrf|Vrf_TRANSIT",
-              "name": "Vrf_TRANSIT",
-              "state": "actuated",
-              "user_params": { "name": "Vrf_TRANSIT" },
-              "parents": ["device"],
-              "resolved_params_strategy": "let_newtron_resolve"
-            }
-          ]
-        }
-      },
-      "newtron_substrate_call": {
-        "manual_equivalent": {
-          "newtron_cli": "newtron switch1 create-vrf --name Vrf_TRANSIT",
-          "newtron_http": {
-            "status": "available",
-            "method": "POST",
-            "path": "/network/default/node/switch1/create-vrf",
-            "body": { "name": "Vrf_TRANSIT" }
-          }
-        }
-      },
-      "produces_intents": ["vrf|Vrf_TRANSIT"],
-      "produces_configdb_keys": [
-        { "table": "VRF", "key": "Vrf_TRANSIT" },
-        { "table": "NEWTRON_INTENT", "key": "vrf|Vrf_TRANSIT" }
+      "scenario_id": "manually-clear-stale-bgp-neighbor",
+      "category": "bgp",
+      "name": "Manually clear a stale BGP_NEIGHBOR entry",
+      "summary": "A BGP_NEIGHBOR entry persists in CONFIG_DB after the peer is gone (no intent claims it; bgpd is still trying to dial). Inspect, confirm staleness against the intent DB, delete the CONFIG_DB key, confirm bgpd has dropped the peer.",
+      "estimated_reading_time": "PT5M",
+      "step_count": 4,
+      "teaches": [
+        "How to identify a CONFIG_DB entry with no owning intent record",
+        "How to read bgpd's view of a peer via vtysh",
+        "How a DEL on BGP_NEIGHBOR propagates to bgpd's session state"
       ]
     },
     {
-      "step": 2,
-      "purpose": "Submit the primary ApplyService intent. With the VRF parent now present, I4 is satisfied. resolved_params_strategy: let_newtron_resolve so newtron computes content-hashed route-map and ACL references at submission time.",
-      "purpose_rationale_ref": {
-        "substrate": "newtron/docs/newtron/intents.md#724-applyservice",
-        "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
-      },
-      "newtcon_endpoint": {
-        "method": "POST",
-        "path": "/api/intents/preview",
-        "body": {
-          "intents": [
-            {
-              "operation": "apply-service",
-              "network": "default",
-              "node": "switch1",
-              "resource_key": "interface|Ethernet0",
-              "name": "transit",
-              "state": "actuated",
-              "user_params": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 },
-              "parents": ["vrf|Vrf_TRANSIT", "service|transit"],
-              "resolved_params_strategy": "let_newtron_resolve"
-            }
-          ]
-        }
-      },
-      "newtron_substrate_call": {
-        "manual_equivalent": {
-          "newtron_cli": "newtron switch1 apply-service --interface Ethernet0 --service transit --ip 10.1.0.0/31 --peer-as 65002",
-          "newtron_http": {
-            "status": "available",
-            "method": "POST",
-            "path": "/network/default/node/switch1/apply-service",
-            "body": {
-              "interface": "Ethernet0",
-              "params": { "service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002 }
-            }
-          }
-        }
-      },
-      "produces_intents": ["interface|Ethernet0", "service|transit", "route-map|TRANSIT_IN_A1B2C3D4", "..."],
-      "produces_configdb_keys": [
-        { "table": "BGP_NEIGHBOR", "key": "default|10.1.0.1" },
-        { "table": "INTERFACE", "key": "Ethernet0" },
-        { "table": "ROUTE_MAP", "key": "TRANSIT_IN_A1B2C3D4" },
-        { "table": "NEWTRON_INTENT", "key": "interface|Ethernet0" }
+      "scenario_id": "manually-inspect-mac-learning",
+      "category": "mac_learning",
+      "name": "Manually inspect MAC-learning on a VLAN interface",
+      "summary": "Read the FDB_TABLE entries for a VLAN; correlate against the operator-facing port for each MAC; confirm the dataplane FDB matches via show mac-address-table.",
+      "estimated_reading_time": "PT3M",
+      "step_count": 3,
+      "teaches": [
+        "FDB_TABLE structure and keys",
+        "Where MAC-learning lives in the control vs dataplane split"
       ]
     }
-  ],
-  "step_count": 2,
-  "ordering_rationale": "Steps are ordered to satisfy intent DAG invariant I4 (parents must exist before children, per newtron/docs/newtron/intents.md §2): VRF intent first because the ApplyService intent declares it as a parent.",
-  "ordering_rationale_ref": {
-    "substrate": "newtron/docs/newtron/intents.md#2-dag-invariants",
-    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#20-on-device-intent-is-sufficient-for-reconstruction"
-  },
-  "equivalence_to_original": {
-    "kind": "exact | partial | structurally_equivalent",
-    "rationale": "Step-by-step manual submissions through /api/intents are bit-equivalent to what newtcon's Composer apply executed: same operation verbs, same resource keys, same user params, same parents, same resolved_params_strategy. The decomposition's ChangeSets are bit-identical to the original's ChangeSets, modulo timestamps."
-  },
-  "equivalence_rationale_ref": {
-    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#2-one-pipeline",
-    "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
-  },
-  "rehearsal_hint": {
-    "verb": "browse_walkthroughs_and_practice_on_lab_device",
-    "endpoint": "/api/rehearsal/walkthroughs",
-    "rationale": "To practice this decomposition without affecting production, browse the Rehearsal teaching surface for a walkthrough that exercises the same substrate (drift recovery, zombie cleanup, partial-commit recovery, etc.), and execute the walkthrough's forward_cli steps on a lab device you own. The walkthroughs use ssh + redis-cli + vendor CLI directly against the lab device, so the practice rehearses the operator's-own-tools path that this decomposition would execute manually."
-  }
+  ]
 }
 ```
 
 Field rules:
 
-- **`decomposition_level`** is the discriminator for the granularity
-  of the decomposition. `intent_submissions` is the default and the
-  operator's first-class manual lever — it matches the surface the
-  operator can drive directly via `/api/intents`. `per_configdb_keys`
-  is the deepest forensic view — each intent submission expands to
-  the per-table-per-key writes the Render stage would produce.
-  `verb_endpoints` is the middle ground: the typed-verb newtron HTTP
-  endpoints (e.g., `apply-service`, `create-vlan`) that the
-  automation chose internally; useful for operators who prefer to
-  hand-call newtron's verb catalog rather than submit raw intents.
-- **`steps[*].purpose`** is the substrate-grounded rationale for the
-  step's existence — WHY this step is in the decomposition. Per
-  operator-philosophy invariant #5 ("why-mode is always available"),
-  every step explains itself in the substrate's own terms. Empty or
-  generic `purpose` strings are a contract smell; the Architecture
-  Reviewer rejects decomposition responses with non-substrate-grounded
-  purpose text.
-- **`steps[*].newtcon_endpoint`** is the EXACT newtcon HTTP call the
-  operator would issue to execute this step manually. The body is
-  copy-pasteable into the operator's HTTP client.
-- **`steps[*].newtron_substrate_call.manual_equivalent`** is the
-  underlying newtron HTTP call (or CLI) the step's
-  `newtcon_endpoint` would internally translate to. Surfaced so the
-  operator who prefers calling newtron directly (bypassing newtcon)
-  can do so. Per operator-philosophy invariant #2, both paths are
-  legitimate; the contract surfaces both.
-- **`steps[*].produces_intents[]`** lists the resource-keys of every
-  intent record this step writes. Per `DESIGN_PRINCIPLES_NEWTRON.md`
-  §1, the intent record IS the decision substrate; surfacing what
-  intents each step produces lets the operator trace step → intent →
-  Provenance directly.
-- **`steps[*].produces_configdb_keys[]`** lists the CONFIG_DB
-  table+key pairs the step's Render stage writes. The list is
-  derived from newtron's render-time logs (today exposed in process
-  logs; expected to come through structured render-decisions in
-  future, per the gap on the §ChangeSet endpoint).
-- **`ordering_rationale`** explains why steps are in this order.
-  For decompositions that span multiple intents with DAG
-  dependencies, ordering MUST satisfy I4 (parents before children).
-  An ordering violation is a contract violation.
-- **`equivalence_to_original.kind`** discriminates:
-  - `exact` — the decomposition reproduces the original
-    bit-for-bit modulo timestamps. Available when the original was
-    itself an `/api/intents` submission or when the per-verb
-    automation has a clean intent-decomposition.
-  - `partial` — the decomposition reproduces a subset of the
-    original's effects; remaining effects cannot be reproduced via
-    the requested `decomposition_level`. The `rationale` names what
-    is missing and why. Used, e.g., when the automation invoked a
-    baseline operation (`setup-*`, `set-*`) whose individual
-    reverse is `Reconcile()` (per
-    `DESIGN_PRINCIPLES_NEWTRON.md` §15) and cannot be decomposed
-    further at the chosen level.
-  - `structurally_equivalent` — the decomposition produces the same
-    set of intent records and ChangeSet entries but through a
-    different ordering than the automation chose. Used for
-    decompositions where the operator's manual ordering is
-    permissible (does not violate I4) but does not match the
-    automation's chosen order.
-- **`equivalence_to_original.kind == "partial"`** with a non-empty
-  rationale is HONEST, not a defect. Per operator-philosophy
-  invariant #9 ("confidence and limits are explicit"), the
-  decomposition surface acknowledges when it cannot fully decompose
-  rather than fabricating a "complete" decomposition that would
-  mislead the operator.
-- **`rehearsal_hint`** is REQUIRED. The decomposition surface is
-  inert without rehearsal — reading the decomposition is teaching;
-  practicing it on a lab device the operator owns is capability-
-  amplification. Per operator-philosophy invariant #6 ("rehearsal
-  mode is real" — reframed: rehearsal is real-tool rehearsal on
-  operator-owned hardware, not a tool-mediated sandbox), the
-  decomposition surface always points to the
-  [§Endpoints — Rehearsal (teaching surface)](#endpoints--rehearsal-teaching-surface),
-  whose walkthroughs are practiced on the operator's lab device with
-  the operator's own tools.
+- **`scenarios[]`** is the scenario catalog. Order is stable within
+  category for a given `content_version`. Each scenario carries the
+  same summary fields as a Rehearsal walkthrough summary (name,
+  summary, estimated_reading_time, step_count, teaches[]).
+- **`teaches[]`** is substrate-grounded per operator-philosophy
+  invariant #3. Empty or generic `teaches[]` is a contract smell
+  rejected by the Architecture Reviewer.
 
 **Errors:**
-- Unknown `operation_kind` → 400 `validation_failure` with
+- Unknown `category` → 400 `validation_failure` with
   `details.rejections[*].reason == "unknown_value"` and
   `details.rejections[*].allowed` carrying the bounded enum.
-- Unknown or evicted `operation_id` → 404 with
-  `kind: "precondition_failure"` and the appropriate condition
-  (`operation_unknown_or_expired`, `operation_evicted`, or
-  `preview_id_unknown` per the original operation class).
-- newtron-server unreachable → 503 `newtron_unavailable` per the
-  typed schema in §Error Schema.
 
-### Manual-mode parity composes with the Rehearsal teaching surface
+### `GET /api/manual/scenarios/{scenario_id}`
 
-The Manual-Mode Parity surface and the Rehearsal teaching surface are
-two halves of one capability-amplification arc, and they compose
-without any Rehearsal-scoped sibling endpoint:
+Return the full scenario teaching content — every step, every CLI
+command, the substrate locators. Idempotent; safe to poll. No
+newtron-side state is mutated.
 
-- The Manual-Mode Parity surface (this section) gives the operator
-  the **production manual lever** — hand-authoring an intent, writing
-  a non-newtron-owned CONFIG_DB key, reading the decomposition of any
-  automated action. These are real endpoints that execute against
-  real devices.
-- The Rehearsal teaching surface (see
-  [§Endpoints — Rehearsal](#endpoints--rehearsal-teaching-surface))
-  gives the operator the **practice ground for the operator's own
-  tools** — walkthroughs of failure scenarios that the operator
-  executes on a lab device they own, using ssh + redis-cli + vendor
-  CLI directly. The walkthroughs do not invoke any production
-  endpoint; they teach the substrate so the operator can practice
-  independently.
+**Response 200:**
+```json
+{
+  "content_version": "2026-05-26.1",
+  "scenario_id": "manually-clear-stale-bgp-neighbor",
+  "category": "bgp",
+  "name": "Manually clear a stale BGP_NEIGHBOR entry",
+  "summary": "A BGP_NEIGHBOR entry persists in CONFIG_DB after the peer is gone (no intent claims it; bgpd is still trying to dial). Inspect, confirm staleness against the intent DB, delete the CONFIG_DB key, confirm bgpd has dropped the peer.",
+  "teaches": [
+    "How to identify a CONFIG_DB entry with no owning intent record",
+    "How to read bgpd's view of a peer via vtysh",
+    "How a DEL on BGP_NEIGHBOR propagates to bgpd's session state"
+  ],
+  "teaches_rationale_ref": {
+    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
+    "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
+  },
+  "prerequisites": {
+    "operator_tooling": [
+      "ssh access to the device",
+      "redis-cli (default in SONiC)",
+      "vtysh (default in SONiC)"
+    ],
+    "starting_state_description": "Device has at least one BGP_NEIGHBOR entry whose peer is unreachable; bgpd's connection state shows Active or Idle for that peer.",
+    "out_of_scope": [
+      "Re-establishing the peer (this scenario is about clearing the stale entry, not provisioning a new one — for that, use Composer apply-service)",
+      "Multi-Node coordination (this scenario is per-Node manual cleanup)"
+    ]
+  },
+  "operator_environment_pointers": {
+    "ssh_access": "You will need ssh access to the device. Device-credential management is owned by your existing operator toolchain.",
+    "redis_cli_on_device": "redis-cli ships with SONiC at /usr/bin/redis-cli; CONFIG_DB is at -n 4.",
+    "vendor_cli_on_device": "vtysh ships with FRR in SONiC.",
+    "newtcon_not_required": "All steps run via ssh + redis-cli or ssh + vtysh against the device directly. newtcon's role in this scenario is to TEACH the steps; the operator EXECUTES them on their own tools."
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "name": "Identify the candidate stale entry",
+      "purpose": "List BGP_NEIGHBOR entries on the device. Identify the entry whose peer you suspect is stale.",
+      "purpose_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#4-sonic-is-a-database--treat-it-as-one"
+      },
+      "starting_substrate": [
+        {
+          "kind": "configdb_key",
+          "network": "default",
+          "node": "switch1",
+          "table": "BGP_NEIGHBOR",
+          "key": "*"
+        }
+      ],
+      "forward_cli": [
+        {
+          "tool": "ssh_redis_cli",
+          "command": "ssh switch1 redis-cli -n 4 KEYS 'BGP_NEIGHBOR|*'",
+          "rationale": "Enumerate the BGP_NEIGHBOR entries; identify the one matching the suspect peer address.",
+          "rationale_ref": {
+            "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+            "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#4-sonic-is-a-database--treat-it-as-one"
+          }
+        }
+      ],
+      "reverse_cli": [],
+      "reverse_cli_rationale": "Read-only step; no reverse needed.",
+      "verify_step_completion": {
+        "what_to_check": "The output lists at least one BGP_NEIGHBOR key. Capture the key for the suspect peer.",
+        "if_missing": "If no BGP_NEIGHBOR entries exist, there is no stale entry to clear; the scenario does not apply."
+      }
+    },
+    {
+      "step_number": 2,
+      "name": "Confirm staleness against the intent DB",
+      "purpose": "Check whether a NEWTRON_INTENT record claims this peer. If none does, the entry is stale relative to newtron's authoritative substrate.",
+      "purpose_rationale_ref": {
+        "substrate": "newtron/docs/newtron/intents.md#intent-record-shape",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+      },
+      "starting_substrate": [
+        {
+          "kind": "intent_record",
+          "network": "default",
+          "node": "switch1",
+          "intent_key": "service|*"
+        }
+      ],
+      "forward_cli": [
+        {
+          "tool": "ssh_redis_cli",
+          "command": "ssh switch1 'redis-cli -n 4 KEYS NEWTRON_INTENT* | xargs -I {} redis-cli -n 4 HGET {} resolved_params | grep 10.1.0.1'",
+          "rationale": "Search the NEWTRON_INTENT records for any whose resolved_params reference the suspect peer address. If grep returns nothing, no intent claims the peer; the BGP_NEIGHBOR entry is stale.",
+          "rationale_ref": {
+            "substrate": "newtron/docs/newtron/intents.md#intent-record-shape",
+            "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
+          }
+        }
+      ],
+      "reverse_cli": [],
+      "reverse_cli_rationale": "Read-only step; no reverse needed.",
+      "verify_step_completion": {
+        "what_to_check": "grep returns no matches. If it does, an intent record DOES claim the peer; the entry is not stale, and you should reconsider whether deletion is appropriate (use Composer remove-service instead).",
+        "if_missing": "If grep finds a match, halt; the entry is owned. Use the service-instance teach (/api/manual/services/<service>/instances/.../teach) for the substrate-faithful removal path."
+      }
+    },
+    {
+      "step_number": 3,
+      "name": "Delete the stale entry",
+      "purpose": "Remove the CONFIG_DB key. bgpd will drop the peer's session within seconds.",
+      "purpose_rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+      },
+      "starting_substrate": [
+        {
+          "kind": "configdb_key",
+          "network": "default",
+          "node": "switch1",
+          "table": "BGP_NEIGHBOR",
+          "key": "default|10.1.0.1"
+        }
+      ],
+      "forward_cli": [
+        {
+          "tool": "ssh_redis_cli",
+          "command": "ssh switch1 redis-cli -n 4 DEL 'BGP_NEIGHBOR|default|10.1.0.1'",
+          "rationale": "Delete the stale entry. bgpd's swss listener sees the deletion and tears down the session.",
+          "rationale_ref": {
+            "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+            "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+          }
+        }
+      ],
+      "reverse_cli": [
+        {
+          "tool": "ssh_redis_cli",
+          "command": "ssh switch1 redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn <captured-from-step-1> local_addr <captured-from-step-1> name <captured-from-step-1>",
+          "rationale": "Restore the entry from the fields you captured in step 1, if you decide to back out the deletion. Bgpd will re-attempt the peer.",
+          "rationale_ref": {
+            "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+            "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
+          }
+        }
+      ],
+      "reverse_cli_rationale": "Symmetric reverse: the entry can be restored by HSET-ing the captured fields. In production manual operations, the reverse is the safety net for an operator who deletes the wrong key.",
+      "verify_step_completion": {
+        "what_to_check": "redis-cli HGETALL on the key returns empty. Proceed to step 4.",
+        "if_missing": "If the DEL returned an error, redis-cli could not write; diagnose ssh / redis-cli access before continuing."
+      }
+    },
+    {
+      "step_number": 4,
+      "name": "Confirm bgpd has dropped the peer",
+      "purpose": "Verify the session is gone from bgpd's view.",
+      "purpose_rationale_ref": {
+        "substrate": "newtron/docs/newtron/hld.md#node-as-device",
+        "principle": "docs/operator-philosophy.md#3-the-substrate-is-the-teaching-surface"
+      },
+      "starting_substrate": [
+        {
+          "kind": "configdb_key",
+          "network": "default",
+          "node": "switch1",
+          "table": "BGP_NEIGHBOR",
+          "key": "default|10.1.0.1"
+        }
+      ],
+      "forward_cli": [
+        {
+          "tool": "ssh_vendor_cli",
+          "command": "ssh switch1 vtysh -c 'show ip bgp summary'",
+          "rationale": "List bgpd's active peers. The deleted peer should be absent from the summary.",
+          "rationale_ref": {
+            "substrate": "newtron/docs/newtron/hld.md#node-as-device",
+            "principle": "docs/operator-philosophy.md#3-the-substrate-is-the-teaching-surface"
+          }
+        }
+      ],
+      "reverse_cli": [],
+      "reverse_cli_rationale": "Read-only step; no reverse needed.",
+      "verify_step_completion": {
+        "what_to_check": "The deleted peer is absent from the summary. The cleanup is complete.",
+        "if_missing": "If bgpd still lists the peer, give it 5-10 seconds (swss propagation latency) and retry. If it persists, bgpd may need a restart — escalate per your operator runbook."
+      }
+    }
+  ],
+  "step_count": 4,
+  "see_also": [
+    {
+      "kind": "newtcon_surface",
+      "name": "Composer remove-service",
+      "endpoint": "/api/preview",
+      "rationale": "newtron-mediated path: when the entry IS owned by an intent, the substrate-faithful removal is remove-service through Composer. Use this scenario only when no intent claims the entry."
+    },
+    {
+      "kind": "rehearsal_walkthrough",
+      "walkthrough_id": "zombie-apply-service-crash-recovery",
+      "endpoint": "/api/rehearsal/walkthroughs/zombie-apply-service-crash-recovery",
+      "rationale": "Adjacent failure scenario: an apply-service crashed mid-Deliver and left a partial substrate. The Rehearsal walkthrough teaches the recovery; practice on a lab device."
+    },
+    {
+      "kind": "newtron_principle",
+      "name": "DESIGN_PRINCIPLES_NEWTRON.md §1",
+      "url": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object",
+      "rationale": "The substrate basis for distinguishing stale (no intent claims it) from owned (an intent does)."
+    }
+  ]
+}
+```
+
+Field rules:
+
+- **`steps[]`** uses the same step shape as Rehearsal walkthrough
+  steps: `step_number`, `name`, `purpose`, `purpose_rationale_ref`,
+  `starting_substrate[]`, `forward_cli[]`, `reverse_cli[]`,
+  `reverse_cli_rationale`, `verify_step_completion`. The shapes are
+  identical so the frontend reuses Rehearsal's renderers; the
+  difference is the surface's intent (day-job manual operation vs
+  failure-scenario walkthrough).
+- **`forward_cli[*]`** is a `CliCommand` (see §Endpoints — Rehearsal
+  §Field shapes). Tools are `ssh_redis_cli` or `ssh_vendor_cli`
+  exclusively; commands never reference `newtron-server`, `newtcon`,
+  or `newtcon-server` as the point of execution. (Invoking
+  `newtron` as a command on the device shell is permitted where
+  newtron-on-the-device is the substrate-faithful path — see Hard
+  contract guarantees below.)
+- **`reverse_cli[]`** is REQUIRED for mutating steps. Read-only steps
+  (inspect, confirm) populate an empty `reverse_cli[]` with a
+  `reverse_cli_rationale` of "Read-only step; no reverse needed."
+- **`operator_environment_pointers`** is REQUIRED. The
+  `newtcon_not_required` assertion is load-bearing per the refined
+  invariant #2.
+
+**Errors:**
+- Unknown `scenario_id` → 404 with
+  `kind: "precondition_failure"`,
+  `condition: "scenario_unknown"`,
+  `condition_details: { scenario_id }`,
+  `next_action_hint: { verb: "list_scenarios", endpoint: "/api/manual/scenarios" }`.
+
+### Composes with the Rehearsal teaching surface
+
+The Manual-Mode Parity teaching surface and the Rehearsal teaching
+surface are the two halves of how newtcon honors invariants #2 and
+#6, and they compose without overlap:
+
+- **The Manual-Mode Parity teaching surface (this section) teaches
+  the day-job manual equivalent.** "I need to know how to do X by
+  hand right now — teach me the device-level path." The operator
+  reads the teach response, then executes on their own tools against
+  the device (production or lab).
+- **The Rehearsal teaching surface
+  ([§Endpoints — Rehearsal](#endpoints--rehearsal-teaching-surface))
+  teaches failure-scenario walkthroughs the operator practices on a
+  lab device.** "I want to be ready for the next time drift / a
+  zombie / a verify failure happens — let me walk through the
+  recovery on a lab device first." The operator reads the
+  walkthrough, then executes on a lab device they own.
+
+The two surfaces share vocabulary (`SubstrateLocator`, `CliCommand`)
+and discipline (static content, `content_version`, no `as_of`, no
+state mutation, no embedded terminal, CLI commands target the
+operator's own tools). They share cross-references — every teach
+response's `see_also[]` may link to a Rehearsal walkthrough, and
+every walkthrough's `see_also[]` may link to a manual-mode teach
+endpoint. They do not share endpoints, do not share IDs, and do not
+share request shapes — the surfaces are different because the
+operator's question is different.
 
 Per the refined operator-philosophy invariant #2 (manual-mode parity
 lives in the operator's own tools, not in newtcon's affordances) and
 the reframed invariant #6 (rehearsal must rehearse the case where
-newtron is the failure mode), there is no `POST
-/api/rehearsal/sessions/{sid}/intents` style sibling for these
-manual-mode endpoints. Such a sibling would be newtron-mediated
-rehearsal, which the reframe rejects. The Rehearsal teaching surface
-is read-only by construction; the practice happens on the operator's
-lab device.
+newtron is the failure mode), there is no newtcon-mediated execution
+path on either surface. The operator runs commands on their own ssh
+session against the device; newtcon teaches.
 
-When the operator wants to practice hand-authoring an intent before
-submitting it in production, the workflow is:
+### What this surface does not do (binding)
 
-1. Read the walkthrough nearest to the intended manual action via
-   [`GET /api/rehearsal/walkthroughs`](#get-apirehearsalwalkthroughs).
-2. Execute the walkthrough's `forward_cli` steps on a lab device the
-   operator owns. The lab-device guidance section names the
-   recommended setup.
-3. Once comfortable, return to this surface and submit the real
-   intent against the production node via
-   [`POST /api/intents/preview`](#post-apiintentspreview) followed by
-   [`POST /api/intents`](#post-apiintents).
+The Manual-Mode Parity teaching surface explicitly excludes the
+following shapes. They are not deferred-for-later; they are excluded
+by the refined invariant #2.
 
-The shape the operator submits in step 3 is the exact shape this
-contract defines — there is no parallel "rehearsal shape" to learn.
-Operator-philosophy invariant #2's "same surface" requirement binds
-on the production submission; the teaching surface teaches the
-underlying substrate the submission travels through, not a parallel
-universe.
+1. **No state-changing endpoints.** Every endpoint is `GET`. There is
+   no `POST /api/intents`, no `POST /api/configdb/.../write`, no
+   preview/apply pair, no `commit`, no `revert`. The earlier shape
+   (PR #33) had these endpoints; they are removed by this rewrite.
+   A contributor proposing a state-changing endpoint on this surface
+   is making the case for re-introducing the newtcon-mediated manual
+   lever; the Architecture Reviewer rejects on principle.
+2. **No embedded terminal.** No endpoint streams a shell session,
+   accepts shell input, executes shell commands on the operator's
+   behalf, or otherwise mediates terminal access to the device.
+   newtcon does not provide the terminal because newtcon being
+   unavailable is one of the failure modes parity exists to handle.
+   The operator's ssh client is the terminal.
+3. **No escape hatch.** No flag, no operator-attestation field, no
+   "advanced mode" toggle re-enables newtcon-mediated state changes.
+   The refined invariant #2 admits no exception: the manual capability
+   is in the operator's own tools, end of statement.
+4. **No newtcon-mediated decomposition execution.** The earlier shape
+   exposed `GET /api/manual_decomposition/...` returning a
+   step-by-step decomposition annotated with `newtcon_endpoint`
+   pointers ("the operator would issue POST /api/intents/preview for
+   each step"). That shape is removed. The teach responses on this
+   surface name `CliCommand` steps the operator executes themselves;
+   there is no newtcon endpoint in the loop.
+5. **No live state in the teach response.** Teach responses do not
+   carry an `as_of` field, do not include the current value of any
+   CONFIG_DB entry, do not include the current state of any intent
+   record, and do not query newtron at request time. The teach is
+   what the substrate's documentation says; the live state is at
+   [§Endpoints — Provenance](#endpoints--provenance-why-mode-surface)
+   or in the operator's own redis-cli output.
 
 ### Out of scope for v0 (deferred Contract PRs)
 
-The following extensions are deliberately deferred:
+The following extensions are deliberately deferred. They are NOT a
+return to the newtcon-mediated manual surface — they are extensions
+to the teaching that preserve the read-only, no-newtcon-mediation
+discipline.
 
-- **Bulk intent import from a file.** v0 accepts intents inline in the
-  request body. A file-upload variant (the operator uploads a
-  newline-delimited JSON of intent submissions) is deferred until a
-  concrete operator workflow demands it.
-- **Intent template authoring.** v0 hand-authors each intent. Templates
-  ("apply this intent shape across these N nodes with parameter
-  variation") are an operator-defined automation capability per
-  operator-philosophy invariant #8 and land in a follow-up Contract PR
-  alongside the broader operator-defined automation surface.
-- **`set-*` and baseline-verb manual decomposition.** Baseline
-  operations (`setup-*`, `set-*`) per `DESIGN_PRINCIPLES_NEWTRON.md`
-  §15 have no individual reverse; their decomposition through the
-  Manual-mode parity surface emits
-  `equivalence_to_original.kind == "partial"` with an explanatory
-  rationale. A first-class "baseline manual" surface that decomposes
-  `setup-device` into its sub-operations is deferred until newtron
-  exposes sub-operation handles.
+- **Operator-authored teach content and scenarios.** v0 teach content
+  is curated by the Architect. Operator-authored scenarios (saved
+  day-job procedures, parameter-templated commands, shareable
+  teach libraries) require an authoring surface and are deferred.
+  The deferred shape is still read-only on consume; only the
+  authoring path differs.
+- **Per-table teach catalog coverage.** v0 teaches a starter set of
+  CONFIG_DB tables (the ones the curated services produce, plus
+  the high-value third-party tables operators commonly encounter).
+  Broadening coverage to every CONFIG_DB table SONiC defines is
+  authoring work that lands incrementally; the `teach_content_unauthored`
+  error is the honest acknowledgment of the coverage frontier.
+- **Diff-against-history affordance.** Comparing the live CONFIG_DB
+  entry against newtcon's recorded observation history (so the
+  operator sees "what changed since last week" while reading the
+  teach) is a composition with the
+  [§Endpoints — Observation History](#endpoints--observation-history)
+  surface; the composition UI is deferred. The two surfaces are
+  composable at the client today (the consumer can call both in
+  parallel and stitch); a server-side composition affordance is a
+  follow-up Contract PR.
+- **Inline rehearsal-walkthrough launch.** The teach `see_also[]`
+  links to Rehearsal walkthroughs; an inline embedding ("read the
+  walkthrough's first step here without leaving this page") is a
+  rendering convenience deferred to the frontend, not a contract
+  shape.
+
+### Hard contract guarantees (binding)
+
+Every endpoint in this section MUST satisfy:
+
+1. **Read-only.** Every endpoint is `GET`. No endpoint mutates
+   newtron state, device state, or newtcon-server state. A
+   contributor proposing a `POST` on this surface is making the case
+   for re-introducing the newtcon-mediated manual lever; the
+   Architecture Reviewer rejects on principle.
+2. **Static content, no live observation.** Teach responses do not
+   query newtron's live state. No `as_of`, no `intent_count`, no
+   `projection_rebuilt_at` on this surface. The catalog is versioned
+   by `content_version`.
+3. **CLI commands target the operator's own tools, never newtcon.**
+   Every `CliCommand` in `manual_inspect[]`, `manual_remove[]`,
+   `manual_write_if_unavoidable[]`, `manual_delete_if_unavoidable[]`,
+   and `steps[*].forward_cli[]` / `steps[*].reverse_cli[]` uses
+   `ssh_redis_cli` or `ssh_vendor_cli` exclusively. The `command`
+   string MUST NOT reference `newtron-server`, `newtcon`,
+   `newtcon-server`, or any newtcon HTTP endpoint as the point of
+   execution. The `command` MAY invoke `newtron` as a command name
+   on the device shell when newtron-on-the-device is the
+   substrate-faithful path (e.g., `ssh switch1 newtron switch1
+   interface Ethernet0 refresh-service`); this is newtron's own
+   manual lever, not a newtcon-mediated path. The operator's own ssh
+   session is the execution venue; newtcon is the teacher.
+4. **Operator-environment pointers on every teach response.**
+   `operator_environment_pointers` is REQUIRED. The reframed
+   invariant #2 demands the operator's manual capability live in
+   their own tools; a teach response that does not name the
+   operator's prerequisite environment is implicitly assuming
+   newtcon-as-execution, which is exactly what the invariant
+   rejects.
+5. **Substrate-grounded teaching.** Every teach response's
+   `teaches[]` (where applicable), `substrate_produced_when_applied[]`,
+   `consumed_by_daemons[]`, `fields_typical[]`, and per-`CliCommand`
+   `rationale` is substrate-grounded. `rationale_ref` always points
+   at a concrete document section, never at a generic statement. Per
+   operator-philosophy invariants #3 ("the substrate is the teaching
+   surface") and #5 ("why-mode is always available"), the teaching
+   is in the substrate's own vocabulary, not in a parallel
+   newtcon-coined abstraction.
+6. **Honest caution on writes to newtron-owned substrate.** Every
+   teach endpoint that names a `manual_modify_*` or
+   `manual_write_if_unavoidable` block MUST include the
+   newtron-ownership warning where applicable. Per operator-
+   philosophy invariants #7 ("errors carry the substrate") and #9
+   ("confidence and limits are explicit"), the teach is honest about
+   what bypassing newtron's intent path costs (drift on the next
+   reconcile, divergence between intent records and reality). A
+   teach response that names a direct write without the warning is
+   a contract violation.
+7. **Symmetric reverse per §15 on mutating content.** Every
+   `manual_remove[]`, `manual_write_if_unavoidable[]`, and
+   `steps[*].forward_cli[]` for mutating steps either includes a
+   `reverse_cli[]` (or `manual_delete_if_unavoidable[]` /
+   equivalent symmetric block) OR includes a
+   `reverse_cli_rationale` / equivalent explaining why no reverse
+   exists (e.g., baseline operations whose reverse is reconcile per
+   `DESIGN_PRINCIPLES_NEWTRON.md` §15). A teach that proposes a
+   destructive command without a reverse path is rejected on §15
+   grounds.
 
 ## Endpoints — Provenance (why-mode surface)
 
@@ -7302,12 +7315,14 @@ refined invariant #6.
 3. **No automation comparison.** Walkthroughs do not return an
    "automation would have done X" block. They teach the substrate;
    the comparison the operator should do is between their own
-   hand-executed step and the actual outcome on their lab device, not
-   between their action and an automated proposal. (The Manual-Mode
-   Parity surface's `manual_decomposition` endpoint exposes the
-   automation's decomposition; an operator who wants the comparison
-   reads that endpoint and compares it against this walkthrough.
-   Two different surfaces, two different purposes.)
+   hand-executed step and the actual outcome on their lab device,
+   not between their action and an automated proposal. (An operator
+   who wants the comparison reads the
+   [§Endpoints — Manual-Mode Parity (teaching surface)](#endpoints--manual-mode-parity-teaching-surface)
+   teach response for the service-instance or CONFIG_DB key in
+   question — that surface names the substrate the automation would
+   produce — and compares it against this walkthrough. Two different
+   surfaces, two different purposes.)
 4. **No state-changing endpoints.** Every endpoint on this surface
    is `GET`. There is no preview-and-apply pair; no `commit`, no
    `revert`, no `stash`. The walkthrough is teaching content; the
@@ -7454,23 +7469,28 @@ changes that produce no NEWTRON_INTENT record). The two are not
 redundant; they answer different questions over the same substrate.
 
 **Historical changes made via newtcon must be maintained by
-newtcon.** When the operator drives a Composer apply, an Inbox action,
-a Workbench commit, or a Manual-Mode-Parity intent submission, newtcon-
-server IS the agent of the change. It captures the operation's
-ChangeSet at apply time (per `CLAUDE.md` §Preview Before Commit and
-the Provenance retention contract); it records the pipeline trace and
-verify assertion (per §Endpoints — Operations); it knows the operator
-identifier and the originating surface. The historical record of those
-changes is therefore newtcon's responsibility by construction — newtron
-holds the current intent records and the current device CONFIG_DB,
-but the question "what did newtcon do, when, on whose behalf, with
-what substrate effect?" is answered from newtcon's own retained
-operation history (the `operation_url` / `intent_url` /
-`changeset_url` companions surfaced on every change entry). The
-observation polling layer is what extends that record to cover
-out-of-band changes that newtcon did not initiate. The combined
-surface — newtcon-mediated changes (authoritative) plus polled
-observations (best-effort) — is what this contract section governs.
+newtcon.** When the operator drives a Composer apply, an Inbox
+action, or a Workbench commit, newtcon-server IS the agent of the
+change. It captures the operation's ChangeSet at apply time (per
+`CLAUDE.md` §Preview Before Commit and the Provenance retention
+contract); it records the pipeline trace and verify assertion (per
+§Endpoints — Operations); it knows the operator identifier and the
+originating surface. The historical record of those changes is
+therefore newtcon's responsibility by construction — newtron holds
+the current intent records and the current device CONFIG_DB, but the
+question "what did newtcon do, when, on whose behalf, with what
+substrate effect?" is answered from newtcon's own retained operation
+history (the `operation_url` / `intent_url` / `changeset_url`
+companions surfaced on every change entry). The observation polling
+layer is what extends that record to cover the operator's own manual
+changes via ssh + redis-cli (taught by the
+[§Endpoints — Manual-Mode Parity (teaching surface)](#endpoints--manual-mode-parity-teaching-surface)
+but executed on the operator's tools, not via a newtcon endpoint —
+so newtcon learns about them through observation, not initiation)
+and other out-of-band changes that newtcon did not initiate. The
+combined surface — newtcon-mediated changes (authoritative) plus
+polled observations (best-effort) — is what this contract section
+governs.
 
 ### The polling layer (operational model)
 
@@ -7508,11 +7528,17 @@ this" from "someone bypassed the automation."
 
 - **`newtron_mediated`** — newtcon can correlate the observed change
   to a newtcon-known operation (one of: a Composer apply, a
-  Workbench commit, an Inbox action, a Manual-Mode-Parity intent
-  submission, a Provisioning operation reported by newtron) by
-  matching the substrate writes the operation produced against the
-  diff between the prior and current observation. The
-  `operation_url` companion field is populated.
+  Workbench commit, an Inbox action, a Provisioning operation
+  reported by newtron) by matching the substrate writes the
+  operation produced against the diff between the prior and current
+  observation. The `operation_url` companion field is populated.
+  Notably absent from this list: any "newtcon-mediated manual write"
+  source. The refined invariant #2 removed that path (see
+  [§Endpoints — Manual-Mode Parity (teaching surface)](#endpoints--manual-mode-parity-teaching-surface));
+  operator manual writes via ssh + redis-cli are taught by newtcon
+  but executed by the operator, so they appear in observation
+  history as `out_of_band` (the operator was the agent; newtcon was
+  not in the path).
 - **`out_of_band`** — newtcon observed a substrate change for which
   it cannot find a correlated operation. Either someone wrote
   CONFIG_DB directly via a non-newtcon path (a different newtron
@@ -8357,14 +8383,13 @@ Field rules:
 - **`source_classification.match_method`** is bounded:
   - `newtcon_initiated_authoritative` — newtcon-server initiated
     the operation itself (Composer apply, Inbox action, Workbench
-    commit, Manual-Mode-Parity intent submission). The
-    correlation is not inferential; newtcon was the agent of the
-    change and captured the operation_id at apply time. The
-    observed diff is validated against the captured ChangeSet
-    writes for substrate-consistency, but the correlation itself
-    is authoritative — "historical changes made via newtcon must
-    be maintained by newtcon" is operationalized at this level.
-    Confidence: high.
+    commit). The correlation is not inferential; newtcon was the
+    agent of the change and captured the operation_id at apply
+    time. The observed diff is validated against the captured
+    ChangeSet writes for substrate-consistency, but the
+    correlation itself is authoritative — "historical changes made
+    via newtcon must be maintained by newtcon" is operationalized
+    at this level. Confidence: high.
   - `changeset_writes_match_observed_diff` — newtcon's captured
     ChangeSet for the operation exactly matches the observed
     substrate diff. Used when the operation was reported by
