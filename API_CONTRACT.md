@@ -2579,8 +2579,16 @@ Field rules:
   shapes; `status` is the discriminator and is bounded by the enum
   `available | pending_newtron_gap | partial_match | not_applicable`:
   (a) `{ "status": "available", "method", "path", "query"?, "body"? }`
-  — an endpoint that exists in `newtron/docs/newtron/api.md` today
-  and answers the same question with the same substrate;
+  — an endpoint that is documented as part of newtron's public HTTP
+  API in `newtron/docs/` (any authoritative newtron doc — e.g.,
+  `api.md`, `lld.md`, `hld.md`) AND is verified registered in
+  `pkg/newtron/api/handler.go` `buildMux()`, and answers the same
+  question with the same substrate. Both halves of the check are
+  required: documentation alone is insufficient (see the api.md ↔
+  buildMux drift tracked at
+  [newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)),
+  and a wired-but-undocumented route is also insufficient (it is not
+  yet public surface);
   (b) `{ "status": "pending_newtron_gap", "gap_issue": "<URL>",
   "expected_shape": { … } }` — no newtron HTTP shape exists today;
   tracked under the Gap-Handling Protocol (`CLAUDE.md`
