@@ -466,15 +466,25 @@ Field rules:
 - **`next_action_hint`** is REQUIRED for every `condition` in the
   enum. `verb` names a concrete operator action (`re_preview`,
   `re_dry_run`, `re_commit_preview`, `stage_reconcile_delta`,
-  `inspect_operation`, `open_inbox_card`, `file_gap_followup`,
+  `inspect_operation`, `inspect_observation_history`,
+  `open_inbox_card`, `file_gap_followup`,
   `retry_after_expiry`, etc.); `endpoint` points to where the verb is
   invoked. The hint is not prescriptive but it is concrete — the
   operator does not need to read other docs to know what to do next
-  (operator-philosophy invariant #7 plus invariant #9).
+  (operator-philosophy invariant #7 plus invariant #9). For
+  `operation_evicted` specifically, the hint is
+  `verb: "inspect_observation_history"` with `endpoint` pointing at
+  the relevant `/api/history/nodes/{node}` window straddling the
+  operation's apply time — the per-stage pipeline trace is gone,
+  but the substrate diff between adjacent observations may still
+  reconstruct what the operation changed (see §Endpoints —
+  Operations "Eviction semantics").
 - **`provenance_url`** points to the relevant Provenance endpoint
   when applicable: for `intent_resolved`, the reverse operation; for
   `operation_evicted`, `null` (the operation is gone, so there is
-  nothing to link); for `batch_state_invalid`, the batch URL itself.
+  nothing to link — the operator is redirected via
+  `next_action_hint` to Observation History instead); for
+  `batch_state_invalid`, the batch URL itself.
 - **`gap_issue`** is REQUIRED on `newtron_capability_missing` and is
   the URL of the filed Gap-Handling-Protocol issue. Forbidden on
   every other `condition`. The free-form `details.gap_issue` field
@@ -1129,6 +1139,13 @@ Liveness probe. No newtron interaction.
     "url": "<configured newtron-server URL>",
     "reachable": true,
     "version": "<reported by newtron-server>"
+  },
+  "operations_retention": {
+    "source": "newtcon_operations_store",
+    "terminal_floor_seconds": 2592000,
+    "in_flight_floor_seconds": 604800,
+    "pruner_last_run_at": "2026-05-26T00:00:00Z",
+    "pruner_next_run_at": "2026-05-27T00:00:00Z"
   }
 }
 ```
@@ -1137,6 +1154,22 @@ The `newtron.reachable` field is the result of a lightweight upstream health
 probe; `newtron.version` is whatever newtron-server reports on its own health
 endpoint. If newtron-server is unreachable, `reachable` is `false` and the
 endpoint still returns 200 — newtcon-server itself is alive.
+
+The `operations_retention` companion is REQUIRED. It exposes the
+deployment's configured retention floors for the operations store
+that backs §Endpoints — Operations. Per
+`CLAUDE.md` §No Hidden State and operator-philosophy invariant #9
+(Confidence and limits are explicit), the operator must be able to
+ask "how long do my operations stay queryable?" and receive a
+substrate-grounded answer without consulting deployment docs.
+`source` echoes the source-of-truth decision recorded in
+§Endpoints — Operations (currently the single value
+`"newtcon_operations_store"`); `terminal_floor_seconds` and
+`in_flight_floor_seconds` are the contract's binding floors as
+configured for this deployment (defaults 30 days and 7 days
+respectively per §Endpoints — Operations "Retention window");
+`pruner_last_run_at` / `pruner_next_run_at` expose the eviction
+schedule so the operator sees when the floor becomes load-bearing.
 
 ### `GET /api/services`
 
@@ -2790,17 +2823,143 @@ itself separates:
 The contract reflects that split: a `pipeline` object with four stages
 and a separate top-level `verify` object typed as a Device I/O result.
 
+### Retention semantics — source of truth, window, eviction
+
+The operations surface is **served from newtcon-server's own
+operations store**. newtcon-server is the authoritative source for
+every `operation_id` it has minted; it is the only source. There is
+no live-read fallback to newtron for the pipeline trace, the verify
+assertion, or any other field in the response.
+
+This is not a design choice between sources; **it is the only source
+that exists**. newtron does not expose an HTTP endpoint that reads a
+past operation's pipeline trace. The rollback-history substrate
+inside newtron (per `DESIGN_PRINCIPLES_NEWTRON.md` §23, the bounded
+rolling buffer of `DefaultMaxHistory = 10` completed commits per
+Node, stored in CONFIG_DB) exists for newtron's own
+rollback-on-crash purpose; the routes that would surface it
+(`GET /history`, `POST /rollback-history`) are documented in
+`../newtron/docs/newtron/api.md` §11 but **not registered** in
+`pkg/newtron/api/handler.go` `buildMux()` and the substrate is not
+shaped for the per-operation pipeline trace this surface returns —
+it stores per-commit reverse-ChangeSets sized for rollback, not the
+multi-stage trace + verify assertion the operator sees. The doc-vs-
+implementation drift on those routes is tracked at
+[newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)
+(the broader doc audit subsuming
+[newtron#18](https://github.com/aldrin-isaac/newtron/issues/18));
+this contract does NOT propose that newtron expose them as a read
+endpoint, because doing so would put newtron in violation of its
+own §21 ("Reconstruct, Don't Record" — completed operation history
+"belongs in structured logging or an external store, not in the
+device's configuration database... or in newtron"). Completed
+operations are observation history; observation history is
+newtcon's domain per `CLAUDE.md` §No Hidden State and §Endpoints —
+Observation History "Why this lives in newtcon, not newtron".
+
+The capture path is the synchronous one: every state-changing
+endpoint in this contract (`POST /api/apply`,
+`POST /api/inbox/{card_id}/action`,
+`POST /api/workbench/{batch_id}/commit`,
+`POST /api/workbench/{batch_id}/revert`) issues the underlying
+newtron RPC, receives newtron's `WriteResult` (per
+`../newtron/docs/newtron/api.md` §15), and writes the full pipeline
+trace + verify assertion + initiator metadata into newtcon-server's
+operations store within the same request. The operation is
+addressable at `GET /api/operations/{operation_id}` as soon as the
+state-changing endpoint returns. There is no propagation delay and
+no separate ingestion path.
+
+**Storage substrate (informational, not contractual).** v0 uses the
+same SQLite store as Observation History (`internal/history/`, per
+the v0 storage choice in newtcon#37 and §Endpoints — Observation
+History "Storage substrate"). The contract surface is
+storage-agnostic; migration to a different store is non-contract-
+breaking provided the response shapes and retention guarantees
+below are preserved. The store is part of newtcon's persistent
+state carved out by `CLAUDE.md` §No Hidden State as observation
+history; operations are the newtcon-mediated subset of observation
+history and inherit its persistence boundary.
+
+**Retention window (binding).** Every minted `operation_id` is
+retained for **at least 30 days** after `terminal.reached == true`
+and **at least 7 days** for an in-flight operation that has not
+reached terminal state (the longer in-flight floor exists so an
+operator who walks away mid-operation can still find the trace on
+return). Deployments MAY retain longer; the contract is a floor,
+not a ceiling. The actual configured retention floor for the
+running newtcon-server is exposed at
+[`GET /api/health`](#get-apihealth) under the new
+`operations_retention` companion (see that endpoint), so the
+operator never has to guess what their deployment's floor is.
+
+Retention is **time-based, not count-based**. There is no rolling
+cap on the number of operations retained, because a count-based
+cap would silently evict recent operations on a busy Node while
+preserving stale operations on a quiet Node — exactly the false-
+confidence pattern operator-philosophy invariant #9 rejects. Time-
+based retention guarantees an operator looking at any operation
+within the window sees the trace, regardless of activity on the
+Node.
+
+Pruning is **terminal-only**. In-flight operations are never
+pruned; the pruner skips any record whose `terminal.reached` is
+false. (This is the correct behavior: a "stuck" in-flight operation
+is exactly the substrate the operator most needs to inspect, and
+silently evicting it because the clock ran out would be the
+hidden-state pattern `CLAUDE.md` §No Hidden State exists to
+prevent.) An operation that is structurally stuck — newtron-server
+crashed before the synchronous response landed, leaving the trace
+in `pipeline.deliver.stage == "in_progress"` indefinitely — is
+surfaced as an Operator Inbox card (zombie-intent or convergence-
+straggler kind, per §Endpoints — Operator Inbox) for the operator
+to resolve; it is never silently aged out.
+
+**Eviction semantics.** When the retention window elapses, the
+operations store deletes the record and the `operation_id` becomes
+unresolvable. A subsequent
+`GET /api/operations/{operation_id}` returns 404 with
+`kind: "precondition_failure"` per §Error Schema, using the
+existing `condition: "operation_evicted"` enum entry. The error's
+`condition_details.evicted_at` carries the eviction timestamp
+(known to the second from the pruner's run record).
+`next_action_hint.verb` is `inspect_observation_history` and
+`next_action_hint.endpoint` is the relevant
+`GET /api/history/nodes/{node}` endpoint scoped to the operation's
+target Node and `[evicted_at - 1h, evicted_at + 1h]` window — the
+substrate effect of the operation may still be reconstructible
+from the diff between adjacent observations even though the per-
+stage pipeline trace itself is gone.
+
+An `operation_id` that newtcon-server never minted (an operator
+who fat-fingered an ID, a stale link from before a newtcon-server
+data-loss event) returns the same 404 shape but with
+`condition: "operation_unknown_or_expired"` and no `evicted_at`
+field (we never knew it). The two `condition` values let the
+operator distinguish "newtcon forgot this" from "newtcon never
+knew this" — a distinction operator-philosophy invariant #9
+makes binding.
+
+**newtron's rolling buffer is NOT a retention concept on this
+surface.** newtron's `DefaultMaxHistory = 10` rolling buffer in
+CONFIG_DB governs what reverse-ChangeSets newtron retains for its
+own rollback purpose — it does not bound what operations newtcon
+can return from this endpoint. An operation captured by newtcon
+at apply time remains addressable at this endpoint for the full
+retention window above, regardless of whether it has been rolled
+out of newtron's per-Node rollback buffer. The response carries
+`retention.newtron_rollback_buffer_estimated_status` (see field
+rules below) as an honest secondary disclosure for the operator
+who is reasoning about what newtron-side rollback primitives can
+still reach the operation, but this is informational only — it
+does not affect whether the operation is returned.
+
 ### `GET /api/operations/{operation_id}`
 
-Return the full trace for an in-flight or recently completed operation.
-Idempotent; safe to poll. No newtron-side state is mutated.
-
-**Operations endpoint retention semantics are NOT yet pinned down**
-(source-of-truth, retention window, eviction policy). Tracked in
-[newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18). This
-contract specifies a minimum behavior (operations retained at least
-30 minutes after terminal-state) sufficient to unblock implementer
-work; the full retention contract lands in a follow-up PR.
+Return the full trace for an operation. Idempotent; safe to poll.
+No newtron-side state is mutated; no newtcon-side state is mutated.
+Served from newtcon-server's operations store per the retention
+contract above; never falls back to newtron.
 
 **Response 200:**
 ```json
@@ -2882,6 +3041,19 @@ work; the full retention contract lands in a follow-up PR.
     "outcome": "success | failure | partial",
     "at": "2026-05-25T14:06:03Z",
     "summary": "applied; verify passed"
+  },
+  "retention": {
+    "source": "newtcon_operations_store",
+    "captured_at": "2026-05-25T14:06:03Z",
+    "retained_until_at_least": "2026-06-24T14:06:03Z",
+    "deployment_floor_seconds": 2592000,
+    "newtron_rollback_buffer_estimated_status": "likely_in_buffer | likely_rolled_out | unknown",
+    "newtron_rollback_buffer_position_estimate": 3,
+    "newtron_rollback_buffer_max_history": 10,
+    "rationale_ref": {
+      "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#21-reconstruct-dont-record",
+      "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+    }
   }
 }
 ```
@@ -2933,17 +3105,111 @@ Field rules:
   `{complete, skipped}` AND (when `verify.state == "complete"`)
   `verify.assertion.failed == 0`. Any `failed` stage or non-zero
   `assertion.failed` produces `terminal.outcome == "failure"`.
+- **`retention.source`** is REQUIRED and bounded to the single value
+  `"newtcon_operations_store"`. The field is load-bearing on the
+  contract even though only one value is ever returned: it makes the
+  source-of-truth decision explicit on every response so the
+  operator never has to consult external documentation to know
+  where the trace came from. A future Contract PR that introduced
+  a second source (none is presently anticipated; see "Considered
+  alternatives" in newtcon#18's PR body) would extend the enum.
+- **`retention.captured_at`** is REQUIRED. The timestamp at which
+  newtcon-server wrote this operation into its operations store —
+  for terminal operations this is approximately
+  `terminal.at`; for in-flight operations this is when the
+  initiating state-changing endpoint received newtron's first
+  response.
+- **`retention.retained_until_at_least`** is REQUIRED. The earliest
+  timestamp at which the pruner is permitted to evict this record.
+  Computed as `captured_at + deployment_floor_seconds` for terminal
+  operations; for in-flight operations it is `captured_at + 7 days`
+  per the in-flight floor. Deployments MAY retain longer; this
+  field is the floor the contract promises, not a prediction of
+  actual eviction. The operator who needs to keep a specific trace
+  longer than the floor should export it; this contract does not
+  provide a per-operation retention extension primitive (a
+  count-based per-operation "pin" would be hidden state per
+  `CLAUDE.md` §No Hidden State).
+- **`retention.deployment_floor_seconds`** is REQUIRED. Echoes the
+  configured retention floor for this newtcon-server. Equal to the
+  same field on
+  [`GET /api/health`](#get-apihealth)'s `operations_retention`
+  companion. Surfacing it on every operation response lets the
+  operator see the floor at the point of use, not only at the
+  health endpoint — invariant #9 (Confidence and limits are
+  explicit) made local to the response.
+- **`retention.newtron_rollback_buffer_estimated_status`** is
+  REQUIRED and bounded by
+  `likely_in_buffer | likely_rolled_out | unknown`. This is an
+  honest secondary disclosure about whether newtron's per-Node
+  rolling rollback buffer (`DefaultMaxHistory = 10` per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §23) still holds the reverse-
+  ChangeSet for this operation. The status is **estimated**, not
+  authoritative — newtron does not expose a read endpoint for its
+  rollback buffer (see "Retention semantics" above), so newtcon-
+  server estimates the position by counting the number of
+  newtcon-mediated terminal operations on the same Node since this
+  one. The `unknown` value is correct and expected when out-of-
+  band operations on the Node (writes via a non-newtcon newtron
+  client, or substrate edits via direct redis-cli) mean newtcon-
+  server cannot bound the position. This disclosure is
+  informational; it does NOT affect whether the operation is
+  returned by this endpoint — the operation remains addressable
+  for the full `retained_until_at_least` window regardless.
+- **`retention.newtron_rollback_buffer_position_estimate`** is
+  REQUIRED when `newtron_rollback_buffer_estimated_status ==
+  "likely_in_buffer"`, OPTIONAL otherwise. The estimated 1-based
+  position (1 = most recent) of this operation in the per-Node
+  buffer, derived from newtcon's own operations-store count of
+  later terminal operations on the same Node.
+- **`retention.newtron_rollback_buffer_max_history`** is REQUIRED
+  and equal to the per-Node `max_history` setting documented in
+  newtron's schema (per
+  `../newtron/pkg/newtron/device/sonic/schema.go` —
+  `intRange(0, 100)`, with `DefaultMaxHistory = 10` per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §23). When the per-Node setting
+  has been adjusted, newtcon-server reflects the actual configured
+  value here; the default-10 is just the typical value.
 
 **Errors:**
-- Unknown or expired `operation_id` → 404 with
-  `kind: "precondition_failure"` per the typed schema in §Error
-  Schema, with `condition: "operation_unknown_or_expired"`.
-- newtron-server unreachable while the operation is still in-flight →
-  503 with `kind: "newtron_unavailable"` per the typed schema in §Error
-  Schema. `details.last_known.kind` is `"operation_pipeline"` and
+- `operation_id` newtcon-server never minted (unknown ID, stale
+  link, ID from a prior data-loss event) → 404 with
+  `kind: "precondition_failure"` per §Error Schema, with
+  `condition: "operation_unknown_or_expired"` and
+  `condition_details: { operation_id }`. `next_action_hint.verb` is
+  `inspect_observation_history` and
+  `next_action_hint.endpoint` is `/api/history/nodes/{node}` for
+  the operation's target Node if the operator can supply it; when
+  the Node cannot be inferred from the unknown ID, the hint omits
+  the Node scope.
+- `operation_id` was minted but the retention window has elapsed
+  and the pruner has evicted it → 404 with
+  `kind: "precondition_failure"` per §Error Schema, with
+  `condition: "operation_evicted"` and
+  `condition_details: { operation_id, evicted_at }`.
+  `next_action_hint.verb` is `inspect_observation_history` and
+  `next_action_hint.endpoint` is
+  `/api/history/nodes/{node}?from={evicted_at - 1h}&to={evicted_at + 1h}`
+  for the operation's target Node — the substrate diff between
+  observations spanning the operation's apply time may still
+  reconstruct what changed, even though the per-stage pipeline
+  trace itself is gone. The `condition_details.evicted_at` is
+  known to the second from the pruner's run record.
+- newtron-server unreachable while the operation is still in-flight
+  (the operation is in newtcon's operations store with non-terminal
+  state and newtcon is unable to poll newtron for terminal-state
+  signals such as verify completion) → 503 with
+  `kind: "newtron_unavailable"` per §Error Schema.
+  `details.last_known.kind` is `"operation_pipeline"` and
   `details.last_known.payload` carries the last-observed pipeline
-  snapshot; `details.affected_nodes[]` lists the Node the operation
-  targets.
+  snapshot from the operations store; `details.affected_nodes[]`
+  lists the Node the operation targets. This case is rare — once
+  the synchronous state-changing endpoint returned, the full trace
+  is captured in newtcon's store and this endpoint serves
+  unconditionally; the 503 path applies only to in-flight
+  operations whose terminal-state signals (e.g., a verify
+  assertion still in `in_progress` that newtcon polls newtron to
+  update) are blocked on newtron reachability.
 
 ## Endpoints — Change Workbench (third surface)
 
@@ -5709,13 +5975,17 @@ Provenance retention mirrors operations retention:
 - **ChangeSets** are captured by newtcon-server at apply time (the
   ChangeSet returned in the preview is the ChangeSet that executes —
   `DESIGN_PRINCIPLES_NEWTRON.md` §11) and retained for the same
-  window as the originating operation. See
-  [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18)
-  for the operation-retention contract (minimum 30 minutes
-  post-terminal-state pinned today; full retention contract lands in
-  a follow-up Contract PR). A `changeset_id` whose underlying
-  operation has been evicted returns 404 with
-  `details.reason: "operation_evicted"`.
+  window as the originating operation per the binding contract in
+  §Endpoints — Operations "Retention window" (terminal floor 30
+  days, in-flight floor 7 days; deployment may extend). The
+  operations store is the substrate for ChangeSet retention as well
+  as the pipeline trace — they are captured and pruned together.
+  A `changeset_id` whose underlying operation has been evicted
+  returns 404 with `kind: "precondition_failure"` per §Error Schema,
+  using either `condition: "operation_evicted"` (when the operation
+  was minted and later pruned, with `evicted_at` populated) or
+  `condition: "changeset_unknown"` (when the ID was never minted by
+  this newtcon-server).
 - **Verify assertions** are captured by newtcon-server alongside the
   ChangeSet at apply time (from
   `WriteResult.verification` returned by newtron — `api.md` §15
@@ -7820,13 +8090,20 @@ Field rules:
   know — and per invariant #9, does not pretend to know).
 - **`operation_url` / `intent_url` / `changeset_url`** are
   populated for `newtron_mediated` changes whose correlated
-  newtcon-server operation is still retained (per the operations
-  retention contract; see newtcon#18). All three are `null` for
-  `out_of_band` changes. For `newtron_mediated` changes whose
-  operation has been evicted from operations retention, all three
-  are `null` and `out_of_band_subkind` is `null` (the source is
-  still `newtron_mediated` — the substrate's classification is
-  durable even when the operation trace is not).
+  newtcon-server operation is still retained per
+  §Endpoints — Operations "Retention window" (terminal floor 30
+  days, in-flight floor 7 days; deployment may extend). All three
+  are `null` for `out_of_band` changes. For `newtron_mediated`
+  changes whose operation has been evicted from operations
+  retention, all three are `null` and `out_of_band_subkind` is
+  `null` (the source is still `newtron_mediated` — the
+  substrate's classification is durable even when the operation
+  trace is not). Observation history typically retains longer
+  than the operations store (Observation History retention is per
+  §Endpoints — Observation History "Identifiers and retention",
+  deferred to a follow-up Contract PR), so an observed change
+  can outlive its originating operation trace; this is the
+  expected case once the operation crosses its retention floor.
 - **`out_of_band_subkind`** is populated only on `source:
   "out_of_band"` entries. Bounded:
   - `unmediated_observed` — the change was observed between two
@@ -9102,14 +9379,21 @@ even though no substrate is mutated.
 Field rules:
 
 - **`operation_id`** — REQUIRED. The operation the report references.
-  Validated against newtcon-server's operations store; unknown or
-  evicted → 400 with `kind: "precondition_failure"`,
-  `details.condition: "operation_unknown_or_expired"`. Operations
-  are retained per the operations retention contract (see
-  §Endpoints — Operations and [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18)
-  for retention semantics); a report that references an evicted
-  operation is refused because the report body's substrate cannot
-  be reconstructed.
+  Validated against newtcon-server's operations store; unknown
+  ID → 400 with `kind: "precondition_failure"`,
+  `details.condition: "operation_unknown_or_expired"`; ID known
+  but evicted → 400 with `kind: "precondition_failure"`,
+  `details.condition: "operation_evicted"` (with `evicted_at`
+  populated). Operations are retained per the binding contract in
+  §Endpoints — Operations "Retention window" (terminal floor 30
+  days, in-flight floor 7 days; deployment-configured retention is
+  exposed at `GET /api/health`'s `operations_retention`
+  companion). A report that references an evicted operation is
+  refused because the report body's substrate (pipeline trace,
+  ChangeSet, verify assertion) cannot be reconstructed; the
+  operator's `next_action_hint` on the error directs them to
+  Observation History where the substrate diff for the
+  operation's apply-time window may still be queryable.
 - **`per_write_seq`** — OPTIONAL. When supplied, the report is
   scoped to one specific substrate operation within the operation.
   When supplied, `per_write_target` is ALSO REQUIRED — `seq` is
@@ -9242,7 +9526,7 @@ Field rules:
         "recent_operations_source": "newtcon_operations_store",
         "recent_operations_limit": 10,
         "recent_operations_available": 10,
-        "recent_operations_window_hint": "operations retained per §Endpoints — Operations retention; older operations may be absent"
+        "recent_operations_window_hint": "operations retained per §Endpoints — Operations retention (terminal floor 30 days, in-flight floor 7 days; deployment may extend, see /api/health.operations_retention); operations older than the configured floor have been evicted"
       }
     },
     {
@@ -9401,11 +9685,15 @@ Field rules:
   parity contribution is exposing the operation trace.
 
 **Errors:**
-- Unknown or evicted `operation_id` → 400 with
-  `kind: "precondition_failure"` per §Error Schema, with
-  `details.condition: "operation_unknown_or_expired"`. Operations
-  retention semantics are tracked at
-  [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18).
+- Unknown `operation_id` → 400 with `kind: "precondition_failure"`
+  per §Error Schema, with
+  `details.condition: "operation_unknown_or_expired"`.
+- Evicted `operation_id` (ID was minted but retention window
+  elapsed) → 400 with `kind: "precondition_failure"` per §Error
+  Schema, with `details.condition: "operation_evicted"` and
+  `details.condition_details.evicted_at` populated. Retention is
+  per the binding contract in §Endpoints — Operations "Retention
+  window".
 - `per_write_seq` supplied without `per_write_target` (or vice
   versa) → 400 `validation_failure` with
   `details.validation_stage: "request"` and
