@@ -6104,7 +6104,6 @@ operation-history mapping.
     "started_at": "2026-05-25T14:06:00Z",
     "origin_rationale_ref": {
       "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#1-the-core-abstraction-intent-db",
-      "substrate_secondary": "newtron/docs/newtron/unified-pipeline-architecture.md#6-six-operations-on-expected-state",
       "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
     }
   },
