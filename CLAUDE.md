@@ -105,8 +105,20 @@ newtcon delivers exactly three operator surfaces, in this order:
    batch committed atomically, partially failed at validate / deliver /
    verify, or did not run because an earlier target failed and the batch
    policy was configured to halt. Revert follows the same per-Node
-   atomicity model. See [`API_CONTRACT.md`](API_CONTRACT.md) §Change
-   Workbench, especially "The atomicity model — read this first."
+   atomicity model. **No multi-batch atomic rollback.** newtron exposes
+   per-operation reverse primitives (`DESIGN_PRINCIPLES_NEWTRON.md` §15
+   operational symmetry); newtcon's Workbench exposes per-batch revert
+   composed from those primitives. There is **no** "revert the last N
+   committed batches in one call" primitive in newtron and **no**
+   corresponding Workbench surface for history-walking undo. An operator
+   who wants to undo a sequence of prior batches reverts each batch
+   individually in reverse order, with per-batch per-Node atomicity at
+   each step. Composers of an "undo last N batches" UI affordance (if
+   any) would do so as a client-side sequence of
+   `POST /api/workbench/{batch_id}/revert` calls; the per-step results
+   are per-Node atomic, the overall sequence is best-effort. See
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Change Workbench, especially
+   "The atomicity model — read this first."
 
 **Out of scope** (do not implement, do not stub, do not propose):
 
