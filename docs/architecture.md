@@ -120,6 +120,21 @@ agent) proposes them, the PR is rejected on principle:
   paradigm and is what newtcon is built against. The service is the unit
   of operator action.
 
+- **Multi-batch / history-walking rollback.** newtcon does not expose an
+  "undo the last N committed batches in one call" surface, because
+  newtron does not expose a corresponding substrate primitive. Per-batch
+  revert exists and is per-Node atomic (see Change Workbench below); a
+  multi-batch undo is operator-orchestrated as a sequence of
+  `POST /api/workbench/{batch_id}/revert` calls issued in reverse order,
+  with per-step per-Node atomicity and best-effort sequence semantics.
+  See [`../CLAUDE.md`](../CLAUDE.md) §Project Scope (Change Workbench
+  bullet, "No multi-batch atomic rollback") for the full statement and
+  rationale; the substrate side is `DESIGN_PRINCIPLES_NEWTRON.md` §15
+  (operational symmetry as per-operation reverses, not a history-walking
+  primitive). Proposals to add such a surface — or to file a newtron
+  HTTP API gap requesting the substrate primitive — are rejected at
+  review on principle.
+
 - **Status dashboard as primary surface.** Status surfaces exist (inside
   inbox cards, inside operation traces), but they are not the landing page.
   The operator lands on actionable work, not on green/red lights.
