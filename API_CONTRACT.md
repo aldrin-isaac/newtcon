@@ -34,13 +34,21 @@ applies (see [`CLAUDE.md`](CLAUDE.md) §Greenfield).
 
 ## Conventions
 
-- All requests and responses are JSON (`Content-Type: application/json`).
+- All requests and responses are JSON (`Content-Type: application/json`)
+  except where an endpoint explicitly admits Server-Sent Events
+  (`Content-Type: text/event-stream`) via Accept-header negotiation.
+  Endpoints that admit SSE are enumerated in
+  §Streaming substrate-operation events; no endpoint streams without
+  an explicit `Accept: text/event-stream` request header.
 - Timestamps are RFC 3339 UTC strings.
 - Resource identifiers are domain names (e.g., service name, node name,
   interface name) — never opaque internal IDs.
 - Errors return a structured `Error` object (see §Error Schema) with a
   domain-meaningful message. HTTP status codes follow the standard semantics
-  but are secondary to the error body.
+  but are secondary to the error body. SSE-streaming endpoints surface
+  mid-stream errors per §Streaming substrate-operation events
+  ("Mid-stream errors") — the `error` event carries the same typed
+  `Error` body as a non-2xx JSON response.
 - Pagination, when needed, is cursor-based (`?cursor=<opaque>&limit=<int>`).
   Endpoints below that omit pagination return the full set.
 
@@ -657,6 +665,449 @@ Field rules:
   should be re-classified as one of the other four kinds, not
   emitted as `internal` with explanatory `rationale_ref` text.
 
+## Streaming substrate-operation events
+
+Three state-changing endpoints — Composer `POST /api/apply`, Workbench
+`POST /api/workbench/{batch_id}/commit`, and Inbox
+`POST /api/inbox/{card_id}/action` — execute device-facing writes
+through newtron's pipeline and admit a Server-Sent Events streaming
+variant. This section defines the shared streaming shape, the
+per-substrate-operation entry type (`PerWrite`) those endpoints carry
+in both the JSON and SSE variants, and the negotiation rule that picks
+between them.
+
+The streaming variant exists for one reason. Operator-philosophy
+invariant #1 ("no black boxes") and the concrete success vision in
+[`docs/operator-philosophy.md`](docs/operator-philosophy.md#concrete-success-vision-operators-as-participants)
+both reject the pattern where the operator initiates a multi-write
+operation and the next thing they see is "operation complete." The
+operator must watch the substrate flow — each CONFIG_DB write as
+newtron commits it, each daemon-settle wait as newtron defers, each
+post-deliver verify read as newtron asserts — because watching the
+substrate is how the operator learns the substrate
+(operator-philosophy invariant #3 "the substrate is the teaching
+surface"). Aggregating ten substrate writes into one terminal "applied:
+true" produces the autopilot whose pilots cannot fly. The streaming
+variant is the structural break of that aggregation.
+
+The per-write granularity is the same structural break expressed in
+the terminal payload. Whether the consumer subscribes to the stream or
+polls the operation endpoint, the per-substrate-operation entries are
+visible at the same granularity: which specific CONFIG_DB write
+landed, what the device returned verbatim, which one was rejected and
+why. This is what makes the operator capable of isolating
+device-vs-automation per the success vision's third point — the
+operator copies the rejected `cli_command` into their own ssh session
+and tries it by hand, learning whether the device or the automation is
+wrong.
+
+### Content negotiation
+
+The variant is selected by the request's `Accept` header. The
+endpoint-defined HTTP path is the same in both cases; clients pick the
+shape they want:
+
+| Request `Accept` header | Response `Content-Type` | Body |
+|-------------------------|--------------------------|------|
+| `application/json` (default; omitted Accept; `*/*`) | `application/json` | JSON object with `per_write[]` per target (see "PerWrite shape" below). |
+| `text/event-stream` | `text/event-stream` | SSE stream: zero or more `substrate_op` events followed by exactly one `apply_complete` (success) or `error` (mid-stream failure) terminal event. |
+| Anything else | — | 406 Not Acceptable with `kind: "validation_failure"`, `validation_stage: "request"`, `rejection.reason: "unknown_value"`, `locator.parameter: { name: "Accept", in: "header" }`, `allowed: ["application/json", "text/event-stream"]`. |
+
+Streaming is opt-in, not default. The rationale: the JSON variant
+remains the simplest correct integration for scripts, ops automation,
+the contract-snapshot test, and any consumer that does not need
+event-by-event visibility. The SSE variant is the operator-UI
+affordance. Forcing every consumer to parse SSE to call apply would
+trade simplicity for capability that not every consumer needs;
+defaulting to SSE would also break the contract-snapshot test's
+JSON-only expectation and create a class of contract-shape ambiguity
+the §Error Schema vocabulary is explicit about avoiding. Operators
+opt in by sending the header the standard SSE-consuming JavaScript
+client (`EventSource`) sends by default.
+
+### PerWrite shape
+
+The per-substrate-operation entry type is shared across the three
+streaming endpoints and across both variants. Each `PerWrite`
+corresponds to one substrate operation newtron performed against the
+device — one Redis `HSET`, one Redis `DEL`, one daemon-settle wait,
+or one post-deliver verify re-read. These are the Device I/O
+Operations defined by
+[`unified-pipeline-architecture.md` §7](https://github.com/aldrin-isaac/newtron/blob/main/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation).
+The contract surfaces them as the canonical
+per-substrate-operation primitive (`DESIGN_PRINCIPLES_NEWTRON` §11
+"The ChangeSet Is the Universal Contract", §46 "HTTP API Boundary —
+Wire Shape Mirrors Substrate").
+
+Shape:
+
+```json
+{
+  "seq": 0,
+  "operation_id": "<opaque>",
+  "target": { "network": "default", "node": "switch1", "interface": "Ethernet0" },
+  "kind": "redis_write | redis_delete | daemon_wait | verify_read",
+  "substrate": {
+    "table": "BGP_NEIGHBOR",
+    "key": "default|10.1.0.1",
+    "fields": { "asn": "65002", "local_addr": "10.1.0.0", "admin_status": "up" }
+  },
+  "result": "applied | rejected | skipped",
+  "cli_command": "redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 local_addr 10.1.0.0 admin_status up",
+  "device_response": "(integer) 3",
+  "at": "2026-05-25T14:06:01.847Z",
+  "rationale_ref": {
+    "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+    "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract"
+  },
+  "source": null
+}
+```
+
+Field rules:
+
+- **`seq`** — REQUIRED. Zero-based ordinal of this entry within the
+  per-target apply sequence. Strictly monotonically increasing per
+  target. Operators reading the stream rely on `seq` to detect missing
+  events; consumers that buffer-and-reorder use `seq` to recover
+  ordering after multiplexing across targets. `seq` is per-target, not
+  global across a multi-target operation — see "Per-Node atomicity
+  honesty" below for what the ordering means.
+- **`operation_id`** — REQUIRED. The newtcon `operation_id` (same
+  value surfaced by the JSON variant's `per_target[*].operation_id`
+  and by `GET /api/operations/{operation_id}`). The same ID appears on
+  every entry that belongs to one per-target apply, so consumers
+  multiplexing the stream split by `operation_id`. A `PerWrite` whose
+  `operation_id` does not also appear on an `apply_complete` event for
+  the same target is a contract violation.
+- **`target`** — REQUIRED. Same `{network, node, interface}` triple
+  the endpoint's per-target results carry. `interface` is omitted for
+  node-scoped verbs (`reconcile_delta`, `reconcile_full`,
+  `rollback_zombie` — see §Endpoints — Operator Inbox); `network` and
+  `node` are always present.
+- **`kind`** — REQUIRED. Bounded enum naming which Device I/O
+  Operation produced this entry:
+
+  | `kind` | Substrate operation | When |
+  |--------|---------------------|------|
+  | `redis_write` | `HSET` on CONFIG_DB (Redis DB 4) | One per CONFIG_DB add or modify the ChangeSet entry produced; corresponds to `ChangeType: "add" \| "modify"`. |
+  | `redis_delete` | `DEL` on CONFIG_DB | One per CONFIG_DB delete; corresponds to `ChangeType: "delete"`. RefreshService's `DEL + HSET` per `DESIGN_PRINCIPLES_NEWTRON` §11 surfaces as two consecutive `PerWrite` entries with the same `(table, key)` and different `kind`. |
+  | `daemon_wait` | Inter-write settle wait, e.g., between VRF creation and BGP-neighbor creation per `DESIGN_PRINCIPLES_NEWTRON` §18 "Write Ordering and Daemon Settling" | The operator sees the wait happen explicitly; `substrate` carries `{ "table": "<table the wait is gating>", "key": "<key>", "fields": null }`; `device_response` carries the wait outcome (`"settled"` or `"timed_out"` with the elapsed duration). |
+  | `verify_read` | `HGETALL` re-read by `cs.Verify(n)` per `unified-pipeline-architecture.md` §7 | One per ChangeSet entry that verify checked. `device_response` carries the re-read fields verbatim; `result: "rejected"` means the re-read disagreed with the ChangeSet (the verify assertion failed for this entry). |
+
+  New `kind` values are a Contract PR. Streaming-only event types
+  (e.g., a future `daemon_log_line`) follow the same rule.
+- **`substrate`** — REQUIRED for `redis_write`, `redis_delete`,
+  `verify_read`; OPTIONAL for `daemon_wait` (the substrate may not
+  pin to a single `(table, key)` for cross-table settles, in which
+  case `fields` is `null` and `key` carries the operation name being
+  waited on, e.g., `"after-create-vrf"`).
+- **`result`** — REQUIRED. Bounded enum:
+  - `applied` — newtron's per-Node `TxPipeline` committed the
+    substrate operation and the device acknowledged it. For
+    `redis_write` / `redis_delete`, this is the `EXEC` reply field
+    for this command. For `daemon_wait`, this is `"settled"`. For
+    `verify_read`, this is "re-read matched the ChangeSet."
+  - `rejected` — the substrate operation reached the device and was
+    refused. For `redis_write` / `redis_delete`, the Redis client
+    surfaced an error (rare; typically schema validation refuses the
+    write before `TxPipeline` per `DESIGN_PRINCIPLES_NEWTRON` §13,
+    in which case the event is not emitted at all — schema-rejected
+    writes appear in the §Error Schema `validation_failure` response,
+    not as a streaming `rejected` event). For `verify_read`,
+    `"rejected"` means the verify assertion failed for this entry
+    (`expected != actual`); the entry's `device_response` carries
+    the actual re-read fields. For `daemon_wait`, `"rejected"`
+    means the wait timed out.
+  - `skipped` — the substrate operation was elided. For
+    `verify_read`, `"skipped"` means the operation requested
+    `no_save` / verify-off semantics. For `daemon_wait`, the
+    settle was deemed unnecessary by newtron at execution time.
+- **`cli_command`** — REQUIRED for `redis_write`, `redis_delete`,
+  `verify_read`; OPTIONAL for `daemon_wait`. The exact command the
+  operator would type against the device themselves to reproduce this
+  substrate operation by hand — `ssh <node>` then
+  `redis-cli -n 4 HSET '<table>|<key>' <field> <value>` (or `HDEL`,
+  `DEL`, `HGETALL`). This is the operationalization of
+  operator-philosophy invariant #2 ("manual-mode parity") refined per
+  PR #44: newtcon's contribution is to **teach** the device-level
+  equivalent of every automated operation. The operator copies this
+  string into their own ssh session, runs it, and learns whether the
+  device or the automation is wrong.
+
+  Rendered by newtcon-server, not by newtron — see "Where `cli_command`
+  is rendered" below. The command targets the device's own Redis
+  instance (`-n 4` is CONFIG_DB) reached via the operator's own ssh
+  session; `cli_command` does NOT reference newtron, newtron-server,
+  newtcon, or newtcon-server. If the command requires shell quoting
+  (key contains `|`, fields contain spaces), the single-quoting in the
+  example is the canonical form; consumers paste it verbatim.
+- **`device_response`** — REQUIRED on every entry. The verbatim wire
+  reply from the device, captured by newtron without paraphrase.
+  Per operator-philosophy invariant #7 ("errors carry the substrate")
+  and `DESIGN_PRINCIPLES_NEWTRON` §14: a friendly summary that loses
+  the substrate is a teaching failure. For successful writes, this is
+  typically `"(integer) 3"` (number of fields HSET'd) or `"OK"`. For
+  rejected writes, this is the daemon/Redis error string verbatim
+  (e.g., `"ERR wrong number of arguments for 'hset' command"`,
+  `"frrcfgd: rejected BGP_NEIGHBOR|10.1.0.1: invalid asn"`,
+  whatever the device offered). Truncation rules match the existing
+  §`details` for `kind: "newtron_unavailable"` rule for
+  `underlying_error_message`: 4 KiB cap with `...[truncated]` marker
+  when exceeded. For `verify_read`, the response is the actual
+  re-read fields as `field=value\nfield=value\n` (the wire form
+  `HGETALL` returns), so the operator can diff visually against
+  `substrate.fields`.
+- **`at`** — REQUIRED. RFC 3339 UTC timestamp with millisecond
+  precision (operators reading a stream of 14 writes need
+  sub-second resolution to see the substrate cadence). The
+  timestamp is when newtron emitted the substrate operation, not
+  when newtcon-server received it.
+- **`rationale_ref`** — REQUIRED. Same typed `{substrate, principle}`
+  shape used throughout the contract. For `redis_write` /
+  `redis_delete`, both anchors point to
+  `unified-pipeline-architecture.md` §7 (Device I/O Operations) and
+  `DESIGN_PRINCIPLES_NEWTRON.md` §11 (ChangeSet) by default. For
+  `verify_read`, `principle` points to §14 (Verify Your Writes). For
+  `daemon_wait`, `principle` points to §18 (Write Ordering and Daemon
+  Settling). The frontend renders `rationale_ref` as a "why this
+  event?" affordance per operator-philosophy invariant #5 ("why-mode
+  is always available").
+- **`source`** — REQUIRED key in the schema, value REQUIRED to be
+  `null` in v0. Reserved for the call-site provenance that
+  [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
+  will populate when it lands: `{ call_site: "<file:line>", function: "<go-method-name>" }`,
+  exposing the newtron Go method that emitted this substrate
+  operation. newtron#12 is operator-filed and currently OPEN; the
+  contract reserves the field shape and key so the streaming consumer
+  does not need a contract update when call-site provenance ships
+  (additive evolution per `DESIGN_PRINCIPLES_NEWTRON` §46's fourth
+  rule). When newtron#12 ships, a follow-up Contract PR populates
+  the `source` field's contents; consumers receive `null` until then
+  and MUST tolerate it.
+
+### Per-Node atomicity honesty
+
+The streaming event sequence MUST NOT teach a false model of
+newtron's atomicity. Per
+[`DESIGN_PRINCIPLES_NEWTRON` §11](../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)
+and `unified-pipeline-architecture.md` §8: every per-Node bundle of
+substrate operations is committed atomically via Redis `TxPipeline`
+(`MULTI` ... `EXEC`) — within a Node, either every write lands or
+none do. The streaming variant surfaces this honestly:
+
+- For one per-Node bundle, every `redis_write` / `redis_delete`
+  `PerWrite` event carries `result: "applied"` (the EXEC succeeded)
+  OR every such event carries `result: "rejected"` (the EXEC was
+  refused before commit, typically by schema validation per
+  `DESIGN_PRINCIPLES_NEWTRON` §13). The stream MUST NOT emit a mix
+  of `applied` and `rejected` for one Node's CONFIG_DB writes — that
+  would teach a non-atomic substrate model the substrate does not
+  have.
+- The `daemon_wait` and `verify_read` events for one Node are NOT
+  part of the `TxPipeline` and may have mixed `result` values. A
+  daemon wait may time out (one `rejected`) even when every CONFIG_DB
+  write succeeded; a verify re-read may fail (one `rejected`) for
+  one CONFIG_DB entry without affecting the others. These post-EXEC
+  Device I/O Operations are surfaced honestly per `result`; they do
+  not contradict the per-Node atomicity claim because they are not
+  part of the atomic commit.
+- For multi-Node operations (Composer apply against N nodes,
+  Workbench commit against N nodes, Inbox `reconcile_delta` on one
+  node), the cross-Node sequence is NOT atomic per
+  `DESIGN_PRINCIPLES_NEWTRON` §11. Per-target events MAY interleave
+  across nodes in the stream (the per-Node calls run sequentially in
+  newtron-server's execution order; events flow as they happen),
+  but the `apply_complete` terminal event surfaces the per-Node
+  atomicity classification of each Node — same `per_node_atomicity`
+  block the JSON variant carries.
+
+The contract's atomicity vocabulary
+(`atomic_via_txpipeline`, `cross_node_atomicity.atomic: false`)
+is the same in both variants; the streaming variant additionally
+makes the per-substrate-operation cadence visible. An operator who
+watches one Node's `redis_write` events all land in one
+sub-millisecond burst is observing `TxPipeline`'s EXEC; an operator
+who watches `daemon_wait` events between writes is observing
+write-ordering-and-daemon-settling per §18.
+
+### SSE event grammar
+
+When `Accept: text/event-stream` is sent, the response body is a
+Server-Sent Events stream per the W3C SSE spec. The grammar:
+
+```
+stream     ::= (substrate_op_event | comment)* terminal_event
+terminal_event ::= apply_complete_event | error_event
+substrate_op_event ::=
+  "event: substrate_op\n"
+  "id: <operation_id>:<seq>\n"
+  "data: <PerWrite JSON, one line, no newlines in value>\n"
+  "\n"
+apply_complete_event ::=
+  "event: apply_complete\n"
+  "data: <apply_complete payload JSON, one line>\n"
+  "\n"
+error_event ::=
+  "event: error\n"
+  "data: <Error envelope JSON, one line>\n"
+  "\n"
+comment    ::= ": <keep-alive text>\n\n"   # heartbeat every 15s
+```
+
+The `id:` field on `substrate_op` events lets EventSource consumers
+resume via `Last-Event-ID` if the connection drops; the
+`<operation_id>:<seq>` form is opaque to the consumer (do not parse
+it) and is unique per event in the stream. Consumers that do not
+need resume semantics may ignore `id:`.
+
+Heartbeat comments (per SSE spec: lines beginning with `:`) flow
+every 15 seconds when the stream is otherwise idle (e.g., during a
+long `daemon_wait`) so that intermediary proxies do not close the
+connection. Heartbeats carry no data and MUST be ignored by
+consumers.
+
+Exactly one terminal event closes the stream. After the terminal
+event, newtcon-server closes the response. Consumers MUST treat any
+post-terminal bytes as a protocol violation.
+
+### Terminal event: `apply_complete`
+
+Emitted when the per-Node sequence reached terminal status (every
+Node has committed, failed, or been recorded as `not_attempted`).
+The payload IS the same JSON object the JSON-variant returns; it is
+not a strict superset, not a subset. This avoids forking the
+terminal shape between variants — consumers using SSE for live
+events and JSON for batch snapshots see the same per-target /
+per-write / aggregate shape.
+
+```
+event: apply_complete
+data: { "operation_id": "<opaque>", "per_target": [ { "node": "switch1", ..., "per_write": [ /* PerWrite[] */ ], ... } ], "aggregate": { ... }, "per_node_atomicity": [ /* same shape as JSON variant */ ] }
+```
+
+### Mid-stream errors
+
+A failure that aborts the apply mid-stream is surfaced as
+`event: error` with the existing typed `Error` envelope as the
+payload — the same shape a non-2xx JSON response would carry. The
+five `kind` values (`validation_failure`, `drift_refusal`,
+`precondition_failure`, `newtron_unavailable`, `internal`) and the
+matching per-kind `details` schemas (§Error Schema) apply
+unchanged. The stream closes after the error event; no
+`apply_complete` follows.
+
+```
+event: error
+data: { "error": { "kind": "drift_refusal", "message": "...", "details": { /* per §Error Schema */ } } }
+```
+
+The HTTP status of the SSE response itself is always 200 — SSE
+proxies require it. The non-2xx semantics are carried inside the
+`error` event's typed envelope, not by the HTTP status. This is
+exactly the trade-off W3C SSE documents (the spec does not admit
+mid-stream status changes), and the contract preserves substrate
+fidelity by placing the typed `Error` body in the event payload
+rather than mapping it to a non-2xx HTTP status the SSE consumer
+cannot read.
+
+Partial substrate operations completed before the abort appear as
+their own `substrate_op` events in normal order (each with its
+honest `result`), preceding the `error` event. The operator sees
+exactly what landed before the abort — operator-philosophy
+invariant #1 ("no black boxes") applied to mid-stream failures.
+
+### Where `cli_command` is rendered
+
+The `cli_command` string is synthesized by **newtcon-server**, not
+by newtron. Rationale:
+
+- The string is operator-facing — `redis-cli -n 4 HSET '<key>'
+  <field> <value>` is the form the operator types in their own ssh
+  session. It is a presentation concern of the operator-UI layer,
+  not a substrate fact newtron needs to know about.
+- Synthesizing in newtcon-server keeps the substrate event shape
+  newtron emits minimal: `{table, key, fields, op_kind}`. newtron's
+  HTTP API stays substrate-canonical per
+  `DESIGN_PRINCIPLES_NEWTRON` §46 ("Wire Shape Mirrors Substrate");
+  the operator-presentation polish is newtcon's job.
+- Synthesizing in the frontend (a third candidate location) is
+  rejected because the contract-snapshot test depends on
+  `cli_command` being part of the API response, not a UI artifact;
+  and because curl-against-API consumers (operators inspecting via
+  `curl` or scripts) must see the same `cli_command` the UI
+  renders.
+
+newtcon-server's rendering is mechanical: take the
+`{kind, table, key, fields}` from the substrate event, format as
+`redis-cli -n 4 HSET '<table>|<key>' <field1> <value1> ...` (or
+`HDEL` for `redis_delete`, `HGETALL` for `verify_read`). Shell
+single-quoting is applied to the `<table>|<key>` argument to
+preserve the `|` character.
+
+A future newtron capability that exposes a different per-write
+substrate (e.g., a non-SONiC device whose substrate is not Redis
+hashes) would need a different `cli_command` format. The contract
+admits per-device-family rendering as a follow-up Contract PR;
+v0 covers SONiC's CONFIG_DB exclusively, matching newtron's
+current device support.
+
+### Newtron HTTP API dependency
+
+The streaming variant and the per-write granularity both depend on
+newtron-server exposing per-substrate-operation results — either as
+an SSE stream of its own, or as a callback API, or as a per-write
+results array in the existing endpoints' responses. newtron's
+current `/intent/reconcile`, `/execute`, and
+`/interface/{name}/apply-service` endpoints return on completion
+with `WriteResult` (`{change_count, applied, verified, saved,
+verification}`) — an aggregate, not per-substrate-operation entries.
+
+This is a Gap-Handling Protocol gap. The newtron-side issue
+tracking it is filed at
+[newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+(per-substrate-operation surfacing on newtron's write endpoints).
+This contract section names the operator-visible shape the gap
+needs to fill; the newtron issue surveys newtron's current routes
+and types to scope the work.
+
+Until newtron#19 ships, `per_write` arrays in newtcon's responses
+are empty (`per_write: []`), `manual_equivalent.newtron_http.status`
+on the affected endpoints is `"pending_newtron_gap"` with
+`gap_issue` pointing at newtron#19, and the SSE variant emits
+exactly one `apply_complete` event (no `substrate_op` events)
+because newtcon-server has nothing to stream. The operator-facing
+contract shape is stable now so frontend work can proceed against
+it; the operator-visible behavior fills in as newtron#19 lands.
+
+### Endpoints that admit streaming
+
+| Endpoint | JSON variant | SSE variant | `per_write` carried | Atomicity surface |
+|----------|--------------|-------------|---------------------|-------------------|
+| `POST /api/apply` | Yes (default) | Yes (Accept: text/event-stream) | Yes, in `per_target[*].per_write[]` | Per-target (one Node per target) |
+| `POST /api/workbench/{batch_id}/commit` | Yes (default) | Yes (Accept: text/event-stream) | Yes, in `per_target[*].per_write[]` | Per-Node via `per_node_atomicity`; cross-Node not atomic |
+| `POST /api/inbox/{card_id}/action` (verbs that produce a ChangeSet: `reconcile_delta`, `reconcile_full`, `rollback_zombie`, `retire_policy`) | Yes (default) | Yes (Accept: text/event-stream) | Yes, in `per_write[]` (single-target per call) | Per-Node (the card's Node) |
+| `POST /api/inbox/{card_id}/action` (verbs that produce no ChangeSet: `acknowledge`, `clear_zombie`, `recheck`) | Yes (default) | No — these verbs produce no substrate writes; streaming would carry only an immediate `apply_complete`. Sending `Accept: text/event-stream` to these verbs returns 200 with a single-event SSE response (`apply_complete` only) for client-side variant uniformity; consumers may skip SSE on them. | `per_write: []` always | Not applicable |
+
+Endpoints NOT in this table do not stream. `POST /api/preview`,
+`POST /api/workbench/{batch_id}/dry_run`,
+`POST /api/inbox/{card_id}/action/preview`, and the other preview
+endpoints do not deliver substrate operations; they compute
+ChangeSets without writing, so there are no Device I/O Operations
+to stream. Adding streaming to a preview endpoint would teach a
+false model — the operator would see "substrate events" for a
+dry-run that touches no device. Stash, restore, revert/preview,
+and dismiss/preview likewise produce no Device I/O Operations
+and do not stream.
+
+The revert endpoint (`POST /api/workbench/{batch_id}/revert`)
+DOES deliver substrate operations and SHOULD admit streaming on
+the same principle. v0 of this contract section reserves the SSE
+variant for the three endpoints in the table; the revert
+streaming variant is a follow-up Contract PR. The follow-up edits
+this table; the §Streaming substrate-operation events section is
+otherwise unchanged.
+
 ## Endpoints — Service Composer (first surface)
 
 ### `GET /api/health`
@@ -842,6 +1293,16 @@ not committed.
 Apply a previously-generated preview. Atomic across targets where the
 underlying newtron API guarantees atomicity; per-target where it doesn't.
 
+This endpoint admits a Server-Sent Events streaming variant per
+§Streaming substrate-operation events. The variant is selected by the
+request's `Accept` header (`text/event-stream` → SSE; otherwise →
+JSON). The JSON variant is documented inline below; the SSE variant
+carries the same `PerWrite` and aggregate shapes as documented in
+§Streaming substrate-operation events. Both variants surface the
+per-substrate-operation `per_write[]` array on every target — the
+SSE variant additionally emits each entry as a `substrate_op` event
+as newtron commits it.
+
 **Request:**
 ```json
 {
@@ -849,7 +1310,7 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
 }
 ```
 
-**Response 200:**
+**Response 200 (JSON variant — `Accept: application/json` or default):**
 ```json
 {
   "operation_id": "<opaque>",
@@ -871,12 +1332,17 @@ underlying newtron API guarantees atomicity; per-target where it doesn't.
       "verify": {
         "kind": "device_io_assertion",
         "state": "in_progress"
-      }
+      },
+      "per_write": [ /* PerWrite[], see §Streaming substrate-operation events */ ]
     }
   ],
   "aggregate": {
     "all_applied": true,
-    "verify_pending": 1
+    "verify_pending": 1,
+    "total_writes_landed": 14,
+    "total_writes_rejected": 0,
+    "total_daemon_waits": 2,
+    "total_verify_reads_failed": 0
   }
 }
 ```
@@ -893,8 +1359,49 @@ The `verify.state` may transition from `in_progress` to `complete` or
 [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id) for
 the terminal verify state.
 
+**`per_target[*].per_write[]`** is the per-substrate-operation
+sequence newtron executed for this target, ordered by `seq`. Each
+entry is a `PerWrite` per §Streaming substrate-operation events
+(`{seq, operation_id, target, kind, substrate, result, cli_command,
+device_response, at, rationale_ref, source}`). Empty `per_write[]`
+indicates either:
+(a) the target had no Device I/O Operations (e.g., the target was a
+dry-run that newtron-server resolved to a no-op ChangeSet — which
+the validate stage should have caught at preview time; receiving an
+empty `per_write[]` on a target whose `applied == true` is a signal
+to file an ops ticket); OR
+(b) newtron-server has not yet shipped the per-substrate-operation
+exposure tracked by [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+— pending that gap, `per_write[]` is empty on every target and the
+operator-visible behavior degrades to the historical aggregate.
+Consumers MUST treat `per_write: []` as honest (newtron has nothing
+to report), not as missing data; the
+`manual_equivalent.newtron_http.status` block on this endpoint moves
+to `"pending_newtron_gap"` until the gap closes.
+
+**`aggregate.total_writes_landed`** counts `per_target[*].per_write[]`
+entries with `kind ∈ {redis_write, redis_delete}` and
+`result == "applied"`, summed across all targets. The four
+`aggregate.total_*` counters surface substrate-operation totals at a
+glance so the operator's first view is not "applied: true on 3
+targets" (an aggregate that hides which writes landed) but "21
+substrate writes landed, 2 daemon waits, 14 verify reads passed" (a
+substrate-grounded summary that points the operator at the
+`per_write[]` arrays for detail). Operator-philosophy invariant #1
+("no black boxes") applies to the aggregate as much as to per-target
+results.
+
+**Response 200 (SSE variant — `Accept: text/event-stream`):** stream
+per §Streaming substrate-operation events. The terminal
+`apply_complete` event's data payload is byte-for-byte the same JSON
+object documented above for the JSON variant.
+
 A stale `preview_id` (expired or already consumed) → 410 Gone with
-`kind: "precondition_failure"`.
+`kind: "precondition_failure"`. On the SSE variant, this error is
+returned as a 410 with the typed `Error` body before any SSE bytes
+are written; the stream is not opened. Errors that occur after the
+SSE stream is open follow the "Mid-stream errors" rule in
+§Streaming substrate-operation events.
 
 ## Endpoints — Operator Inbox (second surface)
 
@@ -1517,12 +2024,27 @@ guarantees per verb:
 | `acknowledge` | No device action. |
 | `recheck` | No device action; re-reads signals. |
 
+This endpoint admits a Server-Sent Events streaming variant per
+§Streaming substrate-operation events for the verbs that produce a
+ChangeSet (`reconcile_delta`, `reconcile_full`, `rollback_zombie`,
+`retire_policy`). The variant is selected by the request's `Accept`
+header (`text/event-stream` → SSE; otherwise → JSON). For verbs that
+produce no ChangeSet (`acknowledge`, `clear_zombie`, `recheck`), the
+SSE variant emits exactly one terminal `apply_complete` event with
+the JSON-variant payload and no `substrate_op` events — there is no
+Device I/O to stream, but the SSE response is still well-formed for
+client-side variant uniformity. Per-Node atomicity honesty
+(§Streaming substrate-operation events) applies: this endpoint
+always targets exactly one Node (the card's Node), so the whole
+substrate sequence is one TxPipeline bundle and every
+`redis_write` / `redis_delete` event carries the same `result`.
+
 **Request:**
 ```json
 { "preview_id": "<from /action/preview>" }
 ```
 
-**Response 200:**
+**Response 200 (JSON variant — `Accept: application/json` or default):**
 ```json
 {
   "card_id": "<echoed>",
@@ -1541,6 +2063,13 @@ guarantees per verb:
     "state": "in_progress",
     "started_at": "2026-05-25T14:06:02Z"
   },
+  "per_write": [ /* PerWrite[], see §Streaming substrate-operation events */ ],
+  "substrate_summary": {
+    "writes_landed": 14,
+    "writes_rejected": 0,
+    "daemon_waits": 2,
+    "verify_reads_failed": 0
+  },
   "card_state_after": "resolved | persists | armed_for_recheck"
 }
 ```
@@ -1554,9 +2083,31 @@ guarantees per verb:
 - `armed_for_recheck` — `recheck` was issued; next list call will reflect
   fresh signal state.
 
+`per_write[]` is the per-substrate-operation sequence newtron
+executed against the card's Node, ordered by `seq`. Each entry is a
+`PerWrite` per §Streaming substrate-operation events. Empty
+`per_write[]` is honest: either the verb produced no ChangeSet
+(`acknowledge`, `clear_zombie`, `recheck` — in which case
+`substrate_summary` is also all-zero) or the newtron-side gap
+[newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+has not yet shipped per-substrate-operation surfacing.
+
+`substrate_summary.*` are substrate-operation counts derivable from
+`per_write[]`. REQUIRED on every response (zeroed for no-ChangeSet
+verbs) so the operator's first view shows substrate cadence (14
+writes, 2 daemon waits, 0 verify failures), not just the abstract
+`executed: true`. Operator-philosophy invariant #1 ("no black
+boxes") applies to the action's terminal summary as much as to its
+per-write detail.
+
 For verbs that produce no ChangeSet (`acknowledge`, `clear_zombie`,
 `recheck`), `operation_id`, `operation_url`, `pipeline`, and `verify` are
-omitted.
+omitted; `per_write: []` and `substrate_summary` zeroed.
+
+**Response 200 (SSE variant — `Accept: text/event-stream`):** stream
+per §Streaming substrate-operation events. The terminal
+`apply_complete` event's data payload is byte-for-byte the same JSON
+object documented above for the JSON variant.
 
 A stale `preview_id` → 410 Gone with `kind: "precondition_failure"`.
 
@@ -1567,14 +2118,17 @@ schema in §Error Schema; the operator must re-preview.
 A newtron failure mid-pipeline → 502 with `kind: "internal"` per the
 typed schema in §Error Schema. `details.partial_results` carries the
 partial per-target results completed before the failure (matching the
-shape of this endpoint's `per_target[]` success body); the
-newtron-side error that triggered the catastrophic failure is logged
-against `details.correlation_id`, not surfaced inline — the operator
-quotes the correlation ID when filing the ops ticket. (When the
-mid-pipeline failure CAN be attributed to a substrate cause, the
-correct kind is `validation_failure`, `drift_refusal`, or
-`newtron_unavailable`, not `internal`; `internal` is the residual
-category for unclassified failures.)
+shape of this endpoint's `per_target[]` success body, including
+each target's `per_write[]` of substrate operations that landed
+before the abort); the newtron-side error that triggered the
+catastrophic failure is logged against `details.correlation_id`, not
+surfaced inline — the operator quotes the correlation ID when filing
+the ops ticket. (When the mid-pipeline failure CAN be attributed to
+a substrate cause, the correct kind is `validation_failure`,
+`drift_refusal`, or `newtron_unavailable`, not `internal`;
+`internal` is the residual category for unclassified failures.) On
+the SSE variant, the catastrophic failure flows as an `error` event
+per §Streaming substrate-operation events ("Mid-stream errors").
 
 For `clear_zombie`, the response includes a `manual_cleanup_record`
 object echoing the `note` and `performed_at` from the request and adding
@@ -2489,6 +3043,21 @@ batch-execute call per Node, in the order declared by the
 commit-preview's `execution_order`. Each per-Node call is atomic per
 the newtron guarantee; the cross-Node sequence is not atomic.
 
+This endpoint admits a Server-Sent Events streaming variant per
+§Streaming substrate-operation events. The variant is selected by the
+request's `Accept` header (`text/event-stream` → SSE; otherwise →
+JSON). The JSON variant is documented inline below; the SSE variant
+carries the same `PerWrite` and per-target shapes as documented in
+§Streaming substrate-operation events. Both variants surface the
+per-substrate-operation `per_write[]` array on every per-Node
+batch-execute target — the SSE variant additionally emits each entry
+as a `substrate_op` event as newtron commits it. Per-Node atomicity
+honesty (§Streaming substrate-operation events) applies: for a given
+Node's TxPipeline bundle, every `redis_write` / `redis_delete` event
+carries the same `result` (all `applied` or all `rejected`);
+cross-Node events may interleave in the stream when the operator
+opted into a multi-Node batch.
+
 **Request:**
 ```json
 {
@@ -2507,7 +3076,7 @@ their choice rather than imposing a single safe-default policy
 (operator-philosophy invariant #8: "Operator-defined automation,
 not tool-imposed automation").
 
-**Response 200:**
+**Response 200 (JSON variant — `Accept: application/json` or default):**
 ```json
 {
   "batch_id": "<echoed>",
@@ -2538,6 +3107,7 @@ not tool-imposed automation").
         "key": "service|transit|Ethernet0",
         "fields": { /* NEWTRON_INTENT record actually written */ }
       },
+      "per_write": [ /* PerWrite[], see §Streaming substrate-operation events */ ],
       "failure": null
     }
   ],
@@ -2547,14 +3117,22 @@ not tool-imposed automation").
       "status": "committed",
       "atomicity": "atomic_via_txpipeline",
       "intent_count": 3,
-      "operation_ids": ["<opaque>"]
+      "operation_ids": ["<opaque>"],
+      "writes_landed": 14,
+      "writes_rejected": 0,
+      "daemon_waits": 2,
+      "verify_reads_failed": 0
     },
     {
       "node": "switch2",
       "status": "not_attempted",
       "atomicity": "atomic_via_txpipeline",
       "intent_count": 1,
-      "operation_ids": []
+      "operation_ids": [],
+      "writes_landed": 0,
+      "writes_rejected": 0,
+      "daemon_waits": 0,
+      "verify_reads_failed": 0
     }
   ],
   "aggregate": {
@@ -2563,7 +3141,11 @@ not tool-imposed automation").
     "node_count_failed": 0,
     "node_count_not_attempted": 1,
     "verify_pending_targets": 3,
-    "stop_on_first_failure_triggered": true
+    "stop_on_first_failure_triggered": true,
+    "total_writes_landed": 14,
+    "total_writes_rejected": 0,
+    "total_daemon_waits": 2,
+    "total_verify_reads_failed": 0
   },
   "cross_node_atomicity": {
     "atomic": false,
@@ -2601,6 +3183,35 @@ Field rules:
   decision substrate; the commit response surfaces it directly so
   the operator never has to follow a link to read what was
   actually recorded.
+- `per_target[*].per_write[]` is the per-substrate-operation sequence
+  newtron executed for this target, ordered by `seq`. Each entry is
+  a `PerWrite` per §Streaming substrate-operation events. Empty
+  `per_write[]` is honest: either the target was `not_attempted`
+  (no Device I/O happened) or the newtron-side gap
+  [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+  has not yet shipped per-substrate-operation surfacing. On
+  `status == "failed"`, `per_write[]` carries the substrate
+  operations that landed before the per-Node TxPipeline was
+  rejected (typically zero — schema validation per
+  `DESIGN_PRINCIPLES_NEWTRON` §13 refuses the bundle before the
+  `EXEC`); when the failure is post-EXEC (daemon-rejection during
+  settle, verify-failure on a re-read), `per_write[]` carries every
+  applied substrate operation plus the rejected entry.
+- `per_node_results[*].{writes_landed, writes_rejected, daemon_waits,
+  verify_reads_failed}` are substrate-operation counts derivable
+  from the corresponding target's `per_write[]`. They are REQUIRED
+  because the operator's first view at the Node summary level must
+  show substrate cadence (14 writes, 2 daemon waits, 0 verify
+  failures), not just the abstract `status: "committed"`. The
+  derivation is mechanical (count `kind`/`result` combinations in
+  the Node's targets' `per_write[]` entries) so consumers may
+  cross-check.
+- `aggregate.total_*` counters sum the corresponding
+  `per_node_results[*]` counters across every Node. The operator
+  reading the response sees substrate cadence at a glance even
+  before drilling into per-target detail. Operator-philosophy
+  invariant #1 ("no black boxes") applies to the aggregate
+  summary, not just to per-target detail.
 - `per_target[*].failure`, when present, has the shape:
   ```json
   {
@@ -2636,6 +3247,19 @@ Field rules:
   and the operator has a meaningful next action; absent on
   `all_committed` or `none_committed`.
 
+**Response 200 (SSE variant — `Accept: text/event-stream`):** stream
+per §Streaming substrate-operation events. The terminal
+`apply_complete` event's data payload is byte-for-byte the same JSON
+object documented above for the JSON variant (`batch_id`,
+`committed_at`, `per_target[]`, `per_node_results[]`, `aggregate`,
+`cross_node_atomicity`). Per-Node `substrate_op` events flow as
+newtron commits each Node's TxPipeline. When
+`stop_on_first_failure: true` halts the sequence, no further
+`substrate_op` events flow after the failed Node's terminal write;
+the `apply_complete` payload's `per_node_results[]` carries
+`status: "not_attempted"` and zeroed substrate counters for the
+unreached Nodes.
+
 **Errors:**
 - Stale or already-consumed `preview_id` → 410 Gone with
   `kind: "precondition_failure"`.
@@ -2654,9 +3278,15 @@ Field rules:
   `kind: "internal"` per the typed schema in §Error Schema.
   `details.partial_results` carries the per-Node results completed
   before the failure (shape matches this endpoint's success-response
-  `per_target[]`). The batch state is left at `committed` with the
-  partial results; the operator decides recovery via revert. The
-  `details.correlation_id` is the handle for the ops ticket.
+  `per_target[]`, including each target's `per_write[]` of substrate
+  operations that landed before the abort). The batch state is left
+  at `committed` with the partial results; the operator decides
+  recovery via revert. The `details.correlation_id` is the handle
+  for the ops ticket. On the SSE variant, the catastrophic failure
+  flows as an `error` event per §Streaming substrate-operation
+  events ("Mid-stream errors"); the partial substrate operations
+  that completed before the abort appear as their own
+  `substrate_op` events preceding the `error`.
 
 ### `POST /api/workbench/{batch_id}/revert/preview`
 
