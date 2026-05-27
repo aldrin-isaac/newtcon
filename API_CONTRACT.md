@@ -991,16 +991,76 @@ post-terminal bytes as a protocol violation.
 
 Emitted when the per-Node sequence reached terminal status (every
 Node has committed, failed, or been recorded as `not_attempted`).
-The payload IS the same JSON object the JSON-variant returns; it is
-not a strict superset, not a subset. This avoids forking the
-terminal shape between variants — consumers using SSE for live
-events and JSON for batch snapshots see the same per-target /
-per-write / aggregate shape.
+The payload IS the same JSON object the JSON-variant returns plus
+one streaming-only `streaming_source` companion field that the JSON
+variant does not carry (the JSON variant carries no stream, so the
+field has no meaning there). This avoids forking the terminal shape
+between variants for substrate fields — consumers using SSE for
+live events and JSON for batch snapshots see the same per-target /
+per-write / aggregate shape — while honestly disclosing the SSE
+variant's derivation mode per §Newtron HTTP API dependency.
 
 ```
 event: apply_complete
-data: { "operation_id": "<opaque>", "per_target": [ { "node": "switch1", ..., "per_write": [ /* PerWrite[] */ ], ... } ], "aggregate": { ... }, "per_node_atomicity": [ /* same shape as JSON variant */ ] }
+data: { "operation_id": "<opaque>", "per_target": [ { "node": "switch1", ..., "per_write": [ /* PerWrite[] */ ], ... } ], "aggregate": { ... }, "per_node_atomicity": [ /* same shape as JSON variant */ ], "streaming_source": { /* see below; REQUIRED on every derived apply_complete */ } }
 ```
+
+#### `streaming_source` companion (SSE variant only)
+
+REQUIRED on every `apply_complete` event emitted on the SSE
+variant. Absent on the JSON variant (which is not a stream).
+Operationalizes operator-philosophy invariant #9 ("confidence and
+limits are explicit") for the SSE-vs-JSON timing distinction:
+operators MUST be able to read the timing fidelity of the events
+they just consumed without inferring it from documentation.
+
+Shape:
+
+```json
+{
+  "passthrough": false,
+  "derived_from_polling_cadence_ms": 250,
+  "polls_observed_during_operation": 12,
+  "rationale_ref": {
+    "substrate": "newtron/docs/scoping/changeset-substrate.md#cluster-b-deep-dive-2026-05-26",
+    "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
+  }
+}
+```
+
+Field rules:
+
+- **`passthrough`** — REQUIRED. `false` in v0 (the only supported
+  mode today: newtcon-server polls newtron's JSON
+  `WriteResult.per_write[]` and emits derived `substrate_op`
+  events). `true` would indicate newtron-side SSE passthrough —
+  reserved for the contingent re-evaluation path the lead recorded
+  on newtron#19 (if newtron-side SSE eventually lands). Consumers
+  MUST honor `passthrough` and MUST NOT infer derivation mode from
+  any other field.
+- **`derived_from_polling_cadence_ms`** — REQUIRED when
+  `passthrough: false`; FORBIDDEN when `passthrough: true`. The
+  newtcon-server polling cadence (in milliseconds) during the
+  operation. The operator reads this to understand that
+  `substrate_op` events may have been observed up to this many
+  milliseconds after newtron's per-Node `TxPipeline` actually
+  emitted them; the cadence is NOT newtron's substrate-emission
+  rate.
+- **`polls_observed_during_operation`** — REQUIRED when
+  `passthrough: false`; FORBIDDEN when `passthrough: true`. The
+  number of polls newtcon-server made against newtron's
+  `WriteResult` during this operation's lifetime. Operators
+  reading the stream see how many sampling points contributed to
+  the visible event sequence; a low poll count for a long-running
+  operation signals reduced timing fidelity (operators tuning the
+  cadence reference this).
+- **`rationale_ref`** — REQUIRED. Same typed `{substrate,
+  principle}` shape used throughout the contract. Default anchors
+  point to newtron's scoping doc (the source of the SSE-deferral
+  decision) and to operator-philosophy invariant #9. The frontend
+  surfaces `streaming_source` inline on apply-completion as an
+  affordance — "this event sequence was polled at 250 ms" — so the
+  operator never has to dig to learn fidelity.
 
 ### Mid-stream errors
 
@@ -1071,30 +1131,85 @@ current device support.
 ### Newtron HTTP API dependency
 
 The streaming variant and the per-write granularity both depend on
-newtron-server exposing per-substrate-operation results — either as
-an SSE stream of its own, or as a callback API, or as a per-write
-results array in the existing endpoints' responses. newtron's
-current `/intent/reconcile`, `/execute`, and
-`/interface/{name}/apply-service` endpoints return on completion
-with `WriteResult` (`{change_count, applied, verified, saved,
-verification}`) — an aggregate, not per-substrate-operation entries.
+newtron-server exposing per-substrate-operation results. The newtron
+lead's verdict on the originating gap
+([newtron#19](https://github.com/aldrin-isaac/newtron/issues/19))
+landed in two parts:
 
-This is a Gap-Handling Protocol gap. The newtron-side issue
-tracking it is filed at
-[newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
-(per-substrate-operation surfacing on newtron's write endpoints).
-This contract section names the operator-visible shape the gap
-needs to fill; the newtron issue surveys newtron's current routes
-and types to scope the work.
+- **JSON variant — AVAILABLE.** Phase 2a (newtron commit `f6b64d8`,
+  2026-05-27) shipped the substrate as an additive
+  `WriteResult.per_write: PerSubstrateOp[]` field on every endpoint
+  in newtron's S8 / S13 / S11 write surface (`/intent/reconcile`,
+  `/execute`, `/interface/{name}/apply-service`, etc.) plus inside
+  the typed 409 envelope for `VerificationFailedError`
+  (newtron#21, same commit). The vocabulary matches this contract
+  verbatim: `kind ∈ redis_write | redis_delete | daemon_wait |
+  verify_read`, `result ∈ applied | rejected | skipped`,
+  `device_response` verbatim, per-Node atomicity honored within one
+  Redis `TxPipeline` bundle. See newtron's `docs/newtron/api.md`
+  §S11 `WriteResult` and `PerSubstrateOp` for the landed schema.
+  newtcon-server consumes the field directly; no reconstruction is
+  required.
+- **SSE wire variant — DEFERRED INDEFINITELY.** Per the lead's
+  [Cluster B deep-dive comment on newtron#19](https://github.com/aldrin-isaac/newtron/issues/19#issuecomment-4551057150):
+  *"streaming is operational timing, not substrate per §46 — UX-only
+  benefit; polling against the existing/scoped endpoint is
+  functional. Substantial newtron infrastructure expansion not
+  justified."* newtron will NOT ship an `Accept: text/event-stream`
+  variant of its write endpoints in the foreseeable future. The
+  re-evaluation trigger the lead recorded is
+  evidence-gated: *"Implement when newtcon team's JSON-variant UI
+  implementation is in flight AND operator field-use reveals
+  polling-derived UX is meaningfully degraded against the Concrete
+  success vision."*
 
-Until newtron#19 ships, `per_write` arrays in newtcon's responses
-are empty (`per_write: []`), `manual_equivalent.newtron_http.status`
-on the affected endpoints is `"pending_newtron_gap"` with
-`gap_issue` pointing at newtron#19, and the SSE variant emits
-exactly one `apply_complete` event (no `substrate_op` events)
-because newtcon-server has nothing to stream. The operator-facing
-contract shape is stable now so frontend work can proceed against
-it; the operator-visible behavior fills in as newtron#19 lands.
+The contract continues to expose both variants to newtcon's
+consumers because the JSON-vs-SSE split is operator-facing — the
+contract-snapshot test consumer wants JSON, the
+operator-UI consumer wants SSE — and that split is meaningful
+regardless of how the underlying newtron substrate is fetched.
+**The SSE variant is now derived by newtcon-server**, not
+passed through from newtron:
+
+- newtcon-server polls newtron's per-operation read endpoint at a
+  bounded cadence (default 250 ms during in-flight operations;
+  exposed at `GET /api/health.operations_retention` for inspection;
+  configurable per deployment). Each poll fetches the
+  most-recent `WriteResult` snapshot — including every
+  `per_write[]` entry newtron has accumulated so far.
+- The newtcon-server SSE handler emits one `substrate_op` event per
+  newly-observed `PerWrite` entry between polls (deduplication by
+  `(operation_id, seq)`), terminated by exactly one
+  `apply_complete` event when newtron's underlying operation
+  reaches a terminal state. Heartbeats and `Last-Event-ID` resume
+  follow the §SSE event grammar unchanged.
+- Per operator-philosophy invariant #9 ("confidence and limits are
+  explicit"), the contract MUST teach that the derived stream's
+  per-event timing is bounded by newtcon's polling cadence — NOT
+  by newtron's per-Node `TxPipeline` cadence. An operator who
+  watches every `redis_write` event arrive in one sub-second burst
+  is observing newtcon-server's first poll *after* the EXEC, NOT
+  the EXEC itself. The cadence is honest to the operator via the
+  `apply_complete` payload's
+  `streaming_source.derived_from_polling_cadence_ms` field
+  (additive, REQUIRED on every derived `apply_complete`; absent
+  only when a future newtron SSE passthrough lands and
+  `streaming_source.passthrough: true` is emitted instead).
+
+This is the operator-honesty boundary. The contract MUST NOT teach
+that SSE is forthcoming from newtron when the lead has explicitly
+deferred it; the contract MUST NOT silently substitute polling
+timing for substrate-emission timing without telling the operator.
+Both rules are binding.
+
+The `manual_equivalent.newtron_http.status` block on every
+affected endpoint is `"available"` for the JSON variant, with
+`note` documenting the polling-derived nature of the SSE variant
+and `gap_issue: null` (the JSON variant is the substrate; the SSE
+variant is a presentation layer over it, not a separate gap).
+Operators reproducing the substrate manually do so against
+newtron's JSON variant directly (see each endpoint's
+`manual_equivalent.newtron_cli` companion for the exact verb).
 
 ### Endpoints that admit streaming
 
@@ -1937,20 +2052,24 @@ sequence newtron executed for this target, ordered by `seq`. Each
 entry is a `PerWrite` per §Streaming substrate-operation events
 (`{seq, operation_id, target, kind, substrate, result, cli_command,
 device_response, at, rationale_ref, source}`). Empty `per_write[]`
-indicates either:
-(a) the target had no Device I/O Operations (e.g., the target was a
-dry-run that newtron-server resolved to a no-op ChangeSet — which
-the validate stage should have caught at preview time; receiving an
-empty `per_write[]` on a target whose `applied == true` is a signal
-to file an ops ticket); OR
-(b) newtron-server has not yet shipped the per-substrate-operation
-exposure tracked by [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
-— pending that gap, `per_write[]` is empty on every target and the
-operator-visible behavior degrades to the historical aggregate.
+indicates the target had no Device I/O Operations (e.g., the target
+was a dry-run that newtron-server resolved to a no-op ChangeSet —
+which the validate stage should have caught at preview time;
+receiving an empty `per_write[]` on a target whose `applied == true`
+is a signal to file an ops ticket). The per-substrate-operation
+surfacing tracked by
+[newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+shipped on 2026-05-27 (Phase 2a, commit `f6b64d8`); since that
+landing, `per_write[]` is populated for every target whose newtron
+operation performed Device I/O.
+
 Consumers MUST treat `per_write: []` as honest (newtron has nothing
 to report), not as missing data; the
-`manual_equivalent.newtron_http.status` block on this endpoint moves
-to `"pending_newtron_gap"` until the gap closes.
+`manual_equivalent.newtron_http.status` block on this endpoint is
+`"available"` (the JSON variant of §Streaming substrate-operation
+events ships the substrate; the SSE variant is derived by
+newtcon-server from the JSON substrate per the polling-cadence
+rule documented there).
 
 **`aggregate.total_writes_landed`** counts `per_target[*].per_write[]`
 entries with `kind ∈ {redis_write, redis_delete}` and
@@ -2745,11 +2864,14 @@ substrate sequence is one TxPipeline bundle and every
 `per_write[]` is the per-substrate-operation sequence newtron
 executed against the card's Node, ordered by `seq`. Each entry is a
 `PerWrite` per §Streaming substrate-operation events. Empty
-`per_write[]` is honest: either the verb produced no ChangeSet
+`per_write[]` is honest: the verb produced no ChangeSet
 (`acknowledge`, `clear_zombie`, `recheck` — in which case
-`substrate_summary` is also all-zero) or the newtron-side gap
-[newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
-has not yet shipped per-substrate-operation surfacing.
+`substrate_summary` is also all-zero). Per-substrate-operation
+surfacing on newtron's write endpoints
+([newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+Phase 2a) shipped on 2026-05-27; for verbs that produce a
+ChangeSet, `per_write[]` is non-empty whenever the underlying
+operation performed Device I/O.
 
 `substrate_summary.*` are substrate-operation counts derivable from
 `per_write[]`. REQUIRED on every response (zeroed for no-ChangeSet
@@ -4125,17 +4247,22 @@ Field rules:
 - `per_target[*].per_write[]` is the per-substrate-operation sequence
   newtron executed for this target, ordered by `seq`. Each entry is
   a `PerWrite` per §Streaming substrate-operation events. Empty
-  `per_write[]` is honest: either the target was `not_attempted`
-  (no Device I/O happened) or the newtron-side gap
-  [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
-  has not yet shipped per-substrate-operation surfacing. On
-  `status == "failed"`, `per_write[]` carries the substrate
-  operations that landed before the per-Node TxPipeline was
-  rejected (typically zero — schema validation per
+  `per_write[]` is honest: the target was `not_attempted` (no
+  Device I/O happened). Per-substrate-operation surfacing on
+  newtron's write endpoints
+  ([newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+  Phase 2a) shipped on 2026-05-27 — `per_write[]` is now populated
+  for every attempted target. On `status == "failed"`, `per_write[]`
+  carries the substrate operations that landed before the per-Node
+  TxPipeline was rejected (typically zero — schema validation per
   `DESIGN_PRINCIPLES_NEWTRON` §13 refuses the bundle before the
   `EXEC`); when the failure is post-EXEC (daemon-rejection during
   settle, verify-failure on a re-read), `per_write[]` carries every
-  applied substrate operation plus the rejected entry.
+  applied substrate operation plus the rejected entry — surfaced
+  from newtron's typed `data: *WriteResult` envelope on
+  `VerificationFailedError` per
+  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
+  (companion to #19 Phase 2a).
 - `per_node_results[*].{writes_landed, writes_rejected, daemon_waits,
   verify_reads_failed}` are substrate-operation counts derivable
   from the corresponding target's `per_write[]`. They are REQUIRED
