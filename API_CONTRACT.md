@@ -7981,3 +7981,1148 @@ Every endpoint in this section MUST satisfy:
    needed, the Architecture Reviewer rejects on principle (per
    `CLAUDE.md` §Design Principles, "Where newtron has a word for
    something, newtcon uses that word").
+
+## Endpoints — Report Bug
+
+The Report Bug surface is the structural infrastructure that closes
+the loop from "operator notices a substrate failure" to "operator
+participates in fixing the automation." It is the contract realization
+of the
+[Concrete success vision](docs/operator-philosophy.md#concrete-success-vision-operators-as-participants)
+in `docs/operator-philosophy.md` — specifically the fourth bullet
+("operator can point at the **exact method in the automation** that
+produced the bad config") and the fifth bullet ("the operator **files
+a PR** against the automation, not a ticket").
+
+Without this surface, the operator's diagnostic work — copying the
+failed `cli_command` into their own ssh session, observing the device
+response by hand, comparing it to what newtron attempted, narrowing
+the failure to "the automation generated bad config, not the device
+rejecting good config" — is wasted effort. There is no structured
+path to deliver the diagnosis back to the automation team. Today the
+operator opens GitHub manually and writes a free-form issue ("this
+didn't work"); the automation team then has to ask back-and-forth for
+the substrate, the command attempted, the device response, the
+operation context, and the affected Node's recent history. The
+operator's per-write granular knowledge is reduced to a ticket-level
+symptom report by the act of filing.
+
+This surface inverts that loss. Every failed substrate operation
+(`PerWrite` with `result: "rejected"`, verify-stage assertion
+failures, mid-stream `error` events) carries enough context for the
+operator to file a method-level bug report from inside newtcon, with
+the substrate, the attempted command, the verbatim device response,
+the operation context, the recent-history context, and (when newtron
+verbose-mode call-site provenance is available) the exact newtron Go
+method that emitted the failing write — all pre-collected, ready for
+operator review, and routable to the correct repository.
+
+The surface is also the structural ground for operator-philosophy
+invariant #7 ("Errors carry the substrate") applied to bug-report
+authorship: the report body IS the substrate-carrying error report.
+A bug report filed through this surface cannot lose substrate by
+construction; the contract guarantees the substrate is present.
+
+### How this surface differs from other surfaces
+
+| Surface | What it does | What it does NOT do |
+|---------|--------------|---------------------|
+| `POST /api/apply`, `POST /api/workbench/{batch_id}/commit`, `POST /api/inbox/{card_id}/action` | Execute substrate operations. Stream / return `PerWrite` entries (per §Streaming substrate-operation events). | Author bug reports. The operator sees the failure; nothing automates the diagnostic-to-report-body translation. |
+| `GET /api/operations/{operation_id}` | Inspect a single operation's pipeline trace, verify assertion, terminal state. | Synthesize a bug report from that trace. The data is available to read; the operator must compose the report by hand. |
+| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source` (depends on [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)). |
+| **`POST /api/report-bug/preview` / `POST /api/report-bug`** (this surface) | Collect the substrate + operation context + recent-history context + (when available) call-site, route to the correct repository, render a structured Markdown body, return for operator review, and (on confirmation) deliver the body to a configured integration target. | Auto-file the report without operator review. The operator confirms the rendered body before any external system is touched, per `CLAUDE.md` §Preview Before Commit, Always. |
+
+The surface is read-mostly with respect to newtron substrate (it
+reads from newtron via `internal/newtronc/` to populate operation
+context and recent-history context); the only state-changing effect
+is the production of an external artifact (a GitHub issue, or a
+clipboard payload). That external mutation is exactly why the
+preview/apply pairing is mandatory on this surface — the artifact's
+shape and content must be operator-approved before it lands in an
+external system that the operator's collaborators will see.
+
+### Honesty about what this surface IS NOT
+
+This surface produces a bug-report body with all the substrate the
+operator needs. It does **not**:
+
+- Diagnose the bug. The body is structured raw substrate
+  (per-write, operation, recent history, call-site when available)
+  plus the operator's free-text narrative. newtcon does not infer
+  "this is probably a daemon timing bug" or "this is probably a
+  schema mismatch." Operator-philosophy invariant #9 ("Confidence
+  and limits are explicit"): newtcon's competence stops at presenting
+  the substrate; interpretation is the operator's.
+- Propose a fix. No code suggestions, no PR drafts. The operator
+  who authors the report may follow up with their own PR (the
+  success vision's fifth bullet); newtcon does not pre-empt that
+  authorship.
+- Replace the operator's per-write inspection. The Report Bug
+  affordance is reached AFTER the operator has watched the
+  substrate stream and isolated the failing write — it is the
+  finishing move, not the diagnostic. The operator who skips
+  reading the `PerWrite` entries and clicks Report Bug as a
+  reflex will produce a low-information report; the substrate is
+  the teaching surface (invariant #3), and this surface relies on
+  the operator having actually used it.
+- Replace manual classification. Until newtron#12 (call-site
+  provenance) ships, the operator manually classifies
+  newtron-vs-newtcon-vs-unknown via the request body. The surface
+  still works without auto-classification — the body shape is
+  identical, and the routing question is asked of the operator
+  rather than inferred. When newtron#12 ships, the field becomes
+  auto-populated; the operator may still override.
+
+### Identifiers
+
+- `report_id` — opaque, server-assigned on `POST /api/report-bug`
+  (the confirm step). Used to address the filed report for status
+  lookup via `GET /api/report-bug/{report_id}`. Distinct from
+  `preview_id` because the report transitions from a transient
+  preview to a durable record on confirm.
+- `preview_id` — opaque, returned by `POST /api/report-bug/preview`,
+  valid for 5 minutes. Same shape and TTL as elsewhere in the
+  contract. REQUIRED by `POST /api/report-bug` per `CLAUDE.md`
+  §Preview Before Commit, Always.
+- `operation_id` — the operation the report references, as defined
+  by §Endpoints — Operations. The Report Bug surface does not
+  mint new operation IDs; it consumes existing ones.
+- `per_write_seq` — OPTIONAL request input. The `seq` of a specific
+  `PerWrite` entry within `operation_id`'s `per_target[*].per_write[]`
+  (per §Streaming substrate-operation events). When supplied, the
+  report is scoped to one substrate operation within the operation;
+  when omitted, the report covers the operation as a whole.
+
+### Vocabulary
+
+This surface uses the existing contract vocabulary. No new types are
+coined.
+
+- `PerWrite` — defined in §Streaming substrate-operation events.
+  Carries `seq`, `target`, `kind`, `substrate`, `result`,
+  `cli_command`, `device_response`, `at`, `rationale_ref`,
+  `source`. The Report Bug body embeds these verbatim; the report
+  is substrate-canonical by construction.
+- Operation trace — defined in §Endpoints — Operations.
+  Carries the pipeline (`Intent → Replay → Render → Deliver`),
+  verify-stage assertion, terminal outcome. Embedded by reference
+  (operation URL) and by the substrate fields needed to make the
+  report self-contained.
+- `rationale_ref` — the typed `{substrate, principle}` shape used
+  throughout the contract. Carried on the report body to anchor
+  the report in the substrate doc and operator-philosophy
+  principle that motivates filing.
+- `Error` schema — defined in §Error Schema. All non-2xx responses
+  use the typed kinds and per-kind `details`.
+
+### Where the report is rendered
+
+The Markdown body is rendered by **newtcon-server**, not by newtron
+and not by the frontend. Rationale:
+
+- The body composes substrate from multiple sources (newtron
+  operation, newtcon-server's operation store, newtcon-server's
+  recent-operations history, the operator's narrative). Rendering
+  in newtcon-server is the natural seam — both the JSON shape and
+  the rendered Markdown are part of the same response, available
+  to curl-consumers and UI consumers identically.
+- Rendering in the frontend would fork the body shape between
+  consumers (UI sees one Markdown, scripts see another), violating
+  the contract-snapshot test's invariant that the wire shape is
+  one shape.
+- Rendering in newtron would put operator-presentation concerns
+  inside newtron, violating `DESIGN_PRINCIPLES_NEWTRON.md` §46
+  ("Wire Shape Mirrors Substrate") — newtron exposes substrate;
+  presentation is newtcon's layer.
+
+newtcon-server's rendering is mechanical and templated: the four
+report templates (substrate-write-failure, verify-assertion-failure,
+drift-mis-classification, mid-stream-abort) each have a known
+Markdown skeleton with substrate slots filled from the operation
+trace and the optional operator narrative. The template choice is
+inferred from the report's scope (`per_write_seq` + the `PerWrite`'s
+`kind` and `result`, or the operation's terminal outcome) and
+exposed in the preview response so the operator can override.
+
+### Where the report is delivered
+
+The contract is **deliberately open** about the delivery mechanism.
+`POST /api/report-bug` accepts a `delivery_mode` request field with
+two bounded values:
+
+- `clipboard` — newtcon-server returns the rendered Markdown body
+  in the response; the frontend places it on the operator's
+  clipboard, and the operator pastes it into GitHub (or their
+  bug-tracker of choice) themselves. No external integration
+  required. Always available, no configuration prerequisite.
+- `direct_file` — newtcon-server is configured to deliver the
+  report to an external bug-tracker integration (e.g., a GitHub
+  token-authenticated client, a Jira webhook, a Phabricator
+  endpoint). The integration is a deployment-time configuration
+  concern of newtcon-server, NOT specified by this contract.
+  When configured and selected, the response carries the
+  external-system URL of the filed artifact. When the operator
+  selects `direct_file` and no integration is configured,
+  newtcon-server responds 400 with `kind: "precondition_failure"`
+  and `details.condition: "delivery_integration_unconfigured"`,
+  naming the missing configuration in the message.
+
+The contract does not embed the integration command (`gh issue
+create ...`, `curl ...`, etc.) into the response shape. Rationale:
+operator-philosophy invariant #8 ("operator-defined automation, not
+tool-imposed automation") — the deployment owner chooses the
+bug-tracker integration; baking `gh` into the contract would make
+GitHub the only first-class target. The contract specifies what
+newtcon-server delivers (a structured body, a target classification,
+operator confirmation); it does not specify how delivery is wired.
+
+### `GET /api/report-bug/templates`
+
+Return the catalog of bug-report templates newtcon-server can render
+from. The catalog is static (versioned with the newtcon-server
+binary), small, and bounded. The frontend uses this endpoint to
+populate the template-selector UI; scripts use it to enumerate the
+fields each template requires.
+
+Idempotent; safe to cache. No newtron interaction.
+
+**Response 200:**
+```json
+{
+  "as_of": "2026-05-26T14:30:00Z",
+  "templates": [
+    {
+      "id": "substrate_write_failure",
+      "applies_to": {
+        "scope": "per_write",
+        "per_write_kind": ["redis_write", "redis_delete"],
+        "per_write_result": ["rejected"]
+      },
+      "title_template": "Substrate write rejected: {table}|{key} on {node}",
+      "body_sections": [
+        "context",
+        "failed_write",
+        "what_operator_attempted_manually",
+        "operation_context",
+        "recent_operations_on_node",
+        "call_site_provenance",
+        "operator_narrative",
+        "rationale"
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants"
+      }
+    },
+    {
+      "id": "verify_assertion_failure",
+      "applies_to": {
+        "scope": "per_write",
+        "per_write_kind": ["verify_read"],
+        "per_write_result": ["rejected"]
+      },
+      "title_template": "Verify assertion failed: {table}|{key}.{field} expected={expected} actual={actual} on {node}",
+      "body_sections": [
+        "context",
+        "verify_failure",
+        "asserted_changeset",
+        "what_operator_attempted_manually",
+        "operation_context",
+        "recent_operations_on_node",
+        "call_site_provenance",
+        "operator_narrative",
+        "rationale"
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#14-verify-your-writes-observe-everything-else",
+        "principle": "docs/operator-philosophy.md#7-errors-carry-the-substrate"
+      }
+    },
+    {
+      "id": "drift_mis_classification",
+      "applies_to": {
+        "scope": "operation",
+        "terminal_outcome": ["failure", "partial"],
+        "error_kind": ["drift_refusal"]
+      },
+      "title_template": "Drift refusal looks wrong: {node} reported {entry_count} drift entries before {verb}",
+      "body_sections": [
+        "context",
+        "drift_entries_reported",
+        "what_operator_attempted_manually",
+        "operation_context",
+        "recent_operations_on_node",
+        "call_site_provenance",
+        "operator_narrative",
+        "rationale"
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#5-drift-detection",
+        "principle": "docs/operator-philosophy.md#1-no-black-boxes"
+      }
+    },
+    {
+      "id": "mid_stream_abort",
+      "applies_to": {
+        "scope": "operation",
+        "terminal_outcome": ["failure"],
+        "error_kind": ["internal", "newtron_unavailable"]
+      },
+      "title_template": "Apply aborted mid-stream on {node}: {kind} after {applied_count}/{total_count} writes",
+      "body_sections": [
+        "context",
+        "abort_event",
+        "writes_that_landed_before_abort",
+        "operation_context",
+        "recent_operations_on_node",
+        "call_site_provenance",
+        "operator_narrative",
+        "rationale"
+      ],
+      "rationale_ref": {
+        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+        "principle": "docs/operator-philosophy.md#1-no-black-boxes"
+      }
+    }
+  ],
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "not_applicable",
+      "rationale": "Bug-report templates are a newtcon presentation concern; no newtron substrate corresponds to them. The operator may instead author a bug report by hand using the operation trace at GET /api/operations/{operation_id} and the per_write[] data from the apply response — that workflow is the manual-mode parity for this surface, exposed via the operation endpoint, not via newtron."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`templates[]`** — the bounded catalog. New template IDs are a
+  Contract PR; the four IDs above are the v0 set, scoped to cover
+  the failure modes the §Streaming substrate-operation events
+  contract surfaces (per-write rejection, verify-assertion failure,
+  drift refusal, mid-stream abort). Other failure modes (e.g.,
+  zombie-detected, ref-count-warning-stuck) get templates in
+  follow-up Contract PRs; until then, the operator selects the
+  closest applicable template and uses the narrative to clarify.
+- **`templates[*].applies_to`** — the typed predicate naming when
+  this template is the recommended default. The frontend uses this
+  to pre-select a template based on the operator's entry point
+  (clicked Report Bug on a rejected `PerWrite` → preselect
+  `substrate_write_failure`; clicked on an operation that ended in
+  `drift_refusal` → preselect `drift_mis_classification`). The
+  operator may always override; the predicate is a recommendation,
+  not a constraint.
+- **`templates[*].body_sections`** — the ordered list of section
+  identifiers the rendered Markdown body will contain. These are
+  bounded; the rendering logic in newtcon-server has one renderer
+  per section ID. Operators reading the preview see the same
+  sections enumerated, so the structure of the eventual external
+  artifact is visible at preview time (invariant #1: no black
+  boxes).
+- **`templates[*].rationale_ref`** — the typed `{substrate,
+  principle}` anchor naming what substrate the template surfaces
+  and what operator-philosophy section motivates that surfacing.
+  The UI renders this as a "why this template?" link per invariant
+  #5 ("why-mode is always available").
+- **`manual_equivalent.newtron_http.status: "not_applicable"`** —
+  this is the honest answer. The substrate is newtcon's
+  (presentation templates), not newtron's. The rationale field
+  names the operator's-tools alternative: read the operation trace
+  by hand and author the bug report directly. Per
+  operator-philosophy invariant #2 (manual-mode parity), the
+  operator can do this without newtcon — the parity contribution
+  is exposing the operation trace at
+  `GET /api/operations/{operation_id}`, not providing a
+  newtcon-mediated bug-tracker.
+
+**Errors:**
+- newtron-server unreachable while serving templates → not
+  applicable; this endpoint does not call newtron. The catalog is
+  static.
+- All other failures → 500 with `kind: "internal"` per the typed
+  schema in §Error Schema.
+
+### `POST /api/report-bug/preview`
+
+Compute the bug-report body that would be filed for the given
+`operation_id` (optionally scoped to `per_write_seq`), with the
+chosen template and the operator's optional narrative. **No
+external mutation.** Returns the rendered Markdown body, the
+target classification, the per-section substrate the body embeds,
+and a `preview_id` that REQUIRED by `POST /api/report-bug`. The
+operator reviews the body before any external system is touched.
+
+Mandatory before `POST /api/report-bug` per `CLAUDE.md`
+§Preview Before Commit, Always — the contract treats production of
+an external artifact (a GitHub issue, a Jira ticket) as a
+state-changing operation against the operator's external collaborators,
+even though no substrate is mutated.
+
+**Request:**
+```json
+{
+  "operation_id": "<opaque, from §Endpoints — Operations>",
+  "per_write_seq": 7,
+  "per_write_target": { "network": "default", "node": "switch1", "interface": "Ethernet0" },
+  "template_id": "substrate_write_failure",
+  "target_repository_hint": {
+    "kind": "auto | newtron | newtcon | other",
+    "other_repository": null
+  },
+  "operator_narrative": {
+    "free_text": "I ran the failed cli_command myself via ssh switch1 → redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 and got OK. The same command newtron emitted got rejected. Suspect newtron is sending a stale ASN value from before my last edit.",
+    "manual_verification": {
+      "performed": true,
+      "performed_at": "2026-05-26T14:25:12Z",
+      "command_run": "redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 local_addr 10.1.0.0 admin_status up",
+      "device_response": "(integer) 3"
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`operation_id`** — REQUIRED. The operation the report references.
+  Validated against newtcon-server's operations store; unknown or
+  evicted → 400 with `kind: "precondition_failure"`,
+  `details.condition: "operation_unknown_or_expired"`. Operations
+  are retained per the operations retention contract (see
+  §Endpoints — Operations and [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18)
+  for retention semantics); a report that references an evicted
+  operation is refused because the report body's substrate cannot
+  be reconstructed.
+- **`per_write_seq`** — OPTIONAL. When supplied, the report is
+  scoped to one specific substrate operation within the operation.
+  When supplied, `per_write_target` is ALSO REQUIRED — `seq` is
+  per-target (per §Streaming substrate-operation events
+  "Per-Node atomicity honesty"), so `(target, seq)` is the unique
+  identifier. Supplying one without the other → 400
+  `validation_failure` with
+  `details.rejections[*].reason: "missing_required"`. Unknown
+  `(target, seq)` within `operation_id` → 400
+  `validation_failure` with
+  `details.rejections[*].reason: "target_absent"` and
+  `details.rejections[*].locator.substrate_field` naming the
+  missing target+seq. When `per_write_seq` is omitted, the report
+  covers the operation as a whole.
+- **`template_id`** — OPTIONAL. When supplied, must be one of the
+  template IDs from
+  [`GET /api/report-bug/templates`](#get-apireport-bugtemplates).
+  When omitted, newtcon-server selects the template using the
+  template catalog's `applies_to` predicates against the operation
+  and (when supplied) the `PerWrite` at `per_write_seq`.
+  Selection logic is deterministic; the chosen template is named
+  in the response (`template_id_resolved`) so the operator can see
+  what was chosen and override on a subsequent preview.
+- **`target_repository_hint`** — OPTIONAL. Defaults to
+  `{ "kind": "auto", "other_repository": null }`.
+  - `"auto"` — newtcon-server classifies the target repository
+    using the `PerWrite.source` call-site if present (newtron#12);
+    when `source` is null (newtron#12 not yet shipped, or this
+    operation predates verbose-mode capture), `auto` resolves to
+    `"unknown"` and the preview response asks the operator to
+    classify before confirmation. The classification is
+    deterministic: a `source.call_site` matching
+    `pkg/newtron/...` → `newtron`; a call-site internal to
+    newtcon-server (which newtcon-server knows by construction) →
+    `newtcon`; anything else → `unknown`.
+  - `"newtron"` / `"newtcon"` — operator explicitly classifies;
+    overrides any auto-classification.
+  - `"other"` — operator names an external repository in
+    `other_repository`. Required when `kind == "other"`.
+- **`operator_narrative.free_text`** — OPTIONAL. Operator-supplied
+  prose describing what they think is wrong, what they tried, and
+  what they expected. The narrative is appended to the rendered
+  body as its own section (`operator_narrative`); newtcon does
+  not edit or summarize it.
+- **`operator_narrative.manual_verification`** — OPTIONAL but
+  STRONGLY RECOMMENDED. The operator's "I ran this myself"
+  evidence. When `performed: true`, all four subfields
+  (`performed_at`, `command_run`, `device_response`,
+  `performed: true`) are REQUIRED; partial population → 400
+  `validation_failure` with
+  `details.rejections[*].reason: "missing_required"` naming the
+  absent subfields. The manual verification populates a dedicated
+  section in the rendered body that the automation team can
+  compare against the `device_response` newtron captured; the
+  diff between the two responses is the substrate-grounded
+  isolation of device-vs-automation (operator-philosophy success
+  vision, third bullet) made first-class on the bug report.
+
+**Response 200:**
+```json
+{
+  "preview_id": "<opaque, valid for 5 minutes>",
+  "as_of": "2026-05-26T14:30:15Z",
+  "operation_id": "<echoed>",
+  "operation_url": "/api/operations/<opaque>",
+  "per_write_seq": 7,
+  "per_write_url": "/api/operations/<opaque>",
+  "template_id_resolved": "substrate_write_failure",
+  "template_id_requested": "substrate_write_failure",
+  "template_resolution_rationale": "Selected by applies_to predicate match: scope=per_write, per_write.kind=redis_write, per_write.result=rejected.",
+  "target_repository_resolved": {
+    "kind": "newtron",
+    "other_repository": null,
+    "resolution_basis": "call_site_provenance | operator_override | unknown",
+    "call_site_used": "pkg/newtron/network/node/bgp_ops.go:142 generateBgpNeighbor",
+    "operator_action_required": false,
+    "operator_action_message": null
+  },
+  "body_sections": [
+    {
+      "id": "context",
+      "rendered_markdown": "**Operation:** ApplyService on switch1:Ethernet0 (service=transit)\n**Operation ID:** abc-123\n**Started at:** 2026-05-26T14:25:00Z\n**Terminal outcome:** failure (per-target rejected at write seq=7)",
+      "substrate": {
+        "operation_id": "<opaque>",
+        "verb": "ApplyService",
+        "target": { "network": "default", "node": "switch1", "interface": "Ethernet0" },
+        "params": { "service": "transit", "ip": "10.1.0.0/31", "peer_as": 65002 },
+        "started_at": "2026-05-26T14:25:00Z",
+        "terminal_outcome": "failure"
+      }
+    },
+    {
+      "id": "failed_write",
+      "rendered_markdown": "**Substrate:** `BGP_NEIGHBOR|default|10.1.0.1`\n**Fields attempted:**\n```\nasn=65002\nlocal_addr=10.1.0.0\nadmin_status=up\n```\n**CLI equivalent:**\n```\nredis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 local_addr 10.1.0.0 admin_status up\n```\n**Device response (verbatim):**\n```\nfrrcfgd: rejected BGP_NEIGHBOR|default|10.1.0.1: invalid asn\n```",
+      "substrate": {
+        "per_write": { /* full PerWrite shape per §Streaming substrate-operation events */ }
+      }
+    },
+    {
+      "id": "what_operator_attempted_manually",
+      "rendered_markdown": "Operator ran the failed CLI equivalent via ssh at 2026-05-26T14:25:12Z:\n```\nredis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 local_addr 10.1.0.0 admin_status up\n```\nDevice returned:\n```\n(integer) 3\n```\n**Interpretation:** the manual write succeeded; the automation's attempt was rejected. The difference between manual success and automation rejection isolates the failure to the automation layer.",
+      "substrate": {
+        "manual_verification": { /* echoed operator_narrative.manual_verification */ },
+        "newtron_attempt_response": "frrcfgd: rejected BGP_NEIGHBOR|default|10.1.0.1: invalid asn",
+        "interpretation_hint": "manual_succeeded_automation_rejected"
+      }
+    },
+    {
+      "id": "operation_context",
+      "rendered_markdown": "**Pipeline trace:**\n- intent: complete (intent record: `service|transit|Ethernet0`)\n- replay: complete (1 step)\n- render: complete (14 entries validated, 0 rejected)\n- deliver: failed (1 entry rejected at seq=7; per-Node TxPipeline EXEC refused)\n\n**Verify:** skipped (deliver failed before verify could run).",
+      "substrate": {
+        "pipeline": { /* echoed from /api/operations/{operation_id} */ },
+        "verify": { /* echoed */ }
+      }
+    },
+    {
+      "id": "recent_operations_on_node",
+      "rendered_markdown": "**Last 10 operations on switch1 (most recent first):**\n1. 2026-05-26T14:25:00Z — ApplyService Ethernet0 (this operation; failure)\n2. 2026-05-26T13:42:14Z — RefreshService Ethernet0 (success)\n3. 2026-05-26T12:18:03Z — ApplyService Ethernet5 (success)\n... (7 more)",
+      "substrate": {
+        "recent_operations": [
+          {
+            "operation_id": "<opaque>",
+            "operation_url": "/api/operations/<opaque>",
+            "verb": "ApplyService",
+            "interface": "Ethernet0",
+            "at": "2026-05-26T14:25:00Z",
+            "terminal_outcome": "failure"
+          }
+        ],
+        "recent_operations_source": "newtcon_operations_store",
+        "recent_operations_limit": 10,
+        "recent_operations_available": 10,
+        "recent_operations_window_hint": "operations retained per §Endpoints — Operations retention; older operations may be absent"
+      }
+    },
+    {
+      "id": "call_site_provenance",
+      "rendered_markdown": "**newtron call-site:** `pkg/newtron/network/node/bgp_ops.go:142 generateBgpNeighbor`\n\nThis is the Go method in newtron that emitted the failing CONFIG_DB write.",
+      "substrate": {
+        "source": { "call_site": "pkg/newtron/network/node/bgp_ops.go:142", "function": "generateBgpNeighbor" },
+        "source_status": "available | pending_newtron_gap | not_captured",
+        "source_gap_issue": null
+      }
+    },
+    {
+      "id": "operator_narrative",
+      "rendered_markdown": "**Operator narrative:**\n\nI ran the failed cli_command myself via ssh switch1 → redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 and got OK. The same command newtron emitted got rejected. Suspect newtron is sending a stale ASN value from before my last edit.",
+      "substrate": {
+        "free_text": "<echoed from operator_narrative.free_text>"
+      }
+    },
+    {
+      "id": "rationale",
+      "rendered_markdown": "**Why this report exists:** newtron's automation produced a substrate write that the device rejected, but the operator's manual attempt of the same logical operation succeeded. Per operator-philosophy invariant #7 (errors carry the substrate) and the concrete success vision's third bullet (isolate device-vs-automation), this report exists so the automation team can compare the automation's `device_response` against the operator's manual `device_response` and identify why the automation's input was wrong.",
+      "substrate": {
+        "rationale_ref": {
+          "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
+          "principle": "docs/operator-philosophy.md#7-errors-carry-the-substrate"
+        }
+      }
+    }
+  ],
+  "rendered_body_full": "<the full Markdown body, all sections concatenated in body_sections[] order>",
+  "rendered_title": "Substrate write rejected: BGP_NEIGHBOR|default|10.1.0.1 on switch1",
+  "delivery_options": [
+    {
+      "mode": "clipboard",
+      "available": true,
+      "configuration_status": "always_available",
+      "configuration_message": null
+    },
+    {
+      "mode": "direct_file",
+      "available": false,
+      "configuration_status": "unconfigured",
+      "configuration_message": "newtcon-server has no bug-tracker integration configured; only clipboard delivery is available. To enable direct filing, configure a bug-tracker integration at deployment time."
+    }
+  ],
+  "rationale_ref": {
+    "substrate": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants",
+    "principle": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants"
+  },
+  "manual_equivalent": {
+    "newtron_cli": null,
+    "newtron_http": {
+      "status": "not_applicable",
+      "rationale": "Bug-report authorship is a newtcon presentation concern; no newtron substrate corresponds to it. The operator may instead read the operation trace at GET /api/operations/{operation_id} (newtron-mediated via newtron-server's underlying endpoints) and author a bug report by hand in GitHub or the bug-tracker of choice — that workflow is the manual-mode parity for this surface."
+    }
+  }
+}
+```
+
+Field rules:
+
+- **`per_write_url`** — points to the operation endpoint (which
+  carries the full per-write array); there is no dedicated
+  per-PerWrite endpoint. The frontend navigates to the operation
+  and scrolls to the named `seq`.
+- **`template_id_resolved`** vs **`template_id_requested`** —
+  surfaced separately so the operator can see when newtcon
+  selected a template they did not request, and on what basis.
+  Per invariant #1 (no black boxes): the template-selection
+  rationale is exposed verbatim in
+  `template_resolution_rationale`.
+- **`target_repository_resolved.resolution_basis`** is bounded:
+  - `call_site_provenance` — the `PerWrite.source` field was
+    populated (newtron#12 has shipped, or a future verbose-mode
+    surface), and the classification follows from the call-site.
+  - `operator_override` — operator supplied
+    `target_repository_hint.kind` ∈ `{newtron, newtcon, other}`
+    explicitly.
+  - `unknown` — `source` is null AND the operator hinted `auto`
+    AND newtcon-server cannot classify. In this case
+    `operator_action_required: true` and
+    `operator_action_message` names what the operator must
+    supply (a `target_repository_hint.kind` explicit override)
+    before `POST /api/report-bug` will accept the preview.
+- **`target_repository_resolved.call_site_used`** is populated
+  ONLY when `resolution_basis == "call_site_provenance"`; null
+  otherwise.
+- **`body_sections[*]`** carries BOTH the rendered Markdown for
+  that section AND the typed substrate the section embeds. The
+  contract-snapshot test asserts the substrate keys are
+  present and well-typed; the rendered Markdown is presentation,
+  the substrate is the substrate, and both surfaces are
+  contract-bound per `DESIGN_PRINCIPLES_NEWTRON.md` §46 (the wire
+  exposes the substrate, not only the presentation).
+- **`body_sections[*].id`** values are bounded by the template's
+  `body_sections[]` list. An ID not in the template → contract
+  violation.
+- **`body_sections[*].substrate`** for the `failed_write` section
+  embeds the full `PerWrite` shape verbatim (per §Streaming
+  substrate-operation events "PerWrite shape"). The bug report
+  body MUST carry the full PerWrite — not a summarized form —
+  per operator-philosophy invariant #7 ("errors carry the
+  substrate") and `DESIGN_PRINCIPLES_NEWTRON.md` §14.
+- **`body_sections[*].substrate.recent_operations_source`** is
+  REQUIRED. The value `"newtcon_operations_store"` names that the
+  recent-operations list is derived from newtcon-server's own
+  operations retention (per §Endpoints — Operations), NOT from
+  newtron — newtron does not expose an operations-history endpoint
+  (the survey in this PR confirms; see Considered alternatives in
+  the PR body). The field names the limit
+  (`recent_operations_limit`, default 10), the actually-available
+  count (`recent_operations_available` — may be less than the
+  limit if the operations store has not yet retained 10
+  operations on this Node), and a
+  `recent_operations_window_hint` reminding the operator that the
+  list is bounded by newtcon's retention.
+- **`call_site_provenance` section's
+  `substrate.source_status`** is bounded:
+  - `"available"` — `PerWrite.source` is populated; the section
+    renders the call-site and function name.
+  - `"pending_newtron_gap"` — `PerWrite.source` is null because
+    [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
+    has not yet shipped. The section renders a brief note
+    ("call-site provenance is pending newtron-side verbose-mode
+    support; tracked at newtron#12") and the `source_gap_issue`
+    field points to the gap. The body is still useful — the
+    automation team can find the call-site by other means (grep
+    on the substrate `(table, key)` for the emitting function);
+    the report just does not auto-populate the name.
+  - `"not_captured"` — `PerWrite.source` is null for some
+    operation-specific reason (e.g., the operation was captured
+    before newtron-server verbose mode was enabled, or the
+    operator's deployment runs newtron without verbose mode).
+    The section renders a note explaining this.
+- **`delivery_options[*]`** — REQUIRED on every preview response.
+  Each option names its `mode`, whether it is `available` in
+  this newtcon-server deployment, the
+  `configuration_status` (one of `always_available`,
+  `configured`, `unconfigured`,
+  `partial_configuration`), and a `configuration_message`
+  explaining the status to the operator. Operator-philosophy
+  invariant #9 ("Confidence and limits are explicit") is
+  binding: the operator MUST be told before confirming whether
+  the chosen delivery mode actually works.
+- **`rendered_body_full`** and **`rendered_title`** — REQUIRED.
+  The body is the concatenation of `body_sections[*].rendered_markdown`
+  in order; the title is the template's `title_template` with
+  substrate slots filled. Both are what would be sent to the
+  external system on `direct_file` and what is placed on the
+  clipboard on `clipboard`.
+- **`manual_equivalent.newtron_http.status: "not_applicable"`** —
+  this is the honest answer. The substrate is newtcon's. The
+  rationale field names the operator's-tools alternative: read
+  the operation trace and author the bug report by hand. Per
+  invariant #2, the operator can do this without newtcon; the
+  parity contribution is exposing the operation trace.
+
+**Errors:**
+- Unknown or evicted `operation_id` → 400 with
+  `kind: "precondition_failure"` per §Error Schema, with
+  `details.condition: "operation_unknown_or_expired"`. Operations
+  retention semantics are tracked at
+  [newtcon#18](https://github.com/aldrin-isaac/newtcon/issues/18).
+- `per_write_seq` supplied without `per_write_target` (or vice
+  versa) → 400 `validation_failure` with
+  `details.validation_stage: "request"` and
+  `details.rejections[*].reason: "missing_required"`.
+- `(target, seq)` not present in the operation → 400
+  `validation_failure` with
+  `details.rejections[*].reason: "target_absent"` and
+  `details.rejections[*].locator.substrate_field` naming the
+  missing target.
+- `template_id` not in the catalog → 400 `validation_failure`
+  with `details.rejections[*].reason: "unknown_value"` and
+  `details.rejections[*].allowed` listing the catalog.
+- `target_repository_hint.kind == "other"` without
+  `other_repository` → 400 `validation_failure`,
+  `reason: "missing_required"`.
+- `operator_narrative.manual_verification.performed == true`
+  with one or more sibling fields missing → 400
+  `validation_failure`, `reason: "missing_required"` with the
+  missing subfields named.
+- newtron-server unreachable while loading operation context →
+  503 with `kind: "newtron_unavailable"` per §Error Schema.
+  The recent-operations context, if it depends on newtron
+  reads, also returns this kind; if newtcon's local store is
+  sufficient (the typical case), the response succeeds with
+  `recent_operations_source: "newtcon_operations_store"`.
+
+### `POST /api/report-bug`
+
+Confirm a previewed bug report and deliver it via the chosen
+mode. The preview MUST have been issued within the last 5 minutes;
+expired previews → 400 `precondition_failure` with
+`details.condition: "preview_expired"`.
+
+This is the state-changing endpoint with respect to the operator's
+external collaborators: on `direct_file`, an external system
+(GitHub, Jira, etc.) is mutated; on `clipboard`, the operator's
+clipboard is populated by the frontend (newtcon-server returns the
+body to copy). Either way, a durable record of the report is
+created in newtcon-server's report store and assigned a
+`report_id`.
+
+**Request:**
+```json
+{
+  "preview_id": "<opaque, from POST /api/report-bug/preview>",
+  "delivery_mode": "clipboard | direct_file",
+  "operator_confirmation": {
+    "body_reviewed": true,
+    "target_repository_confirmed": true
+  }
+}
+```
+
+Field rules:
+
+- **`preview_id`** — REQUIRED. Echoed from the preview response.
+- **`delivery_mode`** — REQUIRED. One of `clipboard` or
+  `direct_file`. When `direct_file` is selected and the
+  deployment has no bug-tracker integration configured (the
+  preview response's `delivery_options[*].available` for this
+  mode was `false`) → 400 `precondition_failure` with
+  `details.condition: "delivery_integration_unconfigured"`.
+- **`operator_confirmation.body_reviewed`** — REQUIRED, MUST be
+  `true`. Operator attesting they read the rendered body. A
+  request with `body_reviewed: false` → 400 `precondition_failure`
+  with `details.condition: "body_not_reviewed"`. This is not
+  enforcement of UI behavior (newtcon-server cannot see what the
+  operator looked at); it is the operator's affirmative attestation
+  recorded in the report's audit metadata. The frontend MUST
+  prompt the operator before setting this true — operator-
+  philosophy invariant #4 ("show before do") applied to
+  external-artifact creation.
+- **`operator_confirmation.target_repository_confirmed`** —
+  REQUIRED, MUST be `true` when the preview's
+  `target_repository_resolved.kind != "unknown"`. When the
+  preview's resolved target was `unknown` (auto-classification
+  failed and operator did not explicitly hint), this field MUST
+  be `false` AND the confirm request MUST be preceded by a fresh
+  preview with `target_repository_hint.kind` set to an explicit
+  value. A confirm against an `unknown` target → 400
+  `precondition_failure` with
+  `details.condition: "target_repository_unresolved"`.
+
+**Response 200:**
+```json
+{
+  "report_id": "<opaque>",
+  "as_of": "2026-05-26T14:31:05Z",
+  "operation_id": "<echoed>",
+  "operation_url": "/api/operations/<opaque>",
+  "delivery_mode": "direct_file",
+  "delivery_outcome": {
+    "status": "delivered | clipboard_returned | failed",
+    "external_url": "https://github.com/aldrin-isaac/newtron/issues/47",
+    "external_id": "47",
+    "external_system": "github",
+    "external_repository": "aldrin-isaac/newtron",
+    "delivered_at": "2026-05-26T14:31:04Z",
+    "failure": null
+  },
+  "body_returned_for_clipboard": null,
+  "title_returned_for_clipboard": null,
+  "report_url": "/api/report-bug/<opaque>",
+  "rationale_ref": {
+    "substrate": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants",
+    "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
+  }
+}
+```
+
+Field rules:
+
+- **`delivery_outcome.status`** is bounded:
+  - `delivered` — `direct_file` mode succeeded; the external
+    system accepted the artifact; `external_url` and
+    `external_id` are populated.
+  - `clipboard_returned` — `clipboard` mode; the body is
+    returned for the frontend to place on the clipboard. In
+    this case, `body_returned_for_clipboard` and
+    `title_returned_for_clipboard` are populated;
+    `external_url` and `external_id` are null.
+  - `failed` — `direct_file` mode but the external system
+    rejected or was unreachable. `failure` is populated with
+    the same per-kind `Error` shape used elsewhere in this
+    contract (`kind: "internal" | "newtron_unavailable"` —
+    note: `newtron_unavailable` is used for clarity even
+    though the unreachable system may be GitHub/Jira/etc.
+    rather than newtron, because the failure semantics map
+    cleanly; future Contract PR may introduce a dedicated
+    `external_integration_unavailable` kind if this proves
+    insufficient).
+- **`delivery_outcome.external_system`** is informational; the
+  contract does not bound it (the integration is configured at
+  deployment time and may target any system). Typical values
+  are `github`, `gitlab`, `jira`, `phabricator`.
+- **`report_url`** — points to the durable record at
+  `GET /api/report-bug/{report_id}` (see below). The operator
+  can revisit any filed report and see its delivery outcome
+  and follow-up status.
+
+**Errors:**
+- Expired `preview_id` → 400 `precondition_failure`,
+  `details.condition: "preview_expired"`.
+- Unknown `preview_id` → 400 `precondition_failure`,
+  `details.condition: "preview_unknown"`.
+- `delivery_mode == "direct_file"` and no integration
+  configured → 400 `precondition_failure`,
+  `details.condition: "delivery_integration_unconfigured"`.
+- `body_reviewed: false` → 400 `precondition_failure`,
+  `details.condition: "body_not_reviewed"`.
+- `target_repository_unresolved` (auto-classification failed
+  and no explicit hint supplied on a fresh preview) → 400
+  `precondition_failure`,
+  `details.condition: "target_repository_unresolved"`.
+- External system unreachable during `direct_file` → the
+  request still returns 200 with `delivery_outcome.status ==
+  "failed"` and the typed `failure` body — the report record
+  IS still created so the operator can retry; the failure is
+  per-delivery, not per-report-authoring. A 5xx response is
+  reserved for newtcon-server internal failures while
+  attempting delivery.
+
+### `GET /api/report-bug/{report_id}`
+
+Return the durable record for a previously-filed bug report.
+Idempotent; safe to poll. The endpoint exists so the operator can
+revisit reports they have filed, see whether the external system's
+artifact still exists, and follow up on resolution.
+
+The endpoint does NOT proxy the external system's state in real
+time (the external system has its own UI for that). It returns
+newtcon-server's record of the report as filed, with a navigation
+link to the external artifact. Optionally, when configured to do
+so, newtcon-server may enrich the response with the
+external-system's current state (e.g., GitHub issue open/closed,
+last-updated-at) — but the enrichment is best-effort and clearly
+labeled; the authoritative source for external state is the
+external system.
+
+**Response 200:**
+```json
+{
+  "report_id": "<echoed>",
+  "as_of": "2026-05-26T14:35:00Z",
+  "filed_at": "2026-05-26T14:31:04Z",
+  "operation_id": "<opaque>",
+  "operation_url": "/api/operations/<opaque>",
+  "per_write_seq": 7,
+  "template_id": "substrate_write_failure",
+  "target_repository": { "kind": "newtron", "other_repository": null },
+  "delivery_mode": "direct_file",
+  "delivery_outcome": { /* same shape as POST /api/report-bug delivery_outcome */ },
+  "rendered_body_full_at_filing": "<the body as filed>",
+  "rendered_title_at_filing": "<the title as filed>",
+  "operator_narrative_at_filing": { /* echoed from preview */ },
+  "external_state_enrichment": {
+    "status": "enriched | not_enriched | enrichment_failed",
+    "fetched_at": "2026-05-26T14:34:55Z",
+    "state": "open",
+    "title": "Substrate write rejected: BGP_NEIGHBOR|default|10.1.0.1 on switch1",
+    "last_external_update": "2026-05-26T14:33:01Z",
+    "labels": ["bug", "newtron-vs-device", "filed-via-newtcon"],
+    "failure": null
+  },
+  "rationale_ref": {
+    "substrate": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants",
+    "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
+  }
+}
+```
+
+Field rules:
+
+- **`rendered_body_full_at_filing`** and
+  **`rendered_title_at_filing`** — the body and title as
+  rendered AT THE TIME of filing. Substrate may have moved
+  since (the operation may have been re-run, the device may have
+  recovered); the report is a historical record of what was
+  filed, NOT a live view of the substrate. Per
+  operator-philosophy invariant #1 (no black boxes): the
+  operator can see exactly what was sent to the external system
+  at the moment of filing.
+- **`external_state_enrichment.status`** is bounded:
+  - `enriched` — newtcon-server fetched current state from the
+    external system; `state`, `title`, `last_external_update`,
+    `labels` are populated.
+  - `not_enriched` — newtcon-server is not configured to
+    enrich, OR the report's `delivery_mode` was `clipboard`
+    (no external artifact to enrich). Other enrichment fields
+    are null.
+  - `enrichment_failed` — newtcon-server attempted enrichment
+    and failed; `failure` is populated with a typed `Error`
+    body. The operator sees the failure honestly rather than
+    silently seeing stale or absent enrichment.
+- **`external_state_enrichment.state`** is the external system's
+  state vocabulary verbatim (e.g., GitHub's `open` / `closed`);
+  newtcon does not normalize across systems. Per `CLAUDE.md`
+  §Operator-Honest Errors: the operator sees the external
+  system's words, not a paraphrased status.
+
+**Errors:**
+- Unknown `report_id` → 404 `precondition_failure`,
+  `details.condition: "report_unknown"`.
+- newtron-server unreachable while loading the report's
+  operation context → the response still succeeds; the report
+  is a newtcon-server-owned record and does not depend on
+  newtron being reachable. (newtron is only reached for the
+  operation_url at navigation time, not for the report record
+  itself.)
+
+### `GET /api/report-bug/recent`
+
+Return the operator's recently-filed bug reports, most recent
+first. Cursor-paginated per the contract's pagination convention
+(see §Conventions). Bounded by newtcon-server's report retention
+policy (which is operator-configurable at deployment time and is
+NOT specified by this contract; the OS-level filesystem or
+sqlite store is the substrate).
+
+The endpoint exists so the operator can see what they have
+reported, the resolution state of each, and patterns in their own
+filing (e.g., "I filed three reports against newtron's BGP
+generation this week, all variations on the same daemon-rejection
+pattern — maybe this is one underlying bug").
+
+**Response 200:**
+```json
+{
+  "as_of": "2026-05-26T14:35:30Z",
+  "reports": [
+    {
+      "report_id": "<opaque>",
+      "report_url": "/api/report-bug/<opaque>",
+      "filed_at": "2026-05-26T14:31:04Z",
+      "operation_id": "<opaque>",
+      "operation_url": "/api/operations/<opaque>",
+      "template_id": "substrate_write_failure",
+      "target_repository": { "kind": "newtron", "other_repository": null },
+      "delivery_mode": "direct_file",
+      "delivery_status": "delivered",
+      "external_url": "https://github.com/aldrin-isaac/newtron/issues/47",
+      "external_state_enrichment_summary": {
+        "status": "enriched",
+        "state": "open"
+      },
+      "title_at_filing": "Substrate write rejected: BGP_NEIGHBOR|default|10.1.0.1 on switch1"
+    }
+  ],
+  "next_cursor": null,
+  "rationale_ref": {
+    "substrate": "docs/operator-philosophy.md#concrete-success-vision-operators-as-participants",
+    "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
+  }
+}
+```
+
+Field rules:
+
+- The list returns summary entries; the full record is reached
+  via `report_url`. This matches the pattern in
+  `GET /api/inbox` vs `GET /api/inbox/{card_id}` and
+  `GET /api/workbench/stashes` vs
+  `GET /api/workbench/stashes/{stash_id}`.
+- The retention window is deliberately under-specified in this
+  contract; the operator chooses, and the substrate (a sqlite
+  store) is documented in `docs/architecture.md`. Reports
+  evicted under retention → 404 on
+  `GET /api/report-bug/{report_id}` with
+  `details.condition: "report_evicted"`.
+
+**Errors:**
+- Standard `validation_failure` on pagination params.
+
+### Out of scope for v0 (deferred Contract PRs)
+
+- **Templated repository routing rules.** A configuration surface
+  where the operator authors "any failure on call-site
+  matching `pkg/newtron/network/node/bgp_*` routes to
+  newtron/bgp-issues" routing. Deferred; v0's routing is
+  call-site → repo (newtron vs newtcon vs other) and the
+  operator overrides per report. A richer rule engine lands when
+  v0 usage shows the per-report override is friction.
+- **Bug-report-driven follow-up surfaces.** A "track this report
+  through to resolution; when the upstream fix lands, replay
+  the failed operation" workflow. Deferred; v0 produces the
+  report, full stop. The follow-up loop is operator-driven
+  outside newtcon (the operator watches the GitHub issue, then
+  manually replays).
+- **Multi-report bundling.** "I have three related reports;
+  file them as one umbrella issue with three sub-reports."
+  Deferred; v0 is one report per call.
+- **Bug-tracker integration enumeration.** A
+  `GET /api/report-bug/integrations` that lists configured
+  integration targets. Deferred; the
+  `delivery_options[*]` array in the preview response covers
+  the at-filing-time disclosure of available delivery modes,
+  and the operator does not need a separate enumeration
+  endpoint for v0.
+- **Cross-operator report visibility.** "Show me reports filed
+  by my teammate." Deferred until newtcon has an auth layer
+  (`CLAUDE.md` §Project Scope explicitly defers auth/authz).
+  v0 reports are visible to whichever operator queries the
+  endpoint; this is acceptable for the no-auth deployment
+  model.
+- **Drift-report variants.** Beyond
+  `drift_mis_classification`, a template for "newtron is
+  consistently detecting drift on a (table, key) the operator
+  has confirmed is correct." Deferred until concrete operator
+  experience names the pattern; the v0 `drift_mis_classification`
+  template is broad enough.
+
+### Hard contract guarantees (binding)
+
+Every endpoint in this section MUST satisfy:
+
+1. **Substrate is carried, never summarized.** Every section in
+   the rendered body has a typed `substrate` companion that
+   carries the full data the section embeds. The Markdown is
+   presentation; the substrate is the substrate. Per
+   `DESIGN_PRINCIPLES_NEWTRON.md` §46 ("HTTP API Boundary —
+   Wire Shape Mirrors Substrate") and operator-philosophy
+   invariant #7 ("errors carry the substrate"). A section
+   whose `substrate` is null or summarized is a contract
+   violation.
+2. **PerWrite is embedded verbatim.** The `failed_write`
+   section embeds the full `PerWrite` shape per §Streaming
+   substrate-operation events. The bug report does not
+   re-serialize, re-key, or selectively elide the PerWrite —
+   the automation team that reads the report sees the same
+   substrate the operator saw at apply time, by construction.
+3. **Operator confirmation is binding.** No external artifact
+   is produced without
+   `operator_confirmation.body_reviewed: true`. The
+   preview/apply pairing is mandatory per `CLAUDE.md`
+   §Preview Before Commit, Always — applied here to
+   external-artifact creation, on the principle that producing
+   an artifact in an external system the operator's
+   collaborators will see is a state-changing operation.
+4. **Manual verification is first-class.** The
+   `manual_verification` block in the operator narrative is a
+   structured field with strict atomicity (all subfields
+   together or none), surfaced as its own body section, with
+   an interpretation hint that compares the manual response
+   to the automation's response. Per operator-philosophy
+   invariant #2 (manual-mode parity refined per PR #44) and
+   the success vision's third bullet (isolate
+   device-vs-automation): the operator's own ssh-session
+   evidence is the diagnostic primary; the report is built
+   around it.
+5. **Auto-classification is opt-in and always overridable.**
+   The operator can always force a target repository, and the
+   contract reports the basis of any auto-classification
+   transparently
+   (`target_repository_resolved.resolution_basis`). When
+   auto-classification cannot decide (`source` is null and the
+   operator did not hint), the contract refuses to confirm
+   silently; it asks the operator to classify. Operator-
+   philosophy invariant #9 ("Confidence and limits are
+   explicit") is binding.
+6. **External-system vocabulary is preserved.** When enriching
+   from the external system (`external_state_enrichment`),
+   the external system's own state/label vocabulary is
+   carried verbatim. newtcon does not normalize "open" to
+   "in_progress" or paraphrase labels. Per `CLAUDE.md`
+   §Operator-Honest Errors and operator-philosophy invariant
+   #1.
+7. **Honest `manual_equivalent` framing.** Every endpoint in
+   this section declares
+   `manual_equivalent.newtron_http.status` as one of the four
+   bounded values. The typical answer is `not_applicable`
+   (bug-report authorship is a newtcon presentation concern,
+   not a newtron substrate operation) — but the rationale
+   field names the operator's-tools alternative: read
+   `GET /api/operations/{operation_id}` and author the body
+   by hand against the external system. Operator-philosophy
+   invariant #2 is binding: the operator can do this without
+   newtcon.
+8. **No diagnosis, no fix proposals.** The contract surfaces
+   substrate, operation context, recent-history context,
+   call-site (when available), and operator narrative. It does
+   NOT infer root causes, suggest patches, or recommend
+   automation changes. Per operator-philosophy invariant #9
+   ("Confidence and limits are explicit"): newtcon's competence
+   stops at presenting the substrate.
+9. **Report records are durable; external state is best-effort.**
+   The `report_id` and the
+   `rendered_body_full_at_filing` survive the filing forever
+   (or until operator-configured eviction). The
+   `external_state_enrichment` is best-effort, clearly labeled
+   when not available, and surfaces failures honestly rather
+   than silently. The external system, not newtcon, is the
+   authority on external state.
+10. **Substrate vocabulary, not coined.** This surface uses
+    `PerWrite`, operation trace, `rationale_ref`, and the
+    `Error` schema as defined elsewhere in this contract. No
+    parallel vocabulary is introduced; if a new term seems
+    needed, the Architecture Reviewer rejects on principle.
