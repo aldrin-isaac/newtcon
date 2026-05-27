@@ -2698,6 +2698,8 @@ substrate sequence is one TxPipeline bundle and every
   "verb": "<echoed>",
   "operation_id": "<opaque, present when verb produces a ChangeSet>",
   "operation_url": "/api/operations/<opaque>",
+  "intent_id": "<opaque, present when verb mints a single addressable NEWTRON_INTENT record>",
+  "intent_url": "/api/intents/<opaque>",
   "executed": true,
   "pipeline": {
     "intent":  { "stage": "complete", "at": "2026-05-25T14:06:01Z" },
@@ -2750,8 +2752,27 @@ boxes") applies to the action's terminal summary as much as to its
 per-write detail.
 
 For verbs that produce no ChangeSet (`acknowledge`, `clear_zombie`,
-`recheck`), `operation_id`, `operation_url`, `pipeline`, and `verify` are
-omitted; `per_write: []` and `substrate_summary` zeroed.
+`recheck`), `operation_id`, `operation_url`, `intent_id`, `intent_url`,
+`pipeline`, and `verify` are omitted; `per_write: []` and
+`substrate_summary` zeroed.
+
+`intent_id` and `intent_url` address the NEWTRON_INTENT record this
+action wrote, per the §Identifiers rule in
+[§Provenance "Identifiers and resolution"](#identifiers-and-resolution)
+that every shape exposing an `intent_id` MUST expose its `intent_url`
+companion. They are present when the verb mints a single addressable
+intent record — `rollback_zombie` (the reverse intent that undoes
+the zombie) and `retire_policy` (the policy-deletion intent). They
+are omitted for `reconcile_delta` and `reconcile_full`: per
+`unified-pipeline-architecture.md` §6, reconcile re-renders existing
+intents through `ApplyDrift` / `ReplaceAll` rather than minting a new
+addressable intent record, and the substrate the operator wants to
+inspect is the projection rebuild surfaced by `per_write[]` and
+`drift_resolved_preview` (carried through from the preview), not a
+single intent_id. Operators who need to navigate the touched intents
+from a reconcile use the per-Node Provenance projection at
+[`GET /api/projection/nodes/{node}`](#get-apiprojectionnodesnode)
+keyed by the operation_id.
 
 **Response 200 (SSE variant — `Accept: text/event-stream`):** stream
 per §Streaming substrate-operation events. The terminal
@@ -4426,6 +4447,8 @@ reversed subset.
       "status": "reverted | failed | not_attempted",
       "operation_id": "<opaque, present when status != not_attempted>",
       "operation_url": "/api/operations/<opaque>",
+      "intent_id": "<opaque, present when status == reverted>",
+      "intent_url": "/api/intents/<opaque>",
       "pipeline": {
         "intent":  { "stage": "complete", "at": "2026-05-25T14:21:00Z" },
         "replay":  { "stage": "complete", "at": "2026-05-25T14:21:00Z" },
@@ -4470,6 +4493,20 @@ reversed subset.
 the batch was reverted in this call (or in cumulative prior partial
 reverts). Partial revert leaves the batch in `committed` with the
 per-target `commit_result.status` reflecting reality.
+
+`per_target[*].intent_id` and `intent_url` address the **reverse**
+NEWTRON_INTENT record minted by this revert (the record whose fields
+appear inline as `reverse_intent_record`), not the original forward
+intent. Per `unified-pipeline-architecture.md` §1, the intent record
+IS the decision substrate; per the §Identifiers rule in
+[§Provenance "Identifiers and resolution"](#identifiers-and-resolution),
+every shape exposing an `intent_id` MUST expose its `intent_url`
+companion so the operator follows the link to
+[`GET /api/intents/{intent_id}`](#get-apiintentsintent_id) without
+constructing paths from opaque IDs. Both are present when
+`status == "reverted"` (the reverse intent was actually written);
+omitted when `status == "failed"` or `"not_attempted"` (no reverse
+intent record exists to address).
 
 Failure semantics, pipeline shapes, and error responses mirror
 `/commit` field-for-field. The `per_target[*].failure` object has
@@ -6066,7 +6103,7 @@ operation-history mapping.
     "operator_identity": "operator:aldrin",
     "started_at": "2026-05-25T14:06:00Z",
     "origin_rationale_ref": {
-      "substrate": "newtron/docs/newtron/intents.md#34-validateintentdag",
+      "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#1-the-core-abstraction-intent-db",
       "principle": "docs/operator-philosophy.md#5-why-mode-is-always-available"
     }
   },
