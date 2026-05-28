@@ -184,7 +184,8 @@ design decisions in unfamiliar areas:
 | newtron HLD | `docs/newtron/hld.md` | Architecture, intent model, Redis interaction |
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Intent → Replay → Render → Deliver |
-| AI Instructions | `docs/ai-instructions.md` | Universal behavioral directives |
+| AI Instructions | `docs/ai-instructions.md` | Universal behavioral directives for Claude Code, scoped by activity phase (ALL / PLAN / IMPL / EXPLAIN / TEST / REVIEW). Binding on every newtcon agent role — see §Agent Team Required Reading. |
+| Documentation Editing Guidelines | `docs/editing-guidelines.md` | Universal documentation-craft principles, scoped by document type (ALL / DESIGN / HLD / LLD / HOWTO / README / API / GUIDE) and quality-tiered. Binding on every newtcon agent that authors or edits documentation — see §Agent Team Required Reading. |
 | **DESIGN_PRINCIPLES_NEWTRON** (foundational) | `docs/DESIGN_PRINCIPLES_NEWTRON.md` | newtron's authoritative principles. **Required reading for the Architect and Architecture Reviewer before every Contract PR.** newtcon's design must derive from and not contradict these. |
 
 **newtcon does not re-document newtron's substrate.** When the UI exposes an
@@ -470,3 +471,67 @@ all upstream compatibility concerns.
 
 See [`AGENTS.md`](AGENTS.md) for the binding team structure: roles, models,
 invocation triggers, coordination protocol, and review gates.
+
+### Agent Team Required Reading
+
+Two newtron docs are binding mandatory reading for the newtcon agent team,
+scoped by role and activity phase. Both are referenced — not paraphrased —
+per the "link, don't paraphrase" rule above; future drift in the upstream
+docs is absorbed automatically by re-reading.
+
+- **`../newtron/docs/ai-instructions.md`** — universal behavioral
+  directives, scoped by activity phase (ALL / PLAN / IMPL / EXPLAIN /
+  TEST / REVIEW).
+- **`../newtron/docs/editing-guidelines.md`** — universal
+  documentation-craft principles, scoped by document type (ALL /
+  DESIGN / HLD / LLD / HOWTO / README / API / GUIDE) and
+  quality-tiered.
+
+The binding obligations per role:
+
+- **Architect** — read `editing-guidelines.md` (ALL plus the scope
+  tags matching the document being authored or revised: DESIGN for
+  principle work, HLD for `docs/architecture.md`, API for
+  `API_CONTRACT.md`) before any edit to `CLAUDE.md`,
+  `API_CONTRACT.md`, `docs/architecture.md`, or an ADR. Read
+  `ai-instructions.md` (ALL, PLAN, REVIEW tags) before authoring or
+  revising any binding rule.
+- **Architecture Reviewer** — apply `editing-guidelines.md`
+  (relevant scope tags for the document under review) and
+  `ai-instructions.md` (ALL, REVIEW tags) when reviewing every
+  Architect-authored PR. Reviews that do not surface
+  editing-guidelines violations on documentation PRs, or
+  ai-instructions violations on design PRs, are themselves incomplete.
+- **Tech Lead** — read `ai-instructions.md` (ALL, PLAN tags) when
+  slicing features into issues. Slices must satisfy directive 14
+  (resolve risks in plans) and directive 15 (detailed trackers)
+  before issuing.
+- **Implementer** — read `ai-instructions.md` (ALL, IMPL, TEST tags)
+  before writing code or tests. Read `editing-guidelines.md` (ALL
+  plus scope tags matching any document being touched — typically
+  none, since Implementers are forbidden from editing the
+  Architect-owned docs; but in-code comments, handler-level
+  godoc, and test descriptions are still documentation and the ALL
+  principles apply).
+- **Critic** — apply `editing-guidelines.md` (relevant scope tags)
+  and `ai-instructions.md` (ALL, REVIEW tags) on every PR. The
+  Critic's seven binding consistency checks (`AGENTS.md` §Critic)
+  remain authoritative; the editing-guidelines and ai-instructions
+  layer on top, not replace.
+- **Drift Auditor** — apply both docs' principles when auditing
+  systemic drift across the week's merged diff. Specifically,
+  `editing-guidelines.md` §4 (each concept explained exactly once),
+  §11 (document what is, not what's intended), and §41 (audit
+  overloaded terms throughout); and `ai-instructions.md` §9
+  (post-implementation conformance audit), §11 (do not speculate),
+  and §20 (authoritative source precedence) are the principles most
+  likely to surface systemic drift the per-PR Critic cannot see.
+
+These obligations do **not** enumerate the principles themselves —
+the upstream docs are the authority. An agent that has not opened the
+relevant doc before acting is acting against this rule, even if their
+output happens to be consistent with the principles by accident. The
+"link, don't paraphrase" discipline above applies to this binding
+clause as much as it applies to substrate concepts: the principles
+live in the upstream documents, and the upstream documents are what
+the agent reads.
