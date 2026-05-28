@@ -2787,9 +2787,9 @@ Field rules:
   operator could issue by hand to achieve the same effect — the
   operator-philosophy invariant #2 (manual-mode parity) is binding,
   not aspirational.
-- `manual_equivalent.newtron_http` is an object with one of four
+- `manual_equivalent.newtron_http` is an object with one of five
   shapes; `status` is the discriminator and is bounded by the enum
-  `available | pending_newtron_gap | partial_match | not_applicable`:
+  `available | partial_match | pending_newtron_gap | deferred_indefinitely | not_applicable`:
   (a) `{ "status": "available", "method", "path", "query"?, "body"? }`
   — an endpoint that is documented as part of newtron's public HTTP
   API in `newtron/docs/` (any authoritative newtron doc — e.g.,
@@ -2801,26 +2801,101 @@ Field rules:
   [newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)),
   and a wired-but-undocumented route is also insufficient (it is not
   yet public surface);
-  (b) `{ "status": "pending_newtron_gap", "gap_issue": "<URL>",
-  "expected_shape": { … } }` — no newtron HTTP shape exists today;
-  tracked under the Gap-Handling Protocol (`CLAUDE.md`
-  §Gap-Handling Protocol);
-  (c) `{ "status": "partial_match", "method", "path", "query"?,
+  (b) `{ "status": "partial_match", "method", "path", "query"?,
   "body"?, "note": "<rationale>" }` — an endpoint exists that
   answers a related but not identical question; the `note` explains
   the gap honestly (used, e.g., on the Provenance verify endpoint,
   where newtron's `verify-committed` re-verifies the LAST committed
   ChangeSet rather than a specified historical operation);
-  (d) `{ "status": "not_applicable", "rationale": "<text>" }` — no
+  (c) `{ "status": "pending_newtron_gap", "gap_issue": "<URL>",
+  "expected_shape": { … } }` — no newtron HTTP shape exists today,
+  AND the substrate is filed with newtron as a gap awaiting upstream
+  delivery on an open timeline; tracked under the Gap-Handling
+  Protocol (`CLAUDE.md` §Gap-Handling Protocol). Consumers may
+  surface this as "tracked at newtron#X; expected upstream" and may
+  set staleness alerts on long-pending items;
+  (d) `{ "status": "deferred_indefinitely", "gap_issue": "<URL>",
+  "re_evaluation_trigger": "<text>" }` — no newtron HTTP shape exists
+  today, AND the newtron lead has considered the substrate and
+  indefinitely deferred it. No upstream delivery is expected on a
+  defined timeline. Consumers MUST NOT surface this as "pending" or
+  "expected"; the operator-facing rendering must convey "considered
+  and deferred" honestly. `re_evaluation_trigger` is REQUIRED on this
+  shape (see field rules below) and may never fire;
+  (e) `{ "status": "not_applicable", "rationale": "<text>" }` — no
   newtron HTTP shape applies, by design, because the substrate is
   not addressable in newtron's model (used, e.g., on the
   Provenance ChangeSet endpoint, where ChangeSets are
   per-invocation artifacts in newtron and the addressable retention
   is a newtcon-server concern).
-  The shape MUST be one of these four — silently fabricating an
+  The shape MUST be one of these five — silently fabricating an
   endpoint URL is forbidden. `newtron_cli` always points to the
   equivalent CLI invocation when one exists; it is `null` when no
-  CLI equivalent applies (matching `not_applicable`).
+  CLI equivalent applies (matching `not_applicable` or
+  `deferred_indefinitely` when no operator-tool path exists).
+
+  **Semantic distinction — `pending_newtron_gap` vs
+  `deferred_indefinitely`.** Both shapes name "no newtron HTTP
+  shape exists today" but they teach different operator-facing
+  models, and the distinction is binding (operator-philosophy
+  invariant #9, "Confidence and limits are explicit"; false
+  confidence about upstream arrival is worse than no confidence).
+  `pending_newtron_gap` means the substrate is **filed and tracked
+  with an open expectation of delivery**: the newtron team is
+  expected to ship it, the only open question is when, and a
+  consumer may surface the gap_issue as an upstream ticket the
+  operator can subscribe to. `deferred_indefinitely` means the
+  substrate has been **considered by the newtron lead and explicitly
+  deferred**: the gap_issue documents the deferral verdict, no
+  delivery is on the lead's roadmap, and a consumer that surfaces it
+  as "pending" or "expected" lies to the operator. The
+  `re_evaluation_trigger` makes the deferral's contingency visible:
+  the deferral is not "wontfix" (that would be a separate verdict),
+  it is "deferred unless the named condition fires."
+
+  **Honest lifecycle.** A given substrate may move through three
+  honest states over its lifetime:
+  `deferred_indefinitely → pending_newtron_gap → available`.
+  Transitions are operator-visible:
+
+  - `deferred_indefinitely → pending_newtron_gap` — the
+    `re_evaluation_trigger` fired (operator field-experience or
+    other named condition supplied the missing justification); a new
+    gap is filed with concrete acceptance criteria; the contract is
+    updated by Contract PR to switch the shape.
+  - `pending_newtron_gap → available` — newtron ships the substrate;
+    the contract is updated by Contract PR to switch the shape, name
+    the landed path, and remove the `gap_issue` reference.
+
+  Skipping or silently re-purposing a transition is forbidden. A
+  `deferred_indefinitely` entry that quietly becomes `available`
+  without first transitioning through `pending_newtron_gap` (i.e.,
+  without the lead's acceptance-criteria step) is a
+  substrate-honesty failure; the operator who watched the deferral
+  has no way to reconstruct what changed. Three honest states; no
+  silent semantic shifts.
+
+- **`re_evaluation_trigger`** (on shape (d) only) — REQUIRED when
+  `status == "deferred_indefinitely"`; MUST be absent for every
+  other `status` value. The field is a free-text description of the
+  condition that would cause the deferral to be lifted, prompting
+  a follow-up Contract PR to migrate the entry from
+  `deferred_indefinitely` to `pending_newtron_gap` (or directly to
+  `available` if the lead chooses to ship it immediately on
+  re-evaluation). The text MUST name a concrete, operator-visible
+  signal (e.g., "if the Report Bug surface goes live and operators
+  consistently struggle to identify methods from substrate alone"),
+  not a vague aspiration ("if useful"). Operator-philosophy
+  invariant #1 ("no black boxes") is binding: the operator who
+  reads a `deferred_indefinitely` entry MUST be able to see WHY the
+  substrate is deferred and WHAT would re-open it, without having
+  to read the linked newtron issue. The field is absent on every
+  other shape because the lifecycle's other states have their own
+  honest signals: `pending_newtron_gap` is already an open
+  expectation (no trigger needed; arrival is expected), `available`
+  has landed (no trigger needed; the substrate is on the wire), and
+  `not_applicable` is by-design (no trigger needed; the substrate
+  does not exist in newtron's model).
 - Per-verb `manual_equivalent.newtron_http.status` today:
 
   | Verb | `status` | Underlying newtron HTTP |
@@ -7420,12 +7495,12 @@ Field rules:
   ordered by relevance; the UI surfaces the top one as the
   default.
 - **`manual_equivalent.newtron_http.status: "partial_match"`** is
-  a new status value alongside `"available"` and
-  `"pending_newtron_gap"`. It is used when an existing newtron
-  endpoint answers a related but not identical question; the
-  `note` explains the gap honestly. The bounded enum for
-  `manual_equivalent.newtron_http.status` is therefore
-  `available | pending_newtron_gap | partial_match | not_applicable`.
+  used here because an existing newtron endpoint answers a related
+  but not identical question; the `note` explains the gap honestly.
+  The bounded enum and the per-shape rules are defined canonically
+  at §POST /api/inbox/{card_id}/action/preview "`manual_equivalent.newtron_http`";
+  this site uses one of those shapes, it does not redefine the
+  enum.
 
 **Errors:**
 - Unknown or evicted `operation_id` → 404 with
@@ -8472,7 +8547,11 @@ contract, never re-coining it:
   contract level.
 - **`manual_equivalent`** — the typed `{ newtron_cli, newtron_http
   }` object with `newtron_http.status` bounded by `available |
-  pending_newtron_gap | partial_match | not_applicable`.
+  partial_match | pending_newtron_gap | deferred_indefinitely |
+  not_applicable`. The bounded enum and the per-shape rules
+  (including the `re_evaluation_trigger` requirement on
+  `deferred_indefinitely`) are defined canonically at §POST
+  /api/inbox/{card_id}/action/preview "`manual_equivalent.newtron_http`".
 
 ### `GET /api/history/nodes/{node}`
 
@@ -8860,8 +8939,9 @@ Field rules:
   each portion of the observation. Per `CLAUDE.md` §No Hidden
   State, observation history is honest about its inputs. Each
   read carries the same `newtron_endpoint_status` discriminator
-  used elsewhere (`available | pending_newtron_gap |
-  partial_match | not_applicable`) so the operator knows which
+  vocabulary as `manual_equivalent.newtron_http.status` (bounded
+  enum and per-shape rules defined canonically at §POST
+  /api/inbox/{card_id}/action/preview), so the operator knows which
   newtron capability is currently exercised.
 
 **Errors:**
@@ -9507,8 +9587,10 @@ Every endpoint in this section MUST satisfy:
    how stale the underlying observation is at request time.
 7. **Honest `manual_equivalent` framing.** Every endpoint
    declares `manual_equivalent.newtron_http.status` as one of
-   the four bounded values. For observation history, the
-   typical answer is `not_applicable` (the substrate is
+   the bounded values defined canonically at §POST
+   /api/inbox/{card_id}/action/preview
+   "`manual_equivalent.newtron_http`". For observation history,
+   the typical answer is `not_applicable` (the substrate is
    newtcon's, not newtron's) — but the rationale field names
    the operator's-tools alternative (poll newtron's reads
    directly, or query newtcon's SQLite store). Operator-
@@ -10649,15 +10731,17 @@ Every endpoint in this section MUST satisfy:
    #1.
 7. **Honest `manual_equivalent` framing.** Every endpoint in
    this section declares
-   `manual_equivalent.newtron_http.status` as one of the four
-   bounded values. The typical answer is `not_applicable`
-   (bug-report authorship is a newtcon presentation concern,
-   not a newtron substrate operation) — but the rationale
-   field names the operator's-tools alternative: read
-   `GET /api/operations/{operation_id}` and author the body
-   by hand against the external system. Operator-philosophy
-   invariant #2 is binding: the operator can do this without
-   newtcon.
+   `manual_equivalent.newtron_http.status` as one of the
+   bounded values defined canonically at §POST
+   /api/inbox/{card_id}/action/preview
+   "`manual_equivalent.newtron_http`". The typical answer is
+   `not_applicable` (bug-report authorship is a newtcon
+   presentation concern, not a newtron substrate operation) —
+   but the rationale field names the operator's-tools
+   alternative: read `GET /api/operations/{operation_id}` and
+   author the body by hand against the external system.
+   Operator-philosophy invariant #2 is binding: the operator
+   can do this without newtcon.
 8. **No diagnosis, no fix proposals.** The contract surfaces
    substrate, operation context, recent-history context,
    call-site (when available), and operator narrative. It does
