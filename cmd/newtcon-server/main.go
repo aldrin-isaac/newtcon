@@ -56,6 +56,25 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Slice 3: Service Composer write endpoints — preview + apply.
+	// The PreviewStore is shared: preview mints and stores entries; apply
+	// consumes (Take, single-use) entries by preview_id.
+	store := handlers.NewPreviewStore(5*time.Minute, time.Now)
+	handlers.RegisterPreviewRoutes(mux, handlers.PreviewDeps{
+		Client:        nc,
+		Store:         store,
+		Clock:         time.Now,
+		NewtronURL:    *newtronURL,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+	handlers.RegisterApplyRoutes(mux, handlers.ApplyDeps{
+		Client:        nc,
+		Store:         store,
+		Clock:         time.Now,
+		NewtronURL:    *newtronURL,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	handler := server.ApplyMiddleware(mux)
 
 	srv := &http.Server{
