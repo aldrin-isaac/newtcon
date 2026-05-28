@@ -3770,31 +3770,90 @@ the batch's intents replayed on top), per-Node, per-table.
   "manual_equivalent": {
     "newtron_cli": "newtron switch1 dry-run | jq '.projection.BGP_NEIGHBOR'",
     "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/4",
-      "expected_shape": {
-        "method": "POST",
-        "path": "/network/{n}/node/{d}/projection/diff",
-        "body": { "intents": [ /* staged intents */ ] }
-      }
+      "status": "available",
+      "method": "POST",
+      "path": "/network/default/node/<node>/intent/projection-diff",
+      "body": { "operations": [ /* TopologyStep[]: {url, params} per step */ ] },
+      "note": "Returns `ProjectionDiffResult { before: RawConfigDB, after: RawConfigDB, diff: sonic.DriftEntry[] }`. The substrate technique is in-memory replay over a snapshotted intent DB: hypothetical operations are applied via `ReplayStep` (with `actuatedIntent` temporarily cleared so the precondition's Lock guard is skipped during reconstruction); the resulting projection is captured; both intent DB and projection are then restored via `RebuildProjectionFromIntents` (Phase 3 primitive). No state mutation survives the call. The newtcon-facing per-Node-per-table grouping (`per_node_diffs[*].table_diffs[*]`) is computed by newtcon-server from the entry-level `diff[]`; one newtron call per Node in the batch (one Node → one projection-diff). The `node` and `table` query parameters are applied client-side by newtcon-server (`node` partitions the per-Node call list; `table` filters the entry-level `diff[]` before regrouping)."
     }
   }
 }
 ```
 
-**Why `pending_newtron_gap`:** newtron's batch-execute endpoint with
-`execute: false` returns a `WriteResult` (preview text + change count)
-and not a typed projection-before/after pair. The raw CONFIG_DB read
-endpoints return device-actual entries, not the typed
-projection-from-intent-replay; the composite endpoint returns counts
-and an opaque handle, not the typed composite contents. There is no
-composition of existing newtron HTTP endpoints that yields the typed
-per-table-per-key-per-field before/after projection diff this surface
-needs. The gap was filed by the newtcon Architect at the time this
-contract was written, per `CLAUDE.md` §Gap-Handling Protocol; see
-[newtron#4](https://github.com/aldrin-isaac/newtron/issues/4) for the
-proposed HTTP shape (which matches the `expected_shape` block above).
-The implementer slice for `/diff` is blocked until newtron#4 lands.
+**Substrate-vs-decoration boundary (binding).** The newtron substrate
+delivered by `POST /network/{n}/node/{d}/intent/projection-diff` is
+the `ProjectionDiffResult` envelope shipped by newtron's Phase 4 work
+(2026-05-27, commit `ecb04c7`): `{ before: RawConfigDB, after:
+RawConfigDB, diff: sonic.DriftEntry[] }`. The `diff` array is the
+§46-canonical entry-level delta vocabulary (`DriftEntry`) — newtron's
+single typed-diff representation
+(`DESIGN_PRINCIPLES_NEWTRON.md` §46 rule 3, "One typed diff
+vocabulary"). The request body is `{operations: TopologyStep[]}`,
+where each `TopologyStep` is `{url, params}` — the same shape
+newtron's `/execute` and `/intent/save` consume. The lead's closing
+comment on
+[newtron#4](https://github.com/aldrin-isaac/newtron/issues/4)
+verbatim: "Projection-diff endpoint landed at POST
+/network/{n}/node/{d}/intent/projection-diff. Hypothetical operations
+are applied in-memory via ReplayStep (with actuatedIntent temporarily
+cleared so precondition's Lock guard is skipped during
+reconstruction), resulting projection is captured, then both intent
+DB and projection are restored via RebuildProjectionFromIntents
+(Phase 3 primitive). Returns ProjectionDiffResult{before, after,
+diff} with diff in canonical sonic.DriftEntry vocabulary. Verified
+end-to-end against deployed 1node-vs
+(newtrun/suites/1node-vs-basic/08-projection-diff-actuated, PASS in
+1m54s) — confirms diff substrate AND no state leakage (post-call
+intent/drift returns clean). Operationalizes operator-philosophy
+invariant #4 (show before do) at the substrate level."
+
+The substrate carries three shapes only: `before` (the projection
+right now), `after` (the projection that would exist if the
+operations were applied), and `diff` (the entry-level delta). Every
+other field in the newtcon response above is a newtcon-server-side
+decoration:
+
+| newtcon response field | Source |
+|------------------------|--------|
+| `per_node_diffs[*].node` | Bare substrate — one newtron `/intent/projection-diff` call per Node in the batch; the Node identifier is newtcon's batch context. |
+| `per_node_diffs[*].before_projection_intent_count`, `after_projection_intent_count` | Composed by newtcon-server from `GET /network/{n}/node/{d}/intent/tree` (companion read taken before and after the hypothetical operations are reasoned about). NOT in the projection-diff substrate. |
+| `per_node_diffs[*].table_diffs[*].table`, `before_entries`, `after_entries` | **Transformed** by newtcon-server: the per-Node `before` / `after` `RawConfigDB` maps (`map[table]map[key]map[field]string`) are walked per-table; per-key entries are projected into the `{key, fields}` shape. The keys and fields are taken verbatim from the substrate; the table grouping is newtcon's view, not newtron's wire shape. |
+| `per_node_diffs[*].table_diffs[*].delta.added`, `removed`, `modified` | **Transformed** by newtcon-server from the entry-level `diff: []DriftEntry`: rows with `type: "extra"` become `added[]` keys, rows with `type: "missing"` become `removed[]` keys, rows with `type: "modified"` become `modified[]` keys, all grouped by `table`. The canonical entry-level vocabulary is preserved internally; the per-table per-bucket presentation is the operator-facing view. |
+| `batch_id`, `as_of`, `manual_equivalent` | newtcon-server metadata. |
+
+This separation is binding per `DESIGN_PRINCIPLES_NEWTRON.md` §46:
+the substrate is the typed `ProjectionDiffResult` with its
+`DriftEntry[]`, and only that. The per-Node fanout, the per-table
+grouping, the per-bucket (`added`/`removed`/`modified`) presentation,
+and the intent-count companions are all newtcon-server compositions
+over that substrate plus existing companion reads. An Implementer
+slicing this endpoint MUST NOT request a richer wire shape from
+newtron — the substrate response is deliberately bare, and the
+decorations live in newtcon-server.
+
+The original gap-filing proposed a `scope.tables[]` body field for
+server-side table filtering; newtron did not adopt it because the
+substrate response carries the full diff cheaply (one per-Node
+in-memory replay, restored). The newtcon `?table=` query parameter is
+implemented client-side by newtcon-server filtering the entry-level
+`diff[]` before regrouping, per the same operator-facing semantics —
+the substrate-faithful path remains "fetch all, group as the operator
+asked," consistent with §46 rule 1 ("Canonical first, summary
+second") and `CLAUDE.md` §No Hidden State (no server-side
+silent-omission).
+
+**Symmetric framing.** Per
+[`DESIGN_PRINCIPLES_NEWTRON` §15](../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove),
+this surface is symmetric with respect to forward vs reverse verbs in
+the batch: a batch composed of `RemoveService` / `UnbindACL` /
+`RemoveBGPPeer` (or any §15 reverse) produces a projection-diff in
+the same substrate shape — `before` carries the current projection,
+`after` carries the projection with the reverse operations replayed
+on top, and `diff` carries `missing` entries (deletes) where the
+forward equivalent would carry `extra` (adds). The substrate does not
+distinguish "create-diff" vs "delete-diff" — the same
+`ProjectionDiffResult` shape serves both, per the lead's single-
+substrate landing.
 
 **Errors:**
 - Unknown `batch_id` → 404 `precondition_failure` per the typed schema
@@ -3803,6 +3862,18 @@ The implementer slice for `/diff` is blocked until newtron#4 lands.
   in §Error Schema. `details.last_known.kind` is `"projection_diff"`
   and `details.last_known.payload` carries the most recent successful
   diff if any (`kind: "none"` if none has been computed).
+- newtron returns 400 on the underlying `/intent/projection-diff`
+  call (invalid JSON or unknown step URL in `operations[]`) → 422
+  `validation_failure` per the typed schema in §Error Schema, with
+  `details.per_operation[]` enumerating the rejected step indices and
+  newtron's per-step rejection reason. The batch is left unmodified;
+  no projection-diff is returned for any Node.
+- newtron returns 500 on the underlying call (rebuild failure during
+  the `RebuildProjectionFromIntents` restore path) → 502
+  `newtron_internal_error` per the typed schema in §Error Schema. The
+  newtron-side state has been restored (the substrate guarantees no
+  state leakage on the success path; the failure path is a newtron
+  internal-error signal, not state-leakage at the operator surface).
 
 ### `POST /api/workbench/{batch_id}/dry_run`
 
