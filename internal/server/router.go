@@ -1,62 +1,53 @@
 // Package server implements HTTP routing, middleware, and request lifecycle
 // management for newtcon-server.
 //
-// This file owns route registration. The pattern for adding new routes is:
-// slices 2/3 call exported Register<Family>Routes(mux, deps) functions in
-// their respective internal/handlers/<family>.go files. NewRouter constructs
-// the mux, registers the health route, and returns the mux for those
-// registration calls. See newtcon#79 §Risks resolved, "Multiple route
-// registration patterns possible".
+// This file owns the middleware composition layer. Route registration is
+// performed by [NewMux] which returns a bare *http.ServeMux; callers (main.go)
+// register routes on the mux before passing it to [ApplyMiddleware] which wraps
+// it in the three standard middleware layers.
+//
+// The split between NewMux and ApplyMiddleware is required to break the import
+// cycle that arises when route registration is done here:
+//
+//	server imports handlers (for route registration)
+//	handlers imports server (for CorrelationIDFromContext)
+//	→ cycle
+//
+// By separating mux creation from route registration, server does not need to
+// import handlers. Route registration is the caller's (main.go's) responsibility.
+// This is consistent with CLAUDE.md §File Ownership Map: "cmd/newtcon-server/main.go
+// → process entry, flag parsing, server boot." Wiring routes is part of server boot.
+//
+// Handlers that need CorrelationIDFromContext receive it as a dependency
+// function (e.g., ServicesDeps.CorrelationID = server.CorrelationIDFromContext)
+// set by main.go at boot time. This passes the accessor through without
+// creating an import dependency.
 package server
 
-import (
-	"net/http"
+import "net/http"
 
-	"github.com/aldrin-isaac/newtcon/internal/handlers"
-	"github.com/aldrin-isaac/newtcon/internal/newtronc"
-)
-
-// Config carries the dependencies NewRouter needs to wire up the handler tree.
-// Fields are set from parsed flags in cmd/newtcon-server/main.go.
-type Config struct {
-	// NewtronClient is the sole newtron-server HTTP client.
-	// Created in main.go via newtronc.New(newtronURL, ...).
-	NewtronClient *newtronc.Client
-
-	// NewtronURL is the configured newtron-server base URL. Passed through to
-	// the health handler so HealthResponse.Newtron.URL is populated per
-	// API_CONTRACT.md §GET /api/health line 1321.
-	NewtronURL string
+// NewMux returns a bare *http.ServeMux for route registration.
+//
+// Callers register routes on the returned mux, then pass it to
+// [ApplyMiddleware] to get the fully-wrapped handler. See main.go for the
+// canonical usage pattern.
+func NewMux() *http.ServeMux {
+	return http.NewServeMux()
 }
 
-// NewRouter returns an *http.ServeMux with the newtcon-server route table
-// registered and all three middleware layers (Recovery → RequestID → Logging)
-// applied.
+// ApplyMiddleware wraps the given handler in the three standard middleware layers:
 //
-// Routes registered here (Slice 1):
+//	RequestID → Recovery → Logging → handler
 //
-//	GET /api/health
+// Composition order is critical: RequestID is outermost so that the
+// correlation_id is populated in context before Recovery's deferred panic
+// handler reads it. If Recovery were outermost, the deferred closure would
+// hold the pre-RequestID request object and CorrelationIDFromContext would
+// return "". The UUID must be set first.
 //
-// Slices 2 and 3 call exported Register<Family>Routes(mux, deps) to add the
-// Composer endpoints without modifying this function.
-//
-// The returned *http.ServeMux uses Go 1.22+ method+path routing patterns.
-func NewRouter(cfg Config) http.Handler {
-	mux := http.NewServeMux()
-
-	healthCfg := handlers.HealthConfig{
-		NewtronClient: cfg.NewtronClient,
-		NewtronURL:    cfg.NewtronURL,
-	}
-	mux.Handle("GET /api/health", handlers.NewHealthHandler(healthCfg))
-
-	// Middleware composition order (outermost first):
-	//
-	//   RequestID → Recovery → Logging → mux
-	//
-	// RequestID is outermost so that the correlation_id is populated in context
-	// before Recovery's deferred panic handler reads it. If Recovery were
-	// outermost, the deferred closure would hold the pre-RequestID request object
-	// and CorrelationIDFromContext would return "". The UUID must be set first.
-	return RequestID(Recovery(Logging(mux)))
+// This function replaces the former NewRouter(Config) which imported handlers
+// directly for route registration. See package godoc for the import-cycle
+// rationale.
+func ApplyMiddleware(handler http.Handler) http.Handler {
+	return RequestID(Recovery(Logging(handler)))
 }
