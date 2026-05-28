@@ -937,18 +937,37 @@ Field rules:
   key so the streaming consumer does not need a contract update
   if the upstream substrate is later re-evaluated (additive
   evolution per `DESIGN_PRINCIPLES_NEWTRON` §46's fourth rule).
-  Re-evaluation trigger (newtron lead's verbatim wording): "if
-  the Report Bug surface goes live (newtcon#42 / PR #51) and
-  operators consistently struggle to identify methods from
-  substrate alone." Until then, consumers receive `null` and MUST
-  tolerate it. The lifecycle's `manual_equivalent.newtron_http`
-  state for this substrate is `deferred_indefinitely` per the
-  canonical enum defined at §POST
+  The re-evaluation trigger, byte-for-byte from the
+  [newtron#12 deferral comment](https://github.com/aldrin-isaac/newtron/issues/12#issuecomment-deferral):
+
+  ```json
+  {
+    "text": "Re-evaluate if the Report Bug surface goes live and operators consistently struggle to identify methods from substrate alone — that pattern, if observed, would make this issue load-bearing.",
+    "newtcon_context": ["newtcon#42", "PR #51"]
+  }
+  ```
+
+  The `text` subfield is the lead's verbatim wording — the
+  trailing "— that pattern, if observed, would make this issue
+  load-bearing" clause is load-bearing operator-honesty substance
+  (the deferral lifts on *observation* of operators struggling,
+  not on speculation that they will), per the verbatim discipline
+  on `re_evaluation_trigger.text` defined canonically at §POST
   /api/inbox/{card_id}/action/preview
-  "`manual_equivalent.newtron_http`"; see
+  "`manual_equivalent.newtron_http`". The `newtcon_context`
+  subfield names the newtcon issue that introduced the Report
+  Bug surface the trigger contemplates (`newtcon#42`) and the
+  PR that landed it (`PR #51`); both are navigation affordances
+  for consumers, not substrate, and are kept structurally
+  separate from `text` per the canonical field shape.
+
+  Until the trigger fires, consumers receive `null` for
+  `source` and MUST tolerate it. The lifecycle's
+  `manual_equivalent.newtron_http` state for this substrate is
+  `deferred_indefinitely` per the canonical enum; see
   §Endpoints — Report Bug `call_site_provenance` for the
-  full per-surface field shape and the
-  `source_status` discriminator.
+  full per-surface field shape and the `source_status`
+  discriminator.
 
 ### Per-Node atomicity honesty
 
@@ -2829,13 +2848,17 @@ Field rules:
   surface this as "tracked at newtron#X; expected upstream" and may
   set staleness alerts on long-pending items;
   (d) `{ "status": "deferred_indefinitely", "gap_issue": "<URL>",
-  "re_evaluation_trigger": "<text>" }` — no newtron HTTP shape exists
-  today, AND the newtron lead has considered the substrate and
-  indefinitely deferred it. No upstream delivery is expected on a
-  defined timeline. Consumers MUST NOT surface this as "pending" or
-  "expected"; the operator-facing rendering must convey "considered
-  and deferred" honestly. `re_evaluation_trigger` is REQUIRED on this
-  shape (see field rules below) and may never fire;
+  "re_evaluation_trigger": { "text": "<verbatim substrate>",
+  "newtcon_context": ["<ref>", ...] } }` — no newtron HTTP shape
+  exists today, AND the newtron lead has considered the substrate
+  and indefinitely deferred it. No upstream delivery is expected on
+  a defined timeline. Consumers MUST NOT surface this as "pending"
+  or "expected"; the operator-facing rendering must convey
+  "considered and deferred" honestly. `re_evaluation_trigger` is
+  REQUIRED on this shape; its `text` subfield is REQUIRED and is
+  byte-for-byte the lead's wording on the linked `gap_issue`, and
+  its `newtcon_context` subfield is OPTIONAL (see field rules
+  below). The trigger may never fire;
   (e) `{ "status": "not_applicable", "rationale": "<text>" }` — no
   newtron HTTP shape applies, by design, because the substrate is
   not addressable in newtron's model (used, e.g., on the
@@ -2891,25 +2914,61 @@ Field rules:
 
 - **`re_evaluation_trigger`** (on shape (d) only) — REQUIRED when
   `status == "deferred_indefinitely"`; MUST be absent for every
-  other `status` value. The field is a free-text description of the
-  condition that would cause the deferral to be lifted, prompting
-  a follow-up Contract PR to migrate the entry from
-  `deferred_indefinitely` to `pending_newtron_gap` (or directly to
-  `available` if the lead chooses to ship it immediately on
-  re-evaluation). The text MUST name a concrete, operator-visible
-  signal (e.g., "if the Report Bug surface goes live and operators
-  consistently struggle to identify methods from substrate alone"),
-  not a vague aspiration ("if useful"). Operator-philosophy
-  invariant #1 ("no black boxes") is binding: the operator who
-  reads a `deferred_indefinitely` entry MUST be able to see WHY the
-  substrate is deferred and WHAT would re-open it, without having
-  to read the linked newtron issue. The field is absent on every
-  other shape because the lifecycle's other states have their own
-  honest signals: `pending_newtron_gap` is already an open
-  expectation (no trigger needed; arrival is expected), `available`
-  has landed (no trigger needed; the substrate is on the wire), and
+  other `status` value. The field is a typed object with two
+  subfields:
+  - **`text`** (REQUIRED, string) — the condition that would cause
+    the deferral to be lifted, prompting a follow-up Contract PR
+    to migrate the entry from `deferred_indefinitely` to
+    `pending_newtron_gap` (or directly to `available` if the lead
+    chooses to ship it immediately on re-evaluation). The string
+    is **byte-for-byte** the lead's wording from the substrate
+    document linked at `gap_issue` (issue comment, design doc,
+    code comment) — paraphrase, polish, or chat-derived rewording
+    is forbidden. Verbatim discipline is operator-philosophy
+    invariant #7 ("errors carry the substrate") applied to the
+    lifecycle of a deferral: the trigger's burden-of-proof
+    framing (e.g., a trailing "— that pattern, if observed, would
+    make this issue load-bearing" clause encodes the lead's
+    discipline that the deferral lifts on observation, not on
+    speculation) is load-bearing substance, not formatting, and
+    survives the wire. The string MUST name a concrete,
+    operator-visible signal, not a vague aspiration ("if
+    useful"). Operator-philosophy invariant #1 ("no black boxes")
+    is binding: the operator who reads a `deferred_indefinitely`
+    entry MUST be able to see WHY the substrate is deferred and
+    WHAT would re-open it, without having to read the linked
+    newtron issue.
+  - **`newtcon_context`** (OPTIONAL, string array, default
+    `[]`) — newtcon-side cross-references that contextualize the
+    trigger surface (e.g., the newtcon issue that introduced the
+    surface the trigger names, the PR that landed it, an ADR that
+    documents a related decision). These are navigation
+    affordances for consumers, not substrate; they MUST NOT live
+    inside `text`. Each entry is a free-form string a consumer
+    can resolve in its own deployment context (typically
+    `newtcon#NNN`, `PR #NNN`, or `docs/adr/NNNN-title.md`).
+    Examples that name a newtron HTTP path, a CONFIG_DB table, or
+    other newtron-side substrate belong in `text` (or in a
+    different `re_evaluation_trigger` whose substrate is on the
+    newtron side), not here. Absent when no context refs apply.
+
+  The field is absent on every other shape because the
+  lifecycle's other states have their own honest signals:
+  `pending_newtron_gap` is already an open expectation (no
+  trigger needed; arrival is expected), `available` has landed
+  (no trigger needed; the substrate is on the wire), and
   `not_applicable` is by-design (no trigger needed; the substrate
   does not exist in newtron's model).
+
+  **Illustrative shape** (NOT the canonical newtron#12 trigger;
+  for the verbatim newtron#12 trigger see §Streaming
+  substrate-operation events "`source`"):
+  ```json
+  {
+    "text": "<the lead's wording, byte-for-byte from gap_issue>",
+    "newtcon_context": ["newtcon#NNN", "PR #NNN"]
+  }
+  ```
 - Per-verb `manual_equivalent.newtron_http.status` today:
 
   | Verb | `status` | Underlying newtron HTTP |
@@ -10207,7 +10266,10 @@ Field rules:
         "source": null,
         "source_status": "deferred_indefinitely",
         "source_gap_issue": "https://github.com/aldrin-isaac/newtron/issues/12",
-        "source_re_evaluation_trigger": "if the Report Bug surface goes live (newtcon#42 / PR #51) and operators consistently struggle to identify methods from substrate alone."
+        "source_re_evaluation_trigger": {
+          "text": "Re-evaluate if the Report Bug surface goes live and operators consistently struggle to identify methods from substrate alone — that pattern, if observed, would make this issue load-bearing.",
+          "newtcon_context": ["newtcon#42", "PR #51"]
+        }
       }
     },
     {
@@ -10341,14 +10403,21 @@ Field rules:
     is null because the upstream substrate has been considered
     by the newtron lead and indefinitely deferred. The section
     renders a note ("call-site provenance is deferred upstream;
-    re-evaluation trigger: <verbatim trigger>"). The
+    re-evaluation trigger: <`source_re_evaluation_trigger.text`>"). The
     `source_gap_issue` field points to newtron#12 and
-    `source_re_evaluation_trigger` carries the verbatim trigger
-    text per §Streaming substrate-operation events "`source`".
-    The body is still useful — the automation team can find the
-    call-site by other means (grep on the substrate
-    `(table, key)` for the emitting function); the report just
-    does not auto-populate the name.
+    `source_re_evaluation_trigger` is the typed `{ text,
+    newtcon_context }` object carrying the lead's verbatim
+    wording from the newtron#12 deferral comment in `text` and
+    the navigation cross-references (`newtcon#42`, `PR #51`)
+    in `newtcon_context`. The shape and verbatim discipline are
+    defined canonically at §POST
+    /api/inbox/{card_id}/action/preview
+    "`manual_equivalent.newtron_http`"; the consumption site for
+    this specific substrate is §Streaming substrate-operation
+    events "`source`". The body is still useful — the
+    automation team can find the call-site by other means (grep
+    on the substrate `(table, key)` for the emitting function);
+    the report just does not auto-populate the name.
   - `"available"` — `PerWrite.source` is populated (the
     re-evaluation trigger has fired and a future verbose-mode
     surface has shipped); the section renders the call-site and
