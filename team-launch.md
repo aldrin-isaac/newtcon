@@ -151,6 +151,38 @@ change):
 The project is "complete and working reliably" when **all** of these
 hold:
 
+Criterion 0 (below) is a **structural protection**, not a project
+completion gate: it forces the second pipeline lane (Tech Lead →
+Implementer) to run before the first lane (Architect → Contract) can
+re-saturate the backlog. It was added by operator intervention
+(`/tmp/newtcon-intervention.md` §Charter amendment) after the
+contract-saturation-over-implementation pattern surfaced in the first
+cumulative drift audit (`docs/audits/2026-05-28.md`, finding D1:
+2 % implemented-vs-specified ratio at the moment the intervention
+fired). The Drift Auditor flagged its non-landing as a medium-
+severity gap (finding D2); landing it alongside the post-ADR-0001
+rebalance is the operator-verdict response. Criteria 1–7 below are
+the substantive completion gates; criterion 0 governs the cadence in
+which the team approaches them.
+
+0. **Ship-before-resaturate.** The current operator surface in flight
+   must be shipped and operator-validated before further contract
+   refinement is allowed beyond the cycle in progress at the time
+   this criterion takes effect. (Verbatim from
+   `/tmp/newtcon-intervention.md` §Charter amendment; absorbed into
+   the team's binding rule per the operator's verdict
+   `/tmp/newtcon-rebalance-verdict.md` §Immediate actions, which
+   directs landing the amendment alongside the rebalance rather than
+   deferring it until Composer ships.) The Drift Auditor and the
+   team lead enforce this together: when an operator surface is
+   in-flight, Architect-class spawns are paused except for hot-fix
+   corrections discovered by the Implementer and except for the
+   cascade rewrites required by an in-flight operator-level
+   architectural verdict (e.g., the ADR-0001 rebalance). "In flight"
+   begins when the Tech Lead slices the surface into Implementer
+   issues; it ends when the operator signs off on empirical
+   validation per §Operator's residual role.
+
 1. **All three primary surfaces implemented** — Service Composer,
    Operator Inbox, Change Workbench — with their full
    `API_CONTRACT.md` endpoint sets.
@@ -171,6 +203,26 @@ hold:
 When criteria 1–6 are met, the lead reports to the operator with a
 completion summary and waits for criterion 7 (operator's empirical
 validation). After validation: the team enters maintenance mode.
+
+### Process posture during the ADR-0001 rebalance
+
+Per the operator's verdict (`/tmp/newtcon-rebalance-verdict.md`
+§Process posture during the rebalance), the rebalance phase that
+follows ADR-0001's acceptance is an unusual posture for the team:
+normally autonomous mode processes the backlog; the rebalance
+restructures the backlog. Expect a brief slower phase while the
+cascade lands — the API_CONTRACT.md split, the architecture document
+rewrite, the CLAUDE.md §Project Scope rewrite, and the rewrites of
+criteria 1 and 7 above all need to settle into the new shape
+(the operator-facing workflows are unchanged; the engine partition
+underneath them is reshuffled per the ADR's
+§"The mission is unchanged; the engine implementation is reshuffled"
+framing). After the cascade lands, normal autonomous-mode cadence
+resumes on the rebalanced scope. The team lead does not treat the
+rebalance as cause to relax criterion 0 — quite the opposite, the
+ship-before-resaturate discipline is what prevents the cascade
+itself from re-saturating the contract backlog before the
+implementation lane catches up on the new scope.
 
 ## Operator's residual role
 
