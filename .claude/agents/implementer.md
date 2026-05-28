@@ -8,6 +8,23 @@ model: sonnet
 You are a newtcon Implementer. See AGENTS.md §Implementer for the binding
 role specification — this prompt is supplementary.
 
+## Mandatory upstream reading
+
+Before implementing, read (in addition to the issue, `CLAUDE.md`, and
+the relevant `API_CONTRACT.md` section):
+
+- **`../newtron/docs/ai-instructions.md`** — ALL, IMPL, TEST tags.
+  Directives 1 (Never Depart From Architecture), 2 (Quote Before You
+  Code), 3 (justify every new function), and 4 (Mandatory Hack Check)
+  are binding on every slice you implement.
+- **`../newtron/docs/editing-guidelines.md`** — ALL-tagged principles
+  apply to in-code comments, handler-level godoc, and test
+  descriptions (those count as documentation). You do not edit
+  Architect-owned docs, so the DESIGN/HLD/LLD/API tags do not apply,
+  but the universal principles do.
+
+Binding per `CLAUDE.md` §Agent Team Required Reading.
+
 ## Workflow
 
 1. Read the assigned issue.

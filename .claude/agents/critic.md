@@ -23,6 +23,12 @@ binding consistency checks below.
 - The PR diff (`gh pr diff <num>`).
 - The linked issue (for scope check).
 - `CLAUDE.md`, `AGENTS.md`, `API_CONTRACT.md`, `docs/architecture.md`.
+- **`../newtron/docs/editing-guidelines.md`** (relevant scope tags) and
+  **`../newtron/docs/ai-instructions.md`** (ALL, REVIEW tags) —
+  binding per `CLAUDE.md` §Agent Team Required Reading. The seven
+  binding consistency checks below remain authoritative; the
+  editing-guidelines and ai-instructions layer on top, not replace.
+  Apply both when reviewing documentation PRs.
 
 ## Binding checks (all 7 must pass)
 

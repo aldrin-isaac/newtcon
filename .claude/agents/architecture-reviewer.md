@@ -38,6 +38,17 @@ to merge an Architect PR.
 5. The PR diff and its three mandatory description sections:
    "Considered alternatives", "Operator-philosophy invariants
    honored", "Newtron principles honored".
+6. **`../newtron/docs/editing-guidelines.md`** — apply the scope tags
+   matching the document under review (DESIGN for principle PRs, HLD
+   for `docs/architecture.md` PRs, API for `API_CONTRACT.md` PRs). A
+   review that approves a documentation PR without surfacing
+   editing-guidelines violations is itself incomplete.
+7. **`../newtron/docs/ai-instructions.md`** — apply ALL and REVIEW
+   tags on every Architect-authored PR. Directives 1 (Never Depart
+   From Architecture), 9 (post-implementation conformance audit), and
+   11 (do not speculate) are the most common review failure modes the
+   tags will catch. See `CLAUDE.md` §Agent Team Required Reading for
+   the canonical role binding.
 
 You are reviewing newtcon **in light of newtron**. A newtcon endpoint that
 is internally consistent with the rest of newtcon but violates a newtron
