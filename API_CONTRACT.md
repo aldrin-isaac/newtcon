@@ -112,6 +112,40 @@ guess:
   `validation_failure`; input-was-right-when-you-typed-it-but-the-device-changed
   → `drift_refusal`.
 
+A third boundary, between the §Error Schema vocabulary as a whole
+and post-deliver verify failures, is worth naming explicitly even
+though it does not name a `kind` value:
+
+- **`verify` failure is NOT one of the five `kind` values.** The
+  five kinds describe **refusals** — the write was refused before
+  landing, or the request could not be attempted, or the upstream
+  was unreachable. A post-deliver verify failure is structurally
+  different: the write **landed** on the device (`applied: true`),
+  but newtron's `cs.Verify(n)` re-read showed the substrate did
+  not match the ChangeSet. Newtron classifies this as a
+  `VerificationFailedError` (Go) and emits 409 with the standard
+  envelope **plus** the typed `data: *WriteResult` field carrying
+  the full `VerificationResult` (with `errors[].device_response`
+  verbatim) per the
+  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
+  envelope fix. Newtcon-server consumes the typed `data` field
+  directly and surfaces the substrate through the 200-path
+  `verify.assertion.errors[]` shape on the Operations endpoint
+  (and via the dedicated
+  [`GET /api/operations/{operation_id}/verify`](#get-apioperationsoperation_idverify)),
+  with `terminal.outcome == "failure"` per the terminal-state
+  derivation rule. Per `DESIGN_PRINCIPLES_NEWTRON.md` §14 ("Verify
+  Your Writes; Observe Everything Else"), verify is a Device I/O
+  assertion against the device — not a pipeline refusal — and the
+  contract honors that classification by surfacing the substrate
+  on the 200 path rather than coining a sixth `kind` value. The
+  vocabulary boundary is therefore: **refusal-before-landing →
+  one of the five kinds**; **landed-but-verify-disagreed →
+  `verify.state == "failed"` with substrate-faithful
+  `verify.assertion.errors[]` per §14 + §46**. A handler that
+  emits `kind: "internal"` for a post-deliver verify failure is a
+  contract violation — the failure is classified, not residual.
+
 ### Companion fields on every error
 
 Two fields appear on every `details` payload, regardless of `kind`:
@@ -1711,26 +1745,45 @@ Field rules:
 
 **Newtron API survey for this split.** newtron exposes a single
 `error: <string>` envelope per `../newtron/docs/newtron/api.md` §1
-("Response Envelope"). The Go error types `ValidationError`,
-`NotFoundError`, `VerificationFailedError`, and the
-`PreconditionError` referenced by `DESIGN_PRINCIPLES_NEWTRON.md`
-§13 are distinguished internally but erased to plain strings by
-`writeError` in `pkg/newtron/api/handler.go`. The wire-level
-distinction §13 demands does not exist on newtron's HTTP today, but
-the discrimination newtcon needs is already established at the
-**§Error Schema level** (PR #32): `validation_failure.details.
-validation_stage ∈ "request" | "substrate_precondition" |
-"substrate_schema"` and `precondition_failure.details.condition`
-together cover the same vocabulary. The Validate inline split
-projects that §Error Schema discrimination into the 200-response
-path; the upstream signal newtcon classifies from is the same set
-of newtron error strings + the call site that emitted them, mediated
-by `internal/newtronc/`. **No new newtron gap is filed** — the
-substrate signal is already reaching newtcon-server today; only the
-operator-facing surface needs the inline split. (For the
-api.md ↔ buildMux divergences encountered during this survey —
-several routes registered in `buildMux()` are not documented in
-api.md and vice versa — see
+("Response Envelope") for `ValidationError`, `NotFoundError`, and
+the `PreconditionError` referenced by `DESIGN_PRINCIPLES_NEWTRON.md`
+§13 — these Go error types are distinguished internally but erased
+to plain strings by `writeError` in `pkg/newtron/api/handler.go`.
+The wire-level distinction §13 demands does not exist on newtron's
+HTTP today for those three error classes, but the discrimination
+newtcon needs is already established at the **§Error Schema
+level** (PR #32): `validation_failure.details.validation_stage ∈
+"request" | "substrate_precondition" | "substrate_schema"` and
+`precondition_failure.details.condition` together cover the same
+vocabulary. The Validate inline split projects that §Error Schema
+discrimination into the 200-response path; the upstream signal
+newtcon classifies from is the same set of newtron error strings +
+the call site that emitted them, mediated by `internal/newtronc/`.
+**No new newtron gap is filed** — the substrate signal is already
+reaching newtcon-server today; only the operator-facing surface
+needs the inline split.
+
+The fourth Go error type, `VerificationFailedError`, is the
+exception: per the
+[newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
+envelope fix (commit `f6b64d8`, 2026-05-27), `writeError` detects
+this case via `errors.As` and emits the standard envelope **plus**
+a typed `data: *WriteResult` field carrying the full
+`VerificationResult` (with `errors[].device_response` verbatim
+from the device re-read) and the `per_write[]` substrate-operation
+sequence. The substrate survives the failure path; no string
+parsing is required. newtcon-server's `internal/newtronc/`
+consumes the typed `data` field directly and surfaces the
+substrate through the 200-path `verify.assertion.errors[]` shape
+defined in §Endpoints — Operations (the verify failure is a
+post-deliver Device I/O assertion per
+`DESIGN_PRINCIPLES_NEWTRON.md` §14, not a refusal of the write
+attempt — see "Verify failure does not produce a 4xx envelope"
+field rule under [`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id)).
+
+(For the api.md ↔ buildMux divergences encountered during this
+survey — several routes registered in `buildMux()` are not
+documented in api.md and vice versa — see
 [newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)
 for the operator's pending doc-wide audit; individual drift
 instances are not refiled here.)
@@ -2104,6 +2157,29 @@ results.
 per §Streaming substrate-operation events. The terminal
 `apply_complete` event's data payload is byte-for-byte the same JSON
 object documented above for the JSON variant.
+
+**`per_target[*].applied`** is `true` when newtron's
+batch-execute returned `applied: true` for this target's per-Node
+bundle (the write LANDED in CONFIG_DB). Verify is a post-deliver
+Device I/O assertion per `unified-pipeline-architecture.md` §7,
+and the target's `verify.state` may be `in_progress`, `complete`,
+`failed`, or `skipped` at response-render time. **`applied:
+true` does NOT imply verify passed** — a target with `applied:
+true` AND `verify.state: "failed"` (newtron returned 409
+`VerificationFailedError` with `applied: true, verified: false`)
+is a legitimate combination: the write landed, the re-read
+disagreed. The substrate is in `verify.assertion.errors[]` (with
+`device_response` per
+[newtron#21](https://github.com/aldrin-isaac/newtron/issues/21))
+once the operator polls
+[`GET /api/operations/{operation_id}`](#get-apioperationsoperation_id)
+for terminal verify state, and in the per-target `per_write[]`
+`verify_read` entries with `result: "rejected"`. `applied: false`
+is reserved for refusal-before-landing (schema validation, drift
+refusal, deliver-stage error); landed-but-verify-disagreed is
+`applied: true` with `verify.state: "failed"`. See "Verify
+failure does not produce a 4xx envelope" and the third vocabulary
+boundary in §Error Schema for the structural rule.
 
 A stale `preview_id` (expired or already consumed) → 410 Gone with
 `kind: "precondition_failure"`. On the SSE variant, this error is
@@ -2926,6 +3002,23 @@ per §Streaming substrate-operation events. The terminal
 `apply_complete` event's data payload is byte-for-byte the same JSON
 object documented above for the JSON variant.
 
+**`executed: true` does NOT imply verify passed.** When newtron's
+action returned `applied: true` (the write LANDED) but
+post-deliver `cs.Verify(n)` re-read disagreed with the ChangeSet
+(`verified: false`, surfaced through newtron's typed 409
+`VerificationFailedError` envelope per
+[newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)),
+the response carries `executed: true` (the action was executed
+against the device) with `verify.state: "failed"` and the typed
+`verify.assertion.errors[]` (with `device_response` verbatim)
+populated. The same `verify_read` substrate appears as `PerWrite`
+entries with `result: "rejected"` on `per_write[]`. `executed:
+false` is reserved for refusal-before-landing (drift refusal at
+execution time, validation rejection); landed-but-verify-disagreed
+is `executed: true` with `verify.state: "failed"`. See "Verify
+failure does not produce a 4xx envelope" and the third vocabulary
+boundary in §Error Schema for the structural rule.
+
 A stale `preview_id` → 410 Gone with `kind: "precondition_failure"`.
 
 A drift-guard refusal at execution time (the device drifted between
@@ -3198,7 +3291,8 @@ contract above; never falls back to newtron.
           "key": "default|10.1.0.1",
           "field": "asn",
           "expected": "65002",
-          "actual": ""
+          "actual": "",
+          "device_response": "local_asn=99999 router_id=10.0.0.1"
         }
       ]
     },
@@ -3242,13 +3336,60 @@ Field rules:
   The top-level `verify` object carries `kind: "device_io_assertion"`
   to make the classification load-bearing on the contract.
 - **`verify.assertion`** mirrors newtron's `VerificationResult` (`api.md`
-  §15 Write Result Types): `passed`, `failed`, `errors[]`. `errors[]`
-  is absent when all entries passed. Present only when `verify.state ==
-  "complete"` or `verify.state == "failed"`. Per
-  `DESIGN_PRINCIPLES_NEWTRON` §14, verify is an assertion against the
-  ChangeSet — newtron knows what it wrote — so the shape is
-  `expected/actual` per field, never a "verification status" enum that
-  would conflate assertion with cross-device observation.
+  §VerificationResult / §VerificationError, originally §15 Write Result
+  Types): `passed`, `failed`, `errors[]`. `errors[]` is absent when all
+  entries passed. Present only when `verify.state == "complete"` or
+  `verify.state == "failed"`. Per `DESIGN_PRINCIPLES_NEWTRON` §14,
+  verify is an assertion against the ChangeSet — newtron knows what it
+  wrote — so the shape is `expected/actual` per field, never a
+  "verification status" enum that would conflate assertion with
+  cross-device observation. Each `errors[]` entry carries `table`,
+  `key`, `field`, `expected`, `actual`, and `device_response` — the
+  six fields newtron's `sonic.VerificationError` exposes per
+  `api.md` §VerificationError after the
+  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
+  envelope fix (commit `f6b64d8`, 2026-05-27). `device_response` is
+  the verbatim device-side reply observed when the mismatch was
+  detected (for field mismatches, the full `HGETALL` content as
+  sorted `key=value` pairs; for missing-key or still-present cases,
+  the Redis-level status string). The substrate-faithful
+  pass-through of `device_response` operationalizes §14 ("verify is
+  an assertion against the device") and §46 ("wire shape mirrors
+  substrate") on the failure path: an operator inspecting a verify
+  failure reads what the device actually returned, not a paraphrase.
+  The `device_response` field is OPTIONAL only in the sense that
+  newtron may omit it when the assertion failure is structural
+  rather than field-level (an entry's whole key was missing); when
+  present, it is verbatim. The newtcon-server consumes this typed
+  substrate from newtron's `VerificationResult` regardless of
+  whether newtron emitted it on the 200 path (`WriteResult.
+  verification`) or on the 409 path (the typed `data: *WriteResult`
+  envelope on `VerificationFailedError`, per newtron#21) — the
+  substrate is the same in both delivery shapes, and the contract
+  surfaces it once on the 200 path's `verify.assertion.errors[]`
+  (see "Verify failure does not produce a 4xx envelope" rule
+  below).
+- **Verify failure does not produce a 4xx envelope.** The five
+  `kind` values in §Error Schema
+  (`validation_failure | drift_refusal | precondition_failure |
+  newtron_unavailable | internal`) do NOT include a
+  `verify_failure` kind, and intentionally so: a verify failure
+  means the write **landed** (`applied: true`) but the post-deliver
+  re-read disagreed with the ChangeSet — newtron's pipeline ran to
+  completion and produced typed substrate; no refusal happened.
+  The substrate is surfaced on the 200 response through
+  `verify.state == "failed"` and `verify.assertion.errors[]`, with
+  the terminal derivation rule below producing
+  `terminal.outcome == "failure"`. Newtron's 409
+  `VerificationFailedError` HTTP envelope is consumed by
+  newtcon-server's `internal/newtronc/` and re-shaped into the
+  same 200-path representation — the substrate flows through the
+  typed `data: *WriteResult.verification` field per newtron#21
+  rather than through string-parsing the legacy `error` field.
+  The 409 status on newtron's wire is a delivery-shape choice for
+  HTTP semantic alignment; the substrate underneath is the typed
+  `VerificationResult`, and the operator-facing contract here
+  surfaces the substrate rather than the wire envelope.
 - **`verify.skip_reason`** is populated when `verify.state == "skipped"`.
   Verify is skippable for verbs that wrote no ChangeSet (e.g.,
   `acknowledge`, `clear_zombie`) or when the caller explicitly opted out
@@ -4311,13 +4452,28 @@ Field rules:
 
 - `per_target[*].status`:
   - `committed` — newtron's batch-execute returned `applied: true`
-    for this intent's per-Node bundle; verify may still be in
-    progress (post-deliver Device I/O per
-    `unified-pipeline-architecture.md` §7).
-  - `failed` — newtron's batch-execute returned a failure on this
-    intent's per-Node bundle. The whole per-Node bundle is failed
-    (per-Node atomicity); the `failure` object carries the
-    substrate-level error from newtron.
+    for this intent's per-Node bundle. The write LANDED in
+    CONFIG_DB. Verify is a post-deliver Device I/O assertion per
+    `unified-pipeline-architecture.md` §7 and may be `in_progress`,
+    `complete`, `failed`, or `skipped` at response-render time.
+    **`committed` does NOT imply verify passed** — a target with
+    `status: "committed"` AND `verify.state: "failed"` (newtron
+    returned 409 `VerificationFailedError` with `applied: true,
+    verified: false`) is a legitimate combination: the write
+    landed, the re-read disagreed. The substrate is in
+    `verify.assertion.errors[]` (with `device_response` per
+    [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21))
+    and in the per-target `per_write[]` `verify_read` entries with
+    `result: "rejected"`. See "Verify failure does not produce a
+    4xx envelope" in §Error Schema.
+  - `failed` — newtron's batch-execute returned `applied: false`
+    for this intent's per-Node bundle (the write did NOT land —
+    schema validation, drift refusal, or deliver-stage error). The
+    whole per-Node bundle is failed (per-Node atomicity); the
+    `failure` object carries the substrate-level error from
+    newtron. `failed` is reserved for refusal-before-landing;
+    landed-but-verify-disagreed is `committed` with
+    `verify.state: "failed"` per the rule above.
   - `not_attempted` — the sequence was halted before this intent's
     Node was reached (only possible when
     `stop_on_first_failure: true`).
@@ -4340,17 +4496,33 @@ Field rules:
   newtron's write endpoints
   ([newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
   Phase 2a) shipped on 2026-05-27 — `per_write[]` is now populated
-  for every attempted target. On `status == "failed"`, `per_write[]`
+  for every attempted target. On `status == "failed"` (the write
+  did NOT land — `applied: false` from newtron), `per_write[]`
   carries the substrate operations that landed before the per-Node
   TxPipeline was rejected (typically zero — schema validation per
   `DESIGN_PRINCIPLES_NEWTRON` §13 refuses the bundle before the
-  `EXEC`); when the failure is post-EXEC (daemon-rejection during
-  settle, verify-failure on a re-read), `per_write[]` carries every
-  applied substrate operation plus the rejected entry — surfaced
-  from newtron's typed `data: *WriteResult` envelope on
-  `VerificationFailedError` per
-  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
-  (companion to #19 Phase 2a).
+  `EXEC`; a daemon-rejection during settle that aborts the bundle
+  may produce a non-empty prefix). A post-deliver verify failure
+  is structurally **not** a `status == "failed"` outcome: the write
+  landed (`applied: true`), only the post-deliver `cs.Verify(n)`
+  re-read disagreed. The per-target row surfaces verify failure
+  with `status == "committed"` and `verify.state == "failed"`,
+  with the typed `verify.assertion.errors[]` (carrying
+  `device_response` per
+  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21))
+  populated from newtron's `data: *WriteResult.verification` field
+  on the 409 `VerificationFailedError` envelope. The same
+  per-write `verify_read` substrate (a `PerWrite` with `kind:
+  "verify_read"` and `result: "rejected"` plus verbatim
+  `device_response`) appears on `per_write[]`; the two surfaces
+  are complementary — `verify.assertion.errors[]` aggregates the
+  failures at the assertion level (table/key/field) for the
+  operator's first view, `per_write[]` exposes them at the
+  substrate-operation level for substrate-cadence inspection.
+  Both flow from the same newtron `VerificationResult` substrate
+  per §46 (wire shape mirrors substrate). See "Verify failure
+  does not produce a 4xx envelope" and the third vocabulary
+  boundary in §Error Schema for the structural rule.
 - `per_node_results[*].{writes_landed, writes_rejected, daemon_waits,
   verify_reads_failed}` are substrate-operation counts derivable
   from the corresponding target's `per_write[]`. They are REQUIRED
@@ -4385,7 +4557,18 @@ Field rules:
   `CLAUDE.md` §Operator-Honest Errors). `stage` is in addition to the
   `details.correlation_id` and other companion fields, and names which
   pipeline stage produced the failure (per
-  `unified-pipeline-architecture.md` §2).
+  `unified-pipeline-architecture.md` §2). The `stage` enum
+  intentionally excludes `verify`: a post-deliver verify failure
+  means the write **landed** (`status: "committed"`, `applied:
+  true`), and the substrate is surfaced through `per_target[*].
+  verify.assertion.errors[]` (with `device_response` per
+  newtron#21) rather than through `per_target[*].failure` — see
+  the "Verify failure does not produce a 4xx envelope" and
+  "`verify` failure is NOT one of the five `kind` values"
+  vocabulary boundaries in §Error Schema. A target whose
+  `per_target[*].failure.stage == "verify"` is a contract
+  violation; the failure must surface through the success-path
+  verify substrate.
 - `aggregate.outcome`:
   - `all_committed` — every per-Node result is `committed`.
   - `partial` — at least one `committed` and at least one of
@@ -7144,6 +7327,7 @@ Idempotent; safe to poll. No newtron-side state is mutated.
             "field": "asn",
             "expected": "65002",
             "actual": "",
+            "device_response": "local_addr=10.1.0.0 admin_status=up",
             "interpretation": "field missing on device after delivery; daemon may have rejected the write"
           }
         ]
@@ -7194,11 +7378,28 @@ Field rules:
 - **`assertion.entries[]`** is per-entry, not summarized. Each
   entry has an `outcome` (`passed` or `failed`); failed entries
   have `field_errors[]` with the per-field
-  `expected`/`actual`/`interpretation`. The `interpretation` is a
-  textual hint produced by newtcon-server — NOT a verdict on the
-  device; it surfaces likely causes (daemon rejection, schema
-  mismatch) so the operator has a starting point, not a
-  conclusion.
+  `expected`/`actual`/`device_response`/`interpretation`. The
+  `expected`, `actual`, and `device_response` triple is the
+  substrate-faithful mirror of newtron's `sonic.VerificationError`
+  (`api.md` §VerificationError) per the
+  [newtron#21](https://github.com/aldrin-isaac/newtron/issues/21)
+  envelope fix: `device_response` is the verbatim device-side
+  reply newtron observed at re-read time (the full `HGETALL`
+  content as sorted `key=value` pairs for field mismatches; the
+  Redis-level status for missing-key or still-present cases). Per
+  `DESIGN_PRINCIPLES_NEWTRON` §14 ("verify is an assertion against
+  the device") and §46 ("wire shape mirrors substrate"), the
+  device's verbatim reply MUST be reachable from the per-field
+  failure entry — paraphrasing it into the `interpretation` would
+  collapse the substrate the operator needs to diagnose. The
+  `interpretation` is the additive newtcon-server-side textual
+  hint — NOT a verdict on the device; it surfaces likely causes
+  (daemon rejection, schema mismatch) so the operator has a
+  starting point, not a conclusion. The contract requires both
+  the substrate (`device_response`) and the affordance
+  (`interpretation`) — the substrate is load-bearing per §14, the
+  affordance is operator-facing per `docs/operator-philosophy.md`
+  invariant #5 ("why-mode is always available").
 - **`asserted_against`** points to the ChangeSet the assertion
   diffed against. Verify is defined as "diff CONFIG_DB re-read
   against THIS ChangeSet" (`DESIGN_PRINCIPLES_NEWTRON.md` §11,
