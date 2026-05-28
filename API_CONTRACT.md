@@ -9587,8 +9587,10 @@ Every endpoint in this section MUST satisfy:
    how stale the underlying observation is at request time.
 7. **Honest `manual_equivalent` framing.** Every endpoint
    declares `manual_equivalent.newtron_http.status` as one of
-   the four bounded values. For observation history, the
-   typical answer is `not_applicable` (the substrate is
+   the bounded values defined canonically at §POST
+   /api/inbox/{card_id}/action/preview
+   "`manual_equivalent.newtron_http`". For observation history,
+   the typical answer is `not_applicable` (the substrate is
    newtcon's, not newtron's) — but the rationale field names
    the operator's-tools alternative (poll newtron's reads
    directly, or query newtcon's SQLite store). Operator-
@@ -10729,15 +10731,17 @@ Every endpoint in this section MUST satisfy:
    #1.
 7. **Honest `manual_equivalent` framing.** Every endpoint in
    this section declares
-   `manual_equivalent.newtron_http.status` as one of the four
-   bounded values. The typical answer is `not_applicable`
-   (bug-report authorship is a newtcon presentation concern,
-   not a newtron substrate operation) — but the rationale
-   field names the operator's-tools alternative: read
-   `GET /api/operations/{operation_id}` and author the body
-   by hand against the external system. Operator-philosophy
-   invariant #2 is binding: the operator can do this without
-   newtcon.
+   `manual_equivalent.newtron_http.status` as one of the
+   bounded values defined canonically at §POST
+   /api/inbox/{card_id}/action/preview
+   "`manual_equivalent.newtron_http`". The typical answer is
+   `not_applicable` (bug-report authorship is a newtcon
+   presentation concern, not a newtron substrate operation) —
+   but the rationale field names the operator's-tools
+   alternative: read `GET /api/operations/{operation_id}` and
+   author the body by hand against the external system.
+   Operator-philosophy invariant #2 is binding: the operator
+   can do this without newtcon.
 8. **No diagnosis, no fix proposals.** The contract surfaces
    substrate, operation context, recent-history context,
    call-site (when available), and operator narrative. It does
