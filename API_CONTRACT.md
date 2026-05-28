@@ -924,17 +924,31 @@ Field rules:
   event?" affordance per operator-philosophy invariant #5 ("why-mode
   is always available").
 - **`source`** — REQUIRED key in the schema, value REQUIRED to be
-  `null` in v0. Reserved for the call-site provenance that
+  `null` in v0. Reserved for the call-site provenance shape
+  `{ call_site: "<file:line>", function: "<go-method-name>" }`,
+  which would expose the newtron Go method that emitted this
+  substrate operation. The newtron lead deferred the upstream
+  substrate indefinitely on 2026-05-27 — the §46 substrate test
+  passes but the operator-value test does not justify the §33
+  reconciliation tax of keeping `Source` out of default responses
+  (see
   [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
-  will populate when it lands: `{ call_site: "<file:line>", function: "<go-method-name>" }`,
-  exposing the newtron Go method that emitted this substrate
-  operation. newtron#12 is operator-filed and currently OPEN; the
-  contract reserves the field shape and key so the streaming consumer
-  does not need a contract update when call-site provenance ships
-  (additive evolution per `DESIGN_PRINCIPLES_NEWTRON` §46's fourth
-  rule). When newtron#12 ships, a follow-up Contract PR populates
-  the `source` field's contents; consumers receive `null` until then
-  and MUST tolerate it.
+  deep-dive comment). The contract reserves the field shape and
+  key so the streaming consumer does not need a contract update
+  if the upstream substrate is later re-evaluated (additive
+  evolution per `DESIGN_PRINCIPLES_NEWTRON` §46's fourth rule).
+  Re-evaluation trigger (newtron lead's verbatim wording): "if
+  the Report Bug surface goes live (newtcon#42 / PR #51) and
+  operators consistently struggle to identify methods from
+  substrate alone." Until then, consumers receive `null` and MUST
+  tolerate it. The lifecycle's `manual_equivalent.newtron_http`
+  state for this substrate is `deferred_indefinitely` per the
+  canonical enum defined at §POST
+  /api/inbox/{card_id}/action/preview
+  "`manual_equivalent.newtron_http`"; see
+  §Endpoints — Report Bug `call_site_provenance` for the
+  full per-surface field shape and the
+  `source_status` discriminator.
 
 ### Per-Node atomicity honesty
 
@@ -3180,10 +3194,9 @@ rollback-on-crash purpose; the routes that would surface it
 shaped for the per-operation pipeline trace this surface returns —
 it stores per-commit reverse-ChangeSets sized for rollback, not the
 multi-stage trace + verify assertion the operator sees. The doc-vs-
-implementation drift on those routes is tracked at
-[newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)
-(the broader doc audit subsuming
-[newtron#18](https://github.com/aldrin-isaac/newtron/issues/18));
+implementation drift on those routes is tracked at the newtron
+lead's broader doc audit
+([newtron#20](https://github.com/aldrin-isaac/newtron/issues/20));
 this contract does NOT propose that newtron expose them as a read
 endpoint, because doing so would put newtron in violation of its
 own §21 ("Reconstruct, Don't Record" — completed operation history
@@ -8674,7 +8687,7 @@ A `from > to` request → 400 `validation_failure` with
     "newtron_cli": null,
     "newtron_http": {
       "status": "not_applicable",
-      "rationale": "Observation history is newtcon-owned by design (see §Endpoints — Observation History, 'Why this lives in newtcon, not newtron'). No newtron HTTP endpoint exists or will exist; an operator reproducing this view manually polls newtron's existing reads (the bulk-CONFIG_DB and bulk-intent reads, pending newtron#17 and newtron#18) at the same cadence newtcon does and computes the diffs themselves. The operator's-tools alternative is to query newtcon's SQLite store directly: `sqlite3 <newtcon-state>/history.db 'SELECT ...'`."
+      "rationale": "Observation history is newtcon-owned by design (see §Endpoints — Observation History, 'Why this lives in newtcon, not newtron'). No newtron HTTP endpoint exists or will exist; an operator reproducing this view manually polls newtron's existing substrate reads (the bulk-CONFIG_DB read at `GET /network/{n}/node/{d}/configdb`, the raw intent-table read at `GET /network/{n}/node/{d}/configdb/NEWTRON_INTENT`, and the projection read at `GET /network/{n}/node/{d}/intent/projection`) at the same cadence newtcon does and computes the diffs themselves; per-snapshot the same reads are enumerated on `GET /api/history/nodes/{node}/snapshot` `source_reads[]`. The operator's-tools alternative is to query newtcon's SQLite store directly: `sqlite3 <newtcon-state>/history.db 'SELECT ...'`."
     }
   }
 }
@@ -8864,15 +8877,13 @@ A timestamp of "now" reads the most-recent observation.
     },
     "source_reads": [
       {
-        "newtron_endpoint": "GET /network/default/node/switch1/configdb",
-        "newtron_endpoint_status": "pending_newtron_gap",
-        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/17",
+        "newtron_endpoint": "GET /network/default/node/switch1/configdb?owned_only=true",
+        "newtron_endpoint_status": "available",
         "captured_at": "2026-05-26T13:58:00Z"
       },
       {
-        "newtron_endpoint": "GET /network/default/node/switch1/intents",
-        "newtron_endpoint_status": "pending_newtron_gap",
-        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/18",
+        "newtron_endpoint": "GET /network/default/node/switch1/configdb/NEWTRON_INTENT",
+        "newtron_endpoint_status": "available",
         "captured_at": "2026-05-26T13:58:00Z"
       },
       {
@@ -8885,13 +8896,10 @@ A timestamp of "now" reads the most-recent observation.
   "manual_equivalent": {
     "newtron_cli": null,
     "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/17",
-      "expected_shape": {
-        "method": "GET",
-        "path": "/network/default/node/switch1/configdb",
-        "query": { "table": "<repeatable>", "owned_only": "true" }
-      }
+      "status": "available",
+      "method": "GET",
+      "path": "/network/default/node/switch1/configdb",
+      "query": { "table": "<repeatable>", "owned_only": "true" }
     }
   }
 }
@@ -8910,23 +8918,49 @@ Field rules:
   immediately post-gap sees the gap reference inline. The gap's
   full detail is reached via `gap_url` on the
   `observation_gap` entry in the timeline endpoint.
-- **`observation.configdb`** is the raw `RawConfigDB` shape
-  documented in newtron#17 — `table → key → field → value`. Same
-  shape returned by the proposed newtron endpoint. Per §46, the
-  wire shape mirrors the substrate.
+- **`observation.configdb`** is the raw `RawConfigDB`
+  (`table → key → field → value`) returned verbatim by newtron's
+  `GET /network/{n}/node/{d}/configdb?owned_only=true` substrate
+  read (landed Phase 1 of the newtron lead's 2026-05-27
+  substrate-faithful batch; closed
+  [newtron#17](https://github.com/aldrin-isaac/newtron/issues/17)).
+  Per §46, the wire shape mirrors the substrate.
 - **`observation.intents[*]`** carries the raw NEWTRON_INTENT
-  record fields per newtron#18.
+  record fields read from newtron's
+  `GET /network/{n}/node/{d}/configdb/NEWTRON_INTENT` substrate
+  read — the generic per-table CONFIG_DB read scoped to the
+  NEWTRON_INTENT table. Returns the same `RawConfigDB`-shaped
+  table (`key → field → value`) the polling layer already decodes
+  for `observation.configdb`, with every NEWTRON_INTENT field
+  preserved verbatim (`op`, `name`, `state`, `parents`,
+  `user_params`, `resolved_params`, `created_at`, `applied_at`).
+  newtron's lead closed
+  [newtron#18](https://github.com/aldrin-isaac/newtron/issues/18)
+  by resolving via this substrate plus the structured
+  `GET /network/{n}/node/{d}/intent/tree` view; the polling layer
+  reads the raw table form because (i) it is byte-for-byte the
+  substrate stored on the device (`/intent/tree` collapses
+  intents into TopologyStep records per §46, dropping `state`,
+  `parents`, `created_at`, `applied_at`, and the
+  `resolved_params` half of dual-purpose intents per newtron's
+  intents §22, which the polling layer needs to distinguish
+  `newtron_mediated` from `out_of_band` changes); and (ii) it
+  reuses the `RawConfigDB` decoder already exercised on
+  `observation.configdb` (one decoder for both polled
+  substrates, smaller per-poll cost).
 - **`observation.projection`** is the projection captured at
   observation time. The polling layer reads newtron's substrate
   endpoint at `GET /network/{n}/node/{d}/intent/projection`
-  (landed under newtron#5 Phase 1, 2026-05-27; returns bare
-  `sonic.RawConfigDB` per §46) and stores the captured
-  `RawConfigDB` map verbatim. The per-table grouping
-  (`tables[*].entries[*]`) and the `owning_intent_resource_key`
-  attribution are computed by newtcon-server at storage time from
-  the substrate plus the companion intent-tree capture; this
-  matches the same substrate-vs-decoration separation documented
-  on `GET /api/projection/nodes/{node}` (the live
+  (landed under
+  [newtron#5](https://github.com/aldrin-isaac/newtron/issues/5)
+  Phase 1, 2026-05-27; returns bare `sonic.RawConfigDB` per §46)
+  and stores the captured `RawConfigDB` map verbatim. The
+  per-table grouping (`tables[*].entries[*]`) and the
+  `owning_intent_resource_key` attribution are computed by
+  newtcon-server at storage time from the substrate plus the
+  companion intent-tree capture; this matches the same
+  substrate-vs-decoration separation documented on
+  `GET /api/projection/nodes/{node}` (the live
   projection-by-Node read).
 - **`observation.drift_at_observation`** is the diff between
   `configdb` and `projection` at observation time, captured by
@@ -9269,7 +9303,7 @@ Idempotent; safe to poll. No state mutated.
     "newtron_cli": null,
     "newtron_http": {
       "status": "not_applicable",
-      "rationale": "Per-change detail is computed by newtcon from its captured observations and the newtcon-server operations log; newtron has no equivalent endpoint because the change-history substrate (observation-over-time) is not newtron's substrate. The operator who reproduces this view manually polls the underlying newtron reads (the CONFIG_DB read tracked at newtron#17, the intents read tracked at newtron#18, and the projection read landed under newtron#5 at `GET /network/{n}/node/{d}/intent/projection`) and computes the diff themselves; or, when newtron is unavailable, runs the `undo_command_sequence` above against the device directly."
+      "rationale": "Per-change detail is computed by newtcon from its captured observations and the newtcon-server operations log; newtron has no equivalent endpoint because the change-history substrate (observation-over-time) is not newtron's substrate. The operator who reproduces this view manually polls the same underlying newtron substrate reads the polling layer uses — documented on `GET /api/history/nodes/{node}/snapshot` `source_reads[]` — at the same cadence newtcon does, and computes the diff themselves; or, when newtron is unavailable, runs the `undo_command_sequence` above against the device directly."
     }
   }
 }
@@ -9652,7 +9686,7 @@ construction; the contract guarantees the substrate is present.
 |---------|--------------|---------------------|
 | `POST /api/apply`, `POST /api/workbench/{batch_id}/commit`, `POST /api/inbox/{card_id}/action` | Execute substrate operations. Stream / return `PerWrite` entries (per §Streaming substrate-operation events). | Author bug reports. The operator sees the failure; nothing automates the diagnostic-to-report-body translation. |
 | `GET /api/operations/{operation_id}` | Inspect a single operation's pipeline trace, verify assertion, terminal state. | Synthesize a bug report from that trace. The data is available to read; the operator must compose the report by hand. |
-| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source` (depends on [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)). |
+| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source`. The upstream substrate is `deferred_indefinitely` per [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) (re-evaluation trigger documented at §Streaming substrate-operation events "`source`"); until re-evaluation, `PerWrite.source` is `null` and operators classify the call-site manually. |
 | **`POST /api/report-bug/preview` / `POST /api/report-bug`** (this surface) | Collect the substrate + operation context + recent-history context + (when available) call-site, route to the correct repository, render a structured Markdown body, return for operator review, and (on confirmation) deliver the body to a configured integration target. | Auto-file the report without operator review. The operator confirms the rendered body before any external system is touched, per `CLAUDE.md` §Preview Before Commit, Always. |
 
 The surface is read-mostly with respect to newtron substrate (it
@@ -9688,13 +9722,18 @@ operator needs. It does **not**:
   reflex will produce a low-information report; the substrate is
   the teaching surface (invariant #3), and this surface relies on
   the operator having actually used it.
-- Replace manual classification. Until newtron#12 (call-site
-  provenance) ships, the operator manually classifies
-  newtron-vs-newtcon-vs-unknown via the request body. The surface
-  still works without auto-classification — the body shape is
-  identical, and the routing question is asked of the operator
-  rather than inferred. When newtron#12 ships, the field becomes
-  auto-populated; the operator may still override.
+- Replace manual classification. Call-site provenance
+  ([newtron#12](https://github.com/aldrin-isaac/newtron/issues/12))
+  is `deferred_indefinitely` on the upstream side — the operator
+  manually classifies newtron-vs-newtcon-vs-unknown via the
+  request body. The surface still works without
+  auto-classification — the body shape is identical, and the
+  routing question is asked of the operator rather than inferred.
+  The re-evaluation trigger for the upstream substrate is
+  documented canonically at §Streaming substrate-operation events
+  "`source`". If the trigger fires and call-site provenance ships
+  later, the field becomes auto-populated; the operator may
+  still override.
 
 ### Identifiers
 
@@ -10049,9 +10088,12 @@ Field rules:
 - **`target_repository_hint`** — OPTIONAL. Defaults to
   `{ "kind": "auto", "other_repository": null }`.
   - `"auto"` — newtcon-server classifies the target repository
-    using the `PerWrite.source` call-site if present (newtron#12);
-    when `source` is null (newtron#12 not yet shipped, or this
-    operation predates verbose-mode capture), `auto` resolves to
+    using the `PerWrite.source` call-site if present; when
+    `source` is null (the upstream substrate is
+    `deferred_indefinitely` per
+    [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12),
+    or this operation predates a future verbose-mode capture if
+    the re-evaluation trigger fires), `auto` resolves to
     `"unknown"` and the preview response asks the operator to
     classify before confirmation. The classification is
     deterministic: a `source.call_site` matching
@@ -10162,9 +10204,10 @@ Field rules:
       "id": "call_site_provenance",
       "rendered_markdown": "**newtron call-site:** `pkg/newtron/network/node/bgp_ops.go:142 generateBgpNeighbor`\n\nThis is the Go method in newtron that emitted the failing CONFIG_DB write.",
       "substrate": {
-        "source": { "call_site": "pkg/newtron/network/node/bgp_ops.go:142", "function": "generateBgpNeighbor" },
-        "source_status": "available | pending_newtron_gap | not_captured",
-        "source_gap_issue": null
+        "source": null,
+        "source_status": "deferred_indefinitely",
+        "source_gap_issue": "https://github.com/aldrin-isaac/newtron/issues/12",
+        "source_re_evaluation_trigger": "if the Report Bug surface goes live (newtcon#42 / PR #51) and operators consistently struggle to identify methods from substrate alone."
       }
     },
     {
@@ -10229,8 +10272,11 @@ Field rules:
   `template_resolution_rationale`.
 - **`target_repository_resolved.resolution_basis`** is bounded:
   - `call_site_provenance` — the `PerWrite.source` field was
-    populated (newtron#12 has shipped, or a future verbose-mode
-    surface), and the classification follows from the call-site.
+    populated (a future verbose-mode surface lands after the
+    [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
+    re-evaluation trigger fires, per §Streaming
+    substrate-operation events "`source`"), and the
+    classification follows from the call-site.
   - `operator_override` — operator supplied
     `target_repository_hint.kind` ∈ `{newtron, newtcon, other}`
     explicitly.
@@ -10273,23 +10319,48 @@ Field rules:
   `recent_operations_window_hint` reminding the operator that the
   list is bounded by newtcon's retention.
 - **`call_site_provenance` section's
-  `substrate.source_status`** is bounded:
-  - `"available"` — `PerWrite.source` is populated; the section
-    renders the call-site and function name.
-  - `"pending_newtron_gap"` — `PerWrite.source` is null because
-    [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
-    has not yet shipped. The section renders a brief note
-    ("call-site provenance is pending newtron-side verbose-mode
-    support; tracked at newtron#12") and the `source_gap_issue`
-    field points to the gap. The body is still useful — the
-    automation team can find the call-site by other means (grep
-    on the substrate `(table, key)` for the emitting function);
-    the report just does not auto-populate the name.
+  `substrate.source_status`** is bounded by `available |
+  deferred_indefinitely | not_captured` — the same
+  three-state honest-lifecycle vocabulary the canonical
+  `manual_equivalent.newtron_http.status` enum applies to
+  this substrate (defined at §POST
+  /api/inbox/{card_id}/action/preview
+  "`manual_equivalent.newtron_http`"; see also the
+  `deferred_indefinitely → pending_newtron_gap → available`
+  honest-lifecycle clause there). The `pending_newtron_gap`
+  value is intentionally absent on this surface today because
+  the upstream substrate is at the deferred-indefinitely state
+  of the lifecycle, not the pending state; consumers MUST NOT
+  surface a `pending_newtron_gap` rendering for `source_status`
+  while
+  [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
+  remains deferred. If the re-evaluation trigger fires and a
+  follow-up Contract PR migrates the substrate to
+  `pending_newtron_gap`, this enum is extended in the same PR.
+  - `"deferred_indefinitely"` (today's default) — `PerWrite.source`
+    is null because the upstream substrate has been considered
+    by the newtron lead and indefinitely deferred. The section
+    renders a note ("call-site provenance is deferred upstream;
+    re-evaluation trigger: <verbatim trigger>"). The
+    `source_gap_issue` field points to newtron#12 and
+    `source_re_evaluation_trigger` carries the verbatim trigger
+    text per §Streaming substrate-operation events "`source`".
+    The body is still useful — the automation team can find the
+    call-site by other means (grep on the substrate
+    `(table, key)` for the emitting function); the report just
+    does not auto-populate the name.
+  - `"available"` — `PerWrite.source` is populated (the
+    re-evaluation trigger has fired and a future verbose-mode
+    surface has shipped); the section renders the call-site and
+    function name. `source_gap_issue` and
+    `source_re_evaluation_trigger` are `null` for this status.
   - `"not_captured"` — `PerWrite.source` is null for some
-    operation-specific reason (e.g., the operation was captured
-    before newtron-server verbose mode was enabled, or the
-    operator's deployment runs newtron without verbose mode).
-    The section renders a note explaining this.
+    operation-specific reason orthogonal to the upstream
+    deferral (e.g., the operation predates the eventual
+    verbose-mode capture, or the operator's deployment runs
+    newtron without the eventual verbose mode). The section
+    renders a note explaining this. `source_re_evaluation_trigger`
+    is `null` for this status.
 - **`delivery_options[*]`** — REQUIRED on every preview response.
   Each option names its `mode`, whether it is `available` in
   this newtcon-server deployment, the
