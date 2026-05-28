@@ -2,21 +2,21 @@
 // newtcon-server. CLAUDE.md §File Ownership Map: "one file per resource
 // family" — do not consolidate unrelated families.
 //
-// This file implements the Service Composer read endpoints:
+// This file implements the Service Composer read endpoint:
 //
 //	GET /api/services
-//	GET /api/services/{name}/instances    (v1 stub — newtron substrate not yet available)
-//	GET /api/services/{name}/candidates   (v1 stub — newtron substrate not yet available)
 //
-// Contract reference: API_CONTRACT.md §GET /api/services lines 1356–1379,
-// §GET /api/services/{name}/instances lines 1381–1405,
-// §GET /api/services/{name}/candidates lines 1413–1443.
+// Contract reference: API_CONTRACT.md §GET /api/services lines 1356–1379.
 //
 // The operator-facing mission this file serves: the first surface the Composer
 // shows is a service-picker. GET /api/services is the foundational read that
 // populates it. Without it, the operator cannot open the Composer and see what
 // services are available — they cannot do the service-first mental verb that
 // newtcon is built around (CLAUDE.md §Service-First, Not Device-First).
+//
+// Scope (newtcon#80 Slice 2/4): GET /api/services only. The /instances and
+// /candidates sub-endpoints are not in this slice and are not registered here.
+// They land in a future slice once newtron exposes the required substrate.
 package handlers
 
 import (
@@ -34,8 +34,8 @@ import (
 // from the newtron client. Defined as an interface so tests can inject a stub
 // without an httptest.Server.
 //
-// All three methods are called only from the handler; the interface is local to
-// this file per CLAUDE.md §File Ownership Map ("one file per resource family").
+// All methods are called only from the handler; the interface is local to this
+// file per CLAUDE.md §File Ownership Map ("one file per resource family").
 type servicesNewtronClient interface {
 	Network(ctx context.Context) string
 	ListServices(ctx context.Context, network string) ([]newtronc.NewtronService, error)
@@ -51,10 +51,11 @@ type ServicesDeps struct {
 	// request context. Every error envelope must carry this value per
 	// API_CONTRACT.md §Error Schema lines 152–155.
 	//
-	// Set to server.CorrelationIDFromContext in router.go. Defined as a
-	// function field (not a direct import of the server package) to break
-	// the server → handlers → server import cycle: handlers must not import
-	// server (server already imports handlers for route registration).
+	// Set to server.CorrelationIDFromContext in main.go at boot time. Defined
+	// as a function field (not a direct import of the server package) to avoid
+	// the server → handlers → server import cycle: server imports handlers for
+	// route registration; if handlers imported server for CorrelationIDFromContext
+	// the cycle would be complete. The function-value approach breaks it.
 	//
 	// If nil, the empty string is used — acceptable for tests that do not
 	// exercise the error-envelope correlation_id field.
@@ -63,31 +64,25 @@ type ServicesDeps struct {
 
 // RegisterServicesRoutes registers the Service Composer read routes on mux.
 //
-// Routes registered:
+// Routes registered (Slice 2/4 scope only):
 //
 //	GET /api/services
-//	GET /api/services/{name}/instances
-//	GET /api/services/{name}/candidates
 //
-// Called from internal/server/router.go after RegisterHealthRoutes per
-// CLAUDE.md §File Ownership Map pattern established by Slice 1.
+// Called from cmd/newtcon-server/main.go at boot time per CLAUDE.md §File
+// Ownership Map: main.go is responsible for server boot and route wiring.
 func RegisterServicesRoutes(mux *http.ServeMux, deps ServicesDeps) {
 	correlationID := deps.CorrelationID
 	if correlationID == nil {
 		// Fallback so tests that don't inject a correlator still compile and
-		// run; errors will carry an empty correlation_id in that case.
+		// run; errors carry an empty correlation_id in that case.
 		correlationID = func(ctx context.Context) string { return "" }
 	}
 	h := &servicesHandler{client: deps.Client, correlationID: correlationID}
 
 	mux.Handle("GET /api/services", http.HandlerFunc(h.handleListServices))
-	mux.Handle("GET /api/services/{name}/instances", http.HandlerFunc(h.handleListInstances))
-	mux.Handle("GET /api/services/{name}/candidates", http.HandlerFunc(h.handleListCandidates))
 }
 
-// servicesHandler holds the shared state for all service-family handlers.
-// Using a struct groups the three handlers without exposing them individually
-// to the router; each handler is attached via RegisterServicesRoutes above.
+// servicesHandler holds the shared state for the services handler family.
 type servicesHandler struct {
 	client        servicesNewtronClient
 	correlationID func(ctx context.Context) string
@@ -136,10 +131,10 @@ func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Requ
 		}
 		result = append(result, types.Service{
 			Name: svc.Name,
-			// Translate newtron's substrate "service_type" field to the
-			// outward "type" field per API_CONTRACT.md §GET /api/services.
-			// The json tag on NewtronServiceDetail.ServiceType is "service_type"
-			// to match newtron's wire format; our outward DTO uses "type".
+			// Translate newtron's substrate "service_type" field to the outward
+			// "type" field per API_CONTRACT.md §GET /api/services line 1365.
+			// NewtronServiceDetail.ServiceType has json tag "service_type" to match
+			// newtron's wire format; the outward Service DTO uses "type".
 			Type: detail.ServiceType,
 			// InstanceCount, Health, and LastModified are zero-valued in v1.
 			// Newtron substrate does not yet expose per-service aggregates.
@@ -161,75 +156,17 @@ func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleListInstances serves GET /api/services/{name}/instances.
-//
-// v1 stub: newtron does not yet expose a per-service instance listing endpoint.
-// This handler is registered to produce the correct 503 with kind
-// "newtron_unavailable" rather than a 404 (the route exists; the substrate does
-// not yet back it).
-//
-// TODO(post-ship): implement once newtron exposes instance aggregate data. See
-// API_CONTRACT.md §GET /api/services/{name}/instances lines 1381–1405.
-func (h *servicesHandler) handleListInstances(w http.ResponseWriter, r *http.Request) {
-	correlationID := h.correlationID(r.Context())
-	types.WriteError(w, http.StatusServiceUnavailable,
-		types.KindNewtronUnavailable,
-		"instances endpoint not yet backed by newtron substrate in v1",
-		map[string]any{
-			"correlation_id":            correlationID,
-			"newtron_url":               "",
-			"last_reachable_at":         nil,
-			"last_attempt_at":           nil,
-			"underlying_error":          "upstream_unhealthy",
-			"underlying_error_message":  "newtron substrate for per-service instance aggregates not yet available",
-			"affected_nodes":            nil,
-			"last_known":                map[string]any{"kind": "none", "captured_at": nil, "payload": nil},
-			"next_action_hint":          map[string]any{"verb": "check_newtron_health", "endpoint": "/api/health", "suggested_after": nil, "rationale": "instances endpoint requires a future newtron substrate addition"},
-			"rationale_ref":             map[string]any{"substrate": "CLAUDE.md#newtron-api-consumption-rule", "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"},
-		},
-	)
-}
-
-// handleListCandidates serves GET /api/services/{name}/candidates.
-//
-// v1 stub: newtron does not yet expose a candidates endpoint. This handler is
-// registered to produce the correct 503 with kind "newtron_unavailable" rather
-// than a 404 (the route exists; the substrate does not yet back it).
-//
-// TODO(post-ship): implement once newtron exposes candidate interface data. See
-// API_CONTRACT.md §GET /api/services/{name}/candidates lines 1413–1443.
-func (h *servicesHandler) handleListCandidates(w http.ResponseWriter, r *http.Request) {
-	correlationID := h.correlationID(r.Context())
-	types.WriteError(w, http.StatusServiceUnavailable,
-		types.KindNewtronUnavailable,
-		"candidates endpoint not yet backed by newtron substrate in v1",
-		map[string]any{
-			"correlation_id":            correlationID,
-			"newtron_url":               "",
-			"last_reachable_at":         nil,
-			"last_attempt_at":           nil,
-			"underlying_error":          "upstream_unhealthy",
-			"underlying_error_message":  "newtron substrate for candidate interface listing not yet available",
-			"affected_nodes":            nil,
-			"last_known":                map[string]any{"kind": "none", "captured_at": nil, "payload": nil},
-			"next_action_hint":          map[string]any{"verb": "check_newtron_health", "endpoint": "/api/health", "suggested_after": nil, "rationale": "candidates endpoint requires a future newtron substrate addition"},
-			"rationale_ref":             map[string]any{"substrate": "CLAUDE.md#newtron-api-consumption-rule", "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"},
-		},
-	)
-}
-
-// writeServicesUnavailable is a helper that writes a 503 newtron_unavailable
-// error per API_CONTRACT.md §details for kind: "newtron_unavailable"
-// (lines 547–655).
+// writeServicesUnavailable writes a 503 newtron_unavailable error per
+// API_CONTRACT.md §details for kind: "newtron_unavailable" (lines 547–655).
 //
 // It exists because the same 503 shape must be written on ListServices failure
-// and ShowService partial failure — two sites with identical structure. Without
-// this helper, they would be the second instance of the same pattern
-// (ai-instructions directive 7: "second instance of a pattern = stop and
-// question"), so the helper is justified.
+// and ShowService partial failure — two call sites with identical structure.
+// Without this helper they would be the second instance of the same pattern;
+// ai-instructions directive 7 ("second instance = stop and question") requires
+// extraction.
 func writeServicesUnavailable(w http.ResponseWriter, correlationID string, err error, operation string) {
-	// Classify the underlying error kind for the bounded "underlying_error" field
-	// per API_CONTRACT.md §newtron_unavailable lines 566–568.
+	// Classify the underlying error kind for the bounded "underlying_error"
+	// field per API_CONTRACT.md §newtron_unavailable lines 566–568.
 	underlyingKind := "http_5xx"
 	if unavail, ok := err.(*newtronc.UnavailableError); ok {
 		if unavail.StatusCode == 0 {
@@ -247,15 +184,15 @@ func writeServicesUnavailable(w http.ResponseWriter, correlationID string, err e
 			"last_attempt_at":          nil,
 			"underlying_error":         underlyingKind,
 			"underlying_error_message": err.Error(),
-			// affected_nodes is null for /api/services — it is not Node-scoped.
+			// affected_nodes is null: /api/services is not Node-scoped.
 			// API_CONTRACT.md §newtron_unavailable line 616: "null for endpoints
 			// that are not Node-scoped (e.g., /api/services listing)."
 			"affected_nodes": nil,
 			"last_known": map[string]any{
-				// kind: "none" for /api/services 503 — no prior cache.
+				// kind: "none" — /api/services 503 has no prior payload cache.
 				// API_CONTRACT.md §newtron_unavailable line 635: "All other
 				// endpoints → kind: 'none', payload is null."
-				"kind":        "service_list",
+				"kind":        "none",
 				"captured_at": nil,
 				"payload":     nil,
 			},
@@ -266,8 +203,8 @@ func writeServicesUnavailable(w http.ResponseWriter, correlationID string, err e
 				"rationale":       "check /api/health to see current newtron-server reachability status",
 			},
 			"rationale_ref": map[string]any{
-				"substrate":  "CLAUDE.md#newtron-api-consumption-rule",
-				"principle":  "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit",
+				"substrate": "CLAUDE.md#newtron-api-consumption-rule",
+				"principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit",
 			},
 		},
 	)

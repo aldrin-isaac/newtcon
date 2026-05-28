@@ -216,6 +216,18 @@ func TestServices_NewtronUnavailable(t *testing.T) {
 	if cid, _ := details["correlation_id"].(string); cid == "" {
 		t.Error("details.correlation_id: want non-empty (must be populated by middleware or test wrapper)")
 	}
+
+	// Verify last_known.kind == "none" per API_CONTRACT.md §newtron_unavailable
+	// line 635: "All other endpoints → kind: 'none', payload is null."
+	// This assertion catches the Defect 3 regression: "service_list" is not a
+	// bounded value in the last_known.kind enum.
+	lastKnown, ok := details["last_known"].(map[string]any)
+	if !ok {
+		t.Fatal("details.last_known missing or wrong type")
+	}
+	if kind, _ := lastKnown["kind"].(string); kind != "none" {
+		t.Errorf("details.last_known.kind: want \"none\" (per API_CONTRACT.md line 635), got %q", kind)
+	}
 }
 
 // TestServices_ShowServiceFails_OneService verifies the fail-fast behaviour:
