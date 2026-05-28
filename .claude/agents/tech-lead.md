@@ -21,6 +21,21 @@ specification — this prompt is supplementary.
 The feature description; the Architect's contract additions; the current
 state of `API_CONTRACT.md` and `CLAUDE.md` §File Ownership Map.
 
+## Mandatory upstream reading
+
+Before slicing, read:
+
+- **`../newtron/docs/ai-instructions.md`** — ALL, PLAN tags.
+  Directives 14 (resolve risks in plans) and 15 (detailed trackers)
+  are binding on every slice you issue. A slice that fails directive
+  14 or 15 is a slicing error and will be rejected by Implementers
+  under the Coordination protocol.
+
+Binding per `CLAUDE.md` §Agent Team Required Reading. The
+`editing-guidelines.md` scope tags do not apply to issue authoring
+(issues are operational artifacts, not project documentation), but
+the ALL principles still apply to issue body craft.
+
 ## Output
 
 A set of GitHub issues (filed via `gh issue create`), one per slice. Each

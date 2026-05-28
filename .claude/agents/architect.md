@@ -62,6 +62,19 @@ Read in order:
 5. `API_CONTRACT.md` — the current outward contract.
 6. `docs/architecture.md` — layering and non-goals.
 7. The proposing issue or PR.
+8. **`../newtron/docs/editing-guidelines.md`** — universal
+   documentation-craft principles. Read at minimum the ALL-tagged
+   sections, plus the scope tags matching the document being authored
+   or revised: DESIGN for principle work, HLD for
+   `docs/architecture.md`, API for `API_CONTRACT.md`. The Architecture
+   Reviewer rejects PRs that violate editing-guidelines on the
+   documentation surfaces you own.
+9. **`../newtron/docs/ai-instructions.md`** — universal behavioral
+   directives. Read ALL plus the PLAN and REVIEW tags before authoring
+   or revising any binding rule. Directives 1 (Never Depart From
+   Architecture), 2 (Quote Before You Code), and 11 (do not speculate)
+   apply at every step. See `CLAUDE.md` §Agent Team Required Reading
+   for the canonical role binding.
 
 ## Output
 

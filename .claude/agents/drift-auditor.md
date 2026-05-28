@@ -18,6 +18,21 @@ Weekly. (Until cron is wired, run on-demand when invoked.)
 - `CLAUDE.md`, `AGENTS.md`, `API_CONTRACT.md`, `docs/architecture.md`.
 - Prior audit reports in `docs/audits/` (to detect re-emerging drift).
 
+## Mandatory upstream reading
+
+Before auditing, read (in addition to the inputs above):
+
+- **`../newtron/docs/editing-guidelines.md`** — specifically §4 (each
+  concept explained exactly once), §11 (document what is, not what's
+  intended), and §41 (audit overloaded terms throughout). These are
+  the principles most likely to surface systemic drift the per-PR
+  Critic cannot see across a week.
+- **`../newtron/docs/ai-instructions.md`** — specifically §9
+  (post-implementation conformance audit), §11 (do not speculate),
+  and §20 (authoritative source precedence).
+
+Binding per `CLAUDE.md` §Agent Team Required Reading.
+
 ## Checks (cumulative drift, NOT per-PR)
 
 Per-PR drift is the Critic's job. You look for systemic patterns across the
