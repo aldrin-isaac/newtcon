@@ -1563,22 +1563,31 @@ Field rules:
   Default anchors point to `DESIGN_PRINCIPLES_NEWTRON.md` §11 and
   `docs/operator-philosophy.md` invariant #1.
 
-**Newtron substrate dependency.** The structured ChangeSet
-(`writes[]`, `deletes[]`, `intent_records[]` with typed fields) is
-tracked as a newtron-side gap at
+**Newtron substrate sourcing.** newtron ships the canonical
+`ConfigChange[]` substrate directly on every `WriteResult` —
+dry-run AND apply — per
 [newtron#11](https://github.com/aldrin-isaac/newtron/issues/11)
-("structured ChangeSet (ConfigChange[]) in WriteResult"). newtron's
-current `WriteResult` exposes the ChangeSet only as the
-human-readable `preview` string plus a `change_count`; the
-structured `ConfigChange[]` that newtron carries internally on
-`ChangeSet.Changes` is not yet on the wire. Until newtron#11 lands,
-newtcon-server reconstructs the typed shape from the dry-run string
-in `internal/newtronc/` — a workaround tracked by the
-`Confidence.reasons[*].code: "changeset_reconstructed_from_string"`
-emission below. The operator-facing contract shape is stable now so
-frontend rendering can proceed against it; the substrate-fidelity
-degradation surfaces explicitly in `confidence`, not in silently
-imperfect data.
+("structured ChangeSet (ConfigChange[]) in WriteResult"), landed
+2026-05-27 in newtron's Phase 1 batch (commits `7f5ed99` /
+`fba4a61` / `a718f8a`) and documented in newtron's
+[`docs/newtron/api.md` §S11 WriteResult](https://github.com/aldrin-isaac/newtron/blob/main/docs/newtron/api.md).
+The wire shape is
+`{table, key, type ∈ {"add","modify","delete"}, fields?}`
+(`fields` omitted on whole-row delete; present on `add`/`modify`
+and on field-level delete). newtcon-server consumes the typed
+array directly in `internal/newtronc/` — no string parsing,
+no reconstruction. The operator-facing groupings
+(`writes[]` for `type ∈ {"add","modify"}`, `deletes[]` for
+`type == "delete"`, `intent_records[]` for the
+`table == "NEWTRON_INTENT"` rows newtron prepends) are
+newtcon-side affordances per
+`DESIGN_PRINCIPLES_NEWTRON.md` §46 ("HTTP API Boundary — Wire
+Shape Mirrors Substrate"): newtron exposes the bare canonical
+substrate; newtcon-server transforms it into the operator's
+mental buckets without losing fidelity. The substrate-fidelity
+degradation the contract previously surfaced
+(`Confidence.reasons[*].code: "changeset_reconstructed_from_string"`)
+is therefore obsolete and removed from the §Confidence enum below.
 
 The Workbench `revert/preview` `shared_resource_handling[]` block
 remains alongside `ChangeSet` on remove-class previews — it carries
@@ -1743,11 +1752,10 @@ Shape:
   "level": "high | conditional | low",
   "reasons": [
     {
-      "code": "changeset_reconstructed_from_string",
-      "message": "ChangeSet writes/deletes/intent_records reconstructed from newtron's dry-run preview string; substrate fidelity is high but not byte-identical to newtron's internal ChangeSet.Changes (tracked at newtron#11).",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/11",
+      "code": "shared_resource_count_estimated",
+      "message": "Reference counts in reference_impact derive from the projection at request time, not a live re-read; concurrent operations may have shifted counts.",
       "rationale_ref": {
-        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary-wire-shape-mirrors-substrate",
+        "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract",
         "principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit"
       }
     }
@@ -1774,7 +1782,6 @@ Field rules:
 
     | `code` | When emitted | Typical level |
     |--------|--------------|---------------|
-    | `changeset_reconstructed_from_string` | newtron has not yet shipped newtron#11; ChangeSet typed shape is reconstructed from `WriteResult.preview` | `conditional` |
     | `shared_resource_count_estimated` | Reference counts in `reference_impact` derive from the projection at request time, not a live re-read; concurrent operations may have shifted counts | `conditional` |
     | `verify_pending` | `apply.verify.state` is `in_progress` or `pending` at response-render time; the assertion is not yet a known fact | `conditional` |
     | `verify_skipped_by_request` | Caller opted out of verify (`no_save` semantics) — apply landed but newtron did not re-read | `low` |
@@ -1787,9 +1794,19 @@ Field rules:
     learn vocabulary from these messages; generic ("results may
     vary") is a contract violation.
   - `gap_issue` — OPTIONAL. Present when the reason corresponds to a
-    filed newtron gap (e.g.,
-    `changeset_reconstructed_from_string` → newtron#11). Forbidden
-    otherwise.
+    filed newtron gap (a `code` whose degradation can only be cleared
+    by upstream newtron work, with a tracking issue URL in
+    `github.com/aldrin-isaac/newtron/issues/<n>`). Forbidden when no
+    such gap is filed — intrinsic-limitation codes (e.g.,
+    `shared_resource_count_estimated`, `verify_pending`) MUST NOT
+    carry `gap_issue`. No currently-defined `code` carries a
+    `gap_issue` (the contract previously surfaced
+    `changeset_reconstructed_from_string` → newtron#11, both removed
+    by this PR after newtron#11 landed). Future degradation codes
+    introduced under the Gap-Handling Protocol that depend on a
+    pending newtron change populate this field; the field shape is
+    reserved here so consumers do not need a contract update when
+    that occurs.
   - `rationale_ref` — REQUIRED. Typed `{substrate, principle}` shape
     as elsewhere. Anchors the operator to the substrate cause and
     the operator-philosophy principle being honored.
