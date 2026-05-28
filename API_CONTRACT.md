@@ -6460,30 +6460,55 @@ otherwise cannot see directly.
   "manual_equivalent": {
     "newtron_cli": "newtron switch1 intent reconcile  # without -x — emits the projection-as-preview",
     "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/5",
-      "expected_shape": {
-        "method": "GET",
-        "path": "/network/default/node/switch1/projection",
-        "query": { "table": "<repeatable>", "mode": "actuated|topology" }
-      }
+      "status": "available",
+      "method": "GET",
+      "path": "/network/default/node/switch1/intent/projection",
+      "query": { "table": "<repeatable>", "mode": "actuated|topology" },
+      "note": "Landed at the `/intent/` group, not at `/node/{d}/projection`. Returns bare `sonic.RawConfigDB` (`map[table]map[key]map[field]string`). The newtcon-facing decorations on this endpoint — `owning_intent`, `drift.summary`, `owned_tables_total`, `as_of`/`rebuilt_at` — are composed by newtcon-server from existing newtron reads (`/intent/tree`, `/intent/drift`, `OwnedTables` enumeration); they are NOT part of the substrate wire shape. The default `mode=intent` corresponds to newtcon's `mode=actuated`."
     }
   }
 }
 ```
 
+**Substrate-vs-decoration boundary (binding).** The newtron substrate
+delivered by `GET /network/{n}/node/{d}/intent/projection` is bare
+`sonic.RawConfigDB` — a `map[table]map[key]map[field]string` and
+nothing more. This is the §46-faithful shape the newtron lead landed
+(Phase 1 batch, 2026-05-27; closing comment cites §46 substrate
+discipline). Every other field in the newtcon response above is a
+newtcon-server-side decoration computed from other newtron reads:
+
+| newtcon response field | Source |
+|------------------------|--------|
+| `tables[*].entries[*].key`, `tables[*].entries[*].fields` | Bare substrate — `RawConfigDB[table][key][field]`, lifted verbatim from newtron's `/intent/projection` response. |
+| `tables[*].entries[*].owning_intent` | Composed by newtcon-server from `GET /network/{n}/node/{d}/intent/tree` (intent DAG attribution). Not in the projection substrate. |
+| `drift.summary`, `drift.drift_card_url` | Composed by newtcon-server from `GET /network/{n}/node/{d}/intent/drift`. Companion read, not part of the projection substrate. |
+| `owned_tables_total` | Composed by newtcon-server from newtron's owned-tables enumeration. Not part of the projection substrate. |
+| `as_of`, `rebuilt_at`, `intent_count` | newtcon-server timestamps and counters. The newtron substrate endpoint does NOT carry a `rebuilt_at` envelope (§46 — bare substrate, no envelope); newtcon-server records the read-completion time and the intent-count from its companion `/intent/tree` read. |
+| `manual_equivalent`, `rationale_ref` | newtcon-side metadata per §Manual-Mode Parity. |
+
+This separation is binding per `DESIGN_PRINCIPLES_NEWTRON.md` §46
+("Wire Shape Mirrors Substrate"): the substrate is the bare map; any
+wrapping envelope or attribution metadata is newtcon's presentation,
+not newtron's wire shape. An Implementer slicing this endpoint MUST
+NOT request a richer wire shape from newtron — the substrate read is
+deliberately bare, and the decorations live in newtcon-server.
+
 Field rules:
 
 - **`as_of` and `rebuilt_at`** are deliberately separate fields.
   `as_of` is when newtcon-server completed the underlying read;
-  `rebuilt_at` is when newtron last replayed intents to rebuild the
-  projection. On `GET .../projection` the two coincide in the
-  no-cache path, but the two-timestamp shape leaves room for an
-  explicit cache to be introduced later (Architect-authored) per
-  `docs/architecture.md` §Caching. Operator-philosophy invariant #9
-  ("confidence and limits are explicit") is honored by surfacing
-  the freshness of the substrate independently of the response
-  envelope.
+  `rebuilt_at` is newtcon-server's record of when newtron's
+  in-memory projection was last rebuilt (derived from the companion
+  intent-tree read's freshness signal). On the no-cache path the
+  two effectively coincide, but the two-timestamp shape leaves room
+  for an explicit cache to be introduced later (Architect-authored)
+  per `docs/architecture.md` §Caching. Operator-philosophy
+  invariant #9 ("confidence and limits are explicit") is honored by
+  surfacing the freshness of the substrate independently of the
+  response envelope. **Note:** the newtron substrate endpoint does
+  not return a `rebuilt_at` field; newtcon-server computes it from
+  the companion intent-tree read.
 - **`tables[*].entries[*].owning_intent`** attributes each
   projection entry back to the intent record whose replay produced
   it. Per `unified-pipeline-architecture.md` §4-5, each render step
@@ -6492,30 +6517,38 @@ Field rules:
   step. Attribution is the bridge that lets the operator click from
   a CONFIG_DB-shaped projection entry to the intent that caused it
   — the why-mode invariant materialized at the projection level.
+  **Composed by newtcon-server** from the intent-tree companion
+  read; NOT part of newtron's bare substrate response per §46.
 - **`drift.summary`** is a lightweight inline counts-only view of
-  `GET /network/{n}/node/{d}/drift` for the same Node, surfaced so
-  the operator immediately knows whether the projection matches
-  reality. The full drift entries are reached via the drift card
-  (`drift_card_url` when non-null; null when `drift.summary.entry_count
-  == 0`). The projection endpoint is the **what newtron believes**;
-  the drift card is the **how reality differs**; both are reachable
-  from each other.
+  `GET /network/{n}/node/{d}/intent/drift` for the same Node,
+  surfaced so the operator immediately knows whether the projection
+  matches reality. The full drift entries are reached via the drift
+  card (`drift_card_url` when non-null; null when
+  `drift.summary.entry_count == 0`). The projection endpoint is the
+  **what newtron believes**; the drift card is the **how reality
+  differs**; both are reachable from each other. **Composed by
+  newtcon-server** from the drift companion read; NOT part of
+  newtron's bare projection substrate response per §46.
 - **`owned_tables_total`** carries the cardinality of
   `OwnedTables()` for the Node so the operator can see when a
-  `table` filter is restricting the response.
+  `table` filter is restricting the response. **Composed by
+  newtcon-server** from newtron's owned-tables enumeration; NOT
+  part of newtron's bare projection substrate response per §46.
 
-**Why `pending_newtron_gap`:** newtron's projection is currently
-exposed only as an in-memory side-effect of `Reconcile()` (which
-also delivers) and as an opaque composite handle from
-`generate-composite` (whose contents are not readable via `GET`).
-There is no HTTP endpoint that returns the typed per-table
-expected-state derived from intent replay as a pure read. The gap
-was filed by the newtcon Architect at the time this contract was
-written, per `CLAUDE.md` §Gap-Handling Protocol; see
-[newtron#5](https://github.com/aldrin-isaac/newtron/issues/5) for
-the proposed HTTP shape (which matches the `expected_shape` block
-above). The implementer slice for this endpoint is blocked until
-newtron#5 lands.
+**Substrate availability (newtron#5 closed).** Phase 1 of the newtron
+lead's 2026-05-27 substrate-faithful batch landed this endpoint at
+`GET /network/{n}/node/{d}/intent/projection` (under the `/intent/`
+group), returning bare `sonic.RawConfigDB` per §46. The closing
+comment on [newtron#5](https://github.com/aldrin-isaac/newtron/issues/5)
+verbatim: "Closed by Phase 1 batch on main (commits 7f5ed99 /
+fba4a61 / a718f8a). See `docs/scoping/` for the substrate-faithful
+scope and `docs/newtron/api.md` for the new endpoint + field
+documentation." The lead's Phase 1 scoping comment frames the
+discipline: "§46 codifies the unifying principle that newtron's HTTP
+API exposes its canonical in-memory substrate types directly, not
+summaries, opaque handles, or free-text renderings." Implementer
+slices for this endpoint may proceed; no `pending_newtron_gap`
+remains.
 
 **Errors:**
 - Unknown `node` → 404 with `kind: "precondition_failure"` and
@@ -6631,17 +6664,62 @@ rendered effect, grouped by Node.
   "manual_equivalent": {
     "newtron_cli": "for each node N binding 'transit': newtron N intent tree --kind service --resource transit --ancestors",
     "newtron_http": {
-      "status": "pending_newtron_gap",
-      "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/6",
-      "expected_shape": {
-        "method": "GET",
-        "path": "/network/default/service/transit/projection",
-        "query": { "node": "<repeatable>", "table": "<repeatable>" }
-      }
+      "status": "available",
+      "method": "GET",
+      "path": "/network/default/service/transit/projection",
+      "query": { "node": "<repeatable>", "table": "<repeatable>" },
+      "note": "Returns `ServiceProjectionResult { service: string, nodes: ServiceProjectionNode[] }` where each `ServiceProjectionNode` carries `{ node: string, diff: sonic.DriftEntry[] }`. The substrate technique is replay-diff: snapshot intent DB → trim the service's intents → rebuild projection → diff. The newtcon-facing per-table grouping (`per_node[*].tables[*].entries[*]`) is computed by newtcon-server from the entry-level `diff[]`; the `owning_intent` URLs, `shared_resource_summary[]`, and `aggregate{}` counters are composed by newtcon-server from existing newtron reads (`/intent/tree`, `/intent/projection`). The `node` and `table` query parameters are applied client-side by newtcon-server against the full `ServiceProjectionResult`."
     }
   }
 }
 ```
+
+**Substrate-vs-decoration boundary (binding).** The newtron substrate
+delivered by `GET /network/{n}/service/{name}/projection` is the
+`ServiceProjectionResult` envelope shipped by newtron's Phase 3 work
+(2026-05-27): a `service` string and a `nodes: []ServiceProjectionNode`
+array where each entry is `{ node: string, diff: sonic.DriftEntry[] }`.
+The `diff` array is the §46-canonical entry-level delta vocabulary
+(`DriftEntry`) — newtron's single typed-diff representation
+(`DESIGN_PRINCIPLES_NEWTRON.md` §46 rule 3, "One typed diff
+vocabulary"). The lead's closing comment on
+[newtron#6](https://github.com/aldrin-isaac/newtron/issues/6)
+verbatim: "Per-service projection slice endpoint landed at
+`GET /network/{n}/service/{name}/projection` via replay-diff over
+each Node's intent DB. Verified end-to-end by
+`newtrun/suites/1node-vs-basic/07-service-projection-actuated`
+against deployed `1node-vs` (PASS, 38s) — TRANSIT service on
+Ethernet0 yields INTERFACE + BGP_NEIGHBOR entries in the per-Node
+diff. Operationalizes operator-philosophy invariant #5 (why-mode at
+service scope) per §11 + §46."
+
+The substrate carries one shape only — the per-Node `diff[]`. Every
+other field in the newtcon response above is a newtcon-server-side
+decoration:
+
+| newtcon response field | Source |
+|------------------------|--------|
+| `per_node[*].node` | Bare substrate — `ServiceProjectionResult.nodes[*].node`. |
+| `per_node[*].tables[*].table`, `per_node[*].tables[*].entries[*].key`, `per_node[*].tables[*].entries[*].fields` | **Transformed** by newtcon-server: the per-Node `diff: []DriftEntry` (entry-level, one row per changed key) is re-grouped into the per-table operator-facing shape (`tables[*].entries[*]`). The keys and fields are taken verbatim from `DriftEntry.Expected` (the projection-side state attributable to this service); the table grouping is newtcon's view, not newtron's wire shape. |
+| `per_node[*].tables[*].entries[*].owning_intent` | Composed by newtcon-server from `GET /network/{n}/node/{d}/intent/tree?kind=service&resource={svc}` (intent DAG attribution). NOT in the projection substrate. |
+| `per_node[*].tables[*].entries[*].shared_with_services` | Composed by newtcon-server from cross-service intent-tree reads. NOT in the projection substrate. |
+| `per_node[*].interfaces` | Composed by newtcon-server from the service-binding intent records. NOT in the projection substrate. |
+| `per_node[*].intent_count_for_service` | Composed by newtcon-server from the intent-tree companion read. NOT in the projection substrate. |
+| `per_node[*].rebuilt_at` | newtcon-server timestamp. The substrate response does NOT carry a `rebuilt_at` field per §46. |
+| `per_node[*].signal_unavailable`, `signal_unavailable_reason` | newtcon-server signal-availability classifier (per-Node read may fail; per `CLAUDE.md` §No Hidden State the Node appears with the unavailability flag). NOT in the substrate. |
+| `shared_resource_summary[]`, `shared_resource_summary_rationale_ref` | Composed by newtcon-server from cross-service projection reads (per `CLAUDE.md` §Reference-Aware Removals; §24 in newtron principles). NOT in the substrate. |
+| `aggregate{}` | newtcon-server-computed counters. NOT in the substrate. |
+| `binding_count`, `as_of`, `manual_equivalent` | newtcon-server metadata. |
+
+This separation is binding per `DESIGN_PRINCIPLES_NEWTRON.md` §46:
+the substrate is the typed `ServiceProjectionResult` with its
+`DriftEntry[]` per Node, and only that. The reference-aware view
+(`shared_resource_summary[]`), the cross-Node aggregation, and the
+table-grouping presentation are newtcon-server compositions over
+that substrate plus existing companion reads. An Implementer
+slicing this endpoint MUST NOT request a richer wire shape from
+newtron — the substrate read is deliberately bare, and the
+decorations live in newtcon-server.
 
 Field rules:
 
@@ -6651,7 +6729,7 @@ Field rules:
   `CLAUDE.md` §No Hidden State). It appears with
   `signal_unavailable: true`, an empty `tables`, and a
   substrate-grounded reason. Aggregate counts split signal-present
-  vs signal-unavailable.
+  vs signal-unavailable. **Composed by newtcon-server.**
 - **`shared_resource_summary[]`** is the reference-aware view of
   the service's shared policy objects. Per
   `CLAUDE.md` §Reference-Aware Removals and
@@ -6662,7 +6740,9 @@ Field rules:
   substrate can see — before any remove operation — which shared
   resources are exclusive to this service and which are shared with
   other services. This is the reference-aware lens applied to the
-  service-first navigation.
+  service-first navigation. **Composed by newtcon-server** from
+  cross-service projection reads; NOT in newtron's bare substrate
+  response per §46.
 - **`shared_resource_summary[*].decision_on_service_remove`** is
   the decision newtron would make IF every binding of this service
   were removed. It is a hypothetical projection, not an action.
@@ -6671,21 +6751,20 @@ Field rules:
 - **`per_node[*].rebuilt_at`** is per-Node because the read is
   per-Node; `null` when `signal_unavailable: true`. The top-level
   `as_of` is the timestamp at which newtcon-server completed the
-  cross-Node fan-out.
+  cross-Node fan-out. **Composed by newtcon-server**; the newtron
+  substrate response does NOT carry per-Node `rebuilt_at` fields
+  per §46.
 
-**Why `pending_newtron_gap`:** there is no newtron HTTP endpoint
-that returns a service-scoped projection slice across Nodes.
-`/intent/tree?kind=service&resource={svc}` returns the intent-side
-DAG for one device; the projection-side rendering of that DAG —
-per-table, per-key, per-field — does not exist as an HTTP read on
-either the per-Node or per-service axis. The gap was filed by the
-newtcon Architect at the time this contract was written, per
-`CLAUDE.md` §Gap-Handling Protocol; see
-[newtron#6](https://github.com/aldrin-isaac/newtron/issues/6) for
-the proposed HTTP shape. The implementer slice for this endpoint is
-blocked until newtron#6 lands. (newtron#5 is a prerequisite of
-newtron#6 — the per-Node projection read is the building block of
-the per-service slice; newtron may choose to land #5 first.)
+**Substrate availability (newtron#6 closed).** Phase 3 of the
+newtron lead's 2026-05-27 substrate-faithful batch landed this
+endpoint at `GET /network/{n}/service/{name}/projection`, returning
+the typed `ServiceProjectionResult` envelope with its `DriftEntry[]`
+per Node. The substrate technique (replay-diff per Node — snapshot
+intent DB, trim the service's intents, rebuild projection, diff)
+operationalizes operator-philosophy invariant #5 (why-mode at
+service scope) per §11 and §46 in newtron's principles. Implementer
+slices for this endpoint may proceed; no `pending_newtron_gap`
+remains.
 
 **Errors:**
 - Unknown `service` → 404 with `kind: "precondition_failure"` and
@@ -8429,9 +8508,8 @@ A timestamp of "now" reads the most-recent observation.
         "captured_at": "2026-05-26T13:58:00Z"
       },
       {
-        "newtron_endpoint": "GET /network/default/node/switch1/projection",
-        "newtron_endpoint_status": "pending_newtron_gap",
-        "gap_issue": "https://github.com/aldrin-isaac/newtron/issues/5",
+        "newtron_endpoint": "GET /network/default/node/switch1/intent/projection",
+        "newtron_endpoint_status": "available",
         "captured_at": "2026-05-26T13:58:00Z"
       }
     ]
@@ -8471,9 +8549,17 @@ Field rules:
 - **`observation.intents[*]`** carries the raw NEWTRON_INTENT
   record fields per newtron#18.
 - **`observation.projection`** is the projection captured at
-  observation time per newtron#5. The shape is the same as the
-  current `GET /api/projection/nodes/{node}` response under the
-  `tables` key.
+  observation time. The polling layer reads newtron's substrate
+  endpoint at `GET /network/{n}/node/{d}/intent/projection`
+  (landed under newtron#5 Phase 1, 2026-05-27; returns bare
+  `sonic.RawConfigDB` per §46) and stores the captured
+  `RawConfigDB` map verbatim. The per-table grouping
+  (`tables[*].entries[*]`) and the `owning_intent_resource_key`
+  attribution are computed by newtcon-server at storage time from
+  the substrate plus the companion intent-tree capture; this
+  matches the same substrate-vs-decoration separation documented
+  on `GET /api/projection/nodes/{node}` (the live
+  projection-by-Node read).
 - **`observation.drift_at_observation`** is the diff between
   `configdb` and `projection` at observation time, captured by
   the polling layer so the operator sees what newtron's drift
@@ -8814,7 +8900,7 @@ Idempotent; safe to poll. No state mutated.
     "newtron_cli": null,
     "newtron_http": {
       "status": "not_applicable",
-      "rationale": "Per-change detail is computed by newtcon from its captured observations and the newtcon-server operations log; newtron has no equivalent endpoint because the change-history substrate (observation-over-time) is not newtron's substrate. The operator who reproduces this view manually polls the underlying newtron reads (newtron#17, newtron#18, newtron#5) and computes the diff themselves; or, when newtron is unavailable, runs the `undo_command_sequence` above against the device directly."
+      "rationale": "Per-change detail is computed by newtcon from its captured observations and the newtcon-server operations log; newtron has no equivalent endpoint because the change-history substrate (observation-over-time) is not newtron's substrate. The operator who reproduces this view manually polls the underlying newtron reads (the CONFIG_DB read tracked at newtron#17, the intents read tracked at newtron#18, and the projection read landed under newtron#5 at `GET /network/{n}/node/{d}/intent/projection`) and computes the diff themselves; or, when newtron is unavailable, runs the `undo_command_sequence` above against the device directly."
     }
   }
 }
