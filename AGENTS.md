@@ -130,6 +130,25 @@ explicitly designed, reasoned about, and documented.
 4. `CLAUDE.md`, `API_CONTRACT.md`, `docs/architecture.md` — current
    newtcon state.
 5. The proposing issue or PR.
+6. `../newtron/docs/editing-guidelines.md` — universal
+   documentation-craft principles. See `CLAUDE.md` §Agent Team
+   Required Reading for the binding scope statement; the Architect's
+   role-specific tags are **ALL** plus the tag matching the document
+   under edit: **DESIGN** for principle work (any edit to
+   `CLAUDE.md` §Design Principles or §Operator Philosophy or to
+   `docs/operator-philosophy.md`), **HLD** for `docs/architecture.md`
+   and ADRs that fix architecture-level shape, **API** for
+   `API_CONTRACT.md`. Read these before drafting the PR; do not
+   paraphrase the guidelines in the PR description — apply them.
+7. `../newtron/docs/ai-instructions.md` — universal behavioral
+   directives. See `CLAUDE.md` §Agent Team Required Reading for the
+   binding scope statement; the Architect's role-specific tags are
+   **ALL**, **PLAN** (every Contract PR is a planning act —
+   directive 14 "resolve risks in plans" and directive 22
+   "source-trace before creating documents" apply to alternatives
+   analysis), and **REVIEW** (the Architect self-reviews via
+   directive 9 "post-implementation conformance audit" before
+   handing the PR to the Architecture Reviewer).
 
 **Inputs:** the above; the current state of newtcon.
 
@@ -183,6 +202,31 @@ newtron's principles even when it looks internally consistent.
 5. The PR diff and the three mandatory description sections:
    "Considered alternatives", "Operator-philosophy invariants
    honored", "Newtron principles honored".
+6. `../newtron/docs/editing-guidelines.md` — apply when reviewing the
+   PR. See `CLAUDE.md` §Agent Team Required Reading for the binding
+   scope statement; the Architecture Reviewer's role-specific tags
+   are **ALL** plus the tag matching the document under review —
+   **DESIGN** for principle changes, **HLD** for
+   `docs/architecture.md` / ADR edits, **API** for `API_CONTRACT.md`.
+   Per `CLAUDE.md` §Agent Team Required Reading, "reviews that do
+   not surface editing-guidelines violations on documentation PRs
+   are themselves incomplete." Explicit per-PR attention to §4
+   (each concept explained exactly once), §11 (document what is, not
+   what's intended), §26 (rewrites compared against the document
+   they replace), §41 (audit overloaded terms throughout), and §43
+   (derivative documents reference, never restate) is mandatory on
+   any PR that edits an Architect-owned document.
+7. `../newtron/docs/ai-instructions.md` — apply when reviewing the
+   PR. See `CLAUDE.md` §Agent Team Required Reading for the binding
+   scope statement; the Architecture Reviewer's role-specific tags
+   are **ALL** and **REVIEW** (this is a review role at root —
+   directive 9 "post-implementation conformance audit", directive
+   11 "do not speculate", and directive 20 "authoritative source
+   precedence" are the directives the Architecture Reviewer is most
+   often the last line of defense against). Per `CLAUDE.md` §Agent
+   Team Required Reading, "reviews that do not surface
+   ai-instructions violations on design PRs are themselves
+   incomplete."
 
 **Adversarial checks (see `.claude/agents/architecture-reviewer.md` for
 the full list):**
@@ -220,6 +264,29 @@ principle sections.
 **Invoked when:** an operator surface or feature is ready to start
 (Architect has finalized contract additions).
 
+**Required reading before slicing a feature:**
+1. The Architect's contract additions (the `API_CONTRACT.md` PR or the
+   relevant section after merge).
+2. `CLAUDE.md` §Project Scope and §File Ownership Map — the scope
+   boundary and the file each slice's work will land in.
+3. `../newtron/docs/ai-instructions.md` — see `CLAUDE.md` §Agent Team
+   Required Reading for the binding scope statement; the Tech Lead's
+   role-specific tags are **ALL** and **PLAN**. Slicing is planning;
+   directive 14 ("resolve risks in plans, don't defer them") and
+   directive 15 ("create detailed trackers before implementing") are
+   the binding constraints — a slice that defers risk into "the
+   Implementer will figure it out" is malformed and rejected by the
+   Critic as a slicing error per `AGENTS.md` §Failure Modes and
+   Recovery.
+4. `../newtron/docs/editing-guidelines.md` — apply only when a slice's
+   acceptance criteria require documentation work that an Implementer
+   will perform. The Tech Lead does not edit Architect-owned docs,
+   but in-issue acceptance criteria that point an Implementer at
+   handler-level godoc, README sections, or test-description prose
+   must reference the relevant scope tags (typically **ALL**,
+   **HOWTO** for operator-facing surfaces, **README** for any
+   `web/`-adjacent setup material).
+
 **Inputs:** the Architect's contract additions; the feature description.
 
 **Outputs:** a set of GitHub issues, one per slice, each containing:
@@ -238,6 +305,39 @@ codebase.
 ### Implementer (Sonnet)
 
 **Invoked when:** a sliced issue is in the ready queue.
+
+**Required reading before implementation:**
+1. The issue (slice scope + acceptance criteria + the
+   `API_CONTRACT.md` section the slice exercises).
+2. `CLAUDE.md` — the binding ruleset; pay special attention to
+   §Project Scope, §File Ownership Map, §newtron API Consumption
+   Rule, §Gap-Handling Protocol, and §Design Principles.
+3. `API_CONTRACT.md` — the section corresponding to the slice's
+   endpoints; the slice MUST match the contract verbatim (response
+   shape, error envelope, idempotency).
+4. `../newtron/docs/ai-instructions.md` — see `CLAUDE.md` §Agent Team
+   Required Reading for the binding scope statement; the
+   Implementer's role-specific tags are **ALL**, **IMPL**, and
+   **TEST**. Directive 1 ("never depart from architecture"),
+   directive 2 ("quote before you code"), directive 3 ("every new
+   function must answer: why doesn't this already exist?"),
+   directive 4 ("mandatory hack check"), and directive 6 ("test
+   failures are architecture conformance failures") are the
+   directives the Critic most often cites when rejecting
+   Implementation PRs. Read before writing the first line of code or
+   the first test.
+5. `../newtron/docs/editing-guidelines.md` — apply when the slice
+   includes any documentation work. See `CLAUDE.md` §Agent Team
+   Required Reading for the binding scope statement; the
+   Implementer's role-specific tags are **ALL** plus the tag
+   matching the documentation under edit: **HOWTO** for operator
+   guides (when those land in scope), **README** for
+   `web/`-adjacent setup material, **API** for any in-code godoc
+   that documents handler request/response shapes. Implementers are
+   forbidden from editing Architect-owned docs (`CLAUDE.md`,
+   `API_CONTRACT.md`, `docs/architecture.md`, ADRs), but in-code
+   comments, handler-level godoc, and test descriptions are
+   documentation and the ALL principles apply.
 
 **Inputs:** the issue (slice scope + acceptance criteria), `CLAUDE.md`,
 `API_CONTRACT.md`, the existing codebase.
@@ -273,7 +373,17 @@ Architecture Reviewer's design checks; focus on the seven binding
 consistency checks below.
 
 **Inputs:** the PR diff, `CLAUDE.md`, `AGENTS.md`, `API_CONTRACT.md`,
-`docs/architecture.md`, relevant newtron principles.
+`docs/architecture.md`, relevant newtron principles,
+`../newtron/docs/editing-guidelines.md` (apply per `CLAUDE.md` §Agent
+Team Required Reading — role-specific tags are **ALL** plus the tag
+matching any documentation the PR touches: **API** for
+`API_CONTRACT.md` edits, **HLD** for `docs/architecture.md` edits,
+**HOWTO** / **README** for in-code documentation; the Critic's seven
+binding checks below remain authoritative, and the editing-guidelines
+layer on top), and `../newtron/docs/ai-instructions.md` (apply per
+`CLAUDE.md` §Agent Team Required Reading — role-specific tags are
+**ALL** and **REVIEW**; directive 9 "post-implementation conformance
+audit" is the directive the Critic operationalizes for every PR).
 
 **Checks (binding):**
 1. **newtron consumption rule:** no Go imports of any newtron package
@@ -307,7 +417,17 @@ rejection that the Implementer must address.
 **Invoked when:** weekly, via cron (Sunday 00:00 UTC by default).
 
 **Inputs:** the week's merged diff (all PRs since last audit), `CLAUDE.md`,
-`AGENTS.md`, `API_CONTRACT.md`, `docs/architecture.md`.
+`AGENTS.md`, `API_CONTRACT.md`, `docs/architecture.md`,
+`../newtron/docs/editing-guidelines.md` (apply per `CLAUDE.md` §Agent
+Team Required Reading — role-specific tags are **ALL** and **REVIEW**;
+the principles most likely to surface systemic drift the per-PR Critic
+cannot see are §4 "each concept explained exactly once", §11 "document
+what is, not what's intended", and §41 "audit overloaded terms
+throughout"), and `../newtron/docs/ai-instructions.md` (apply per
+`CLAUDE.md` §Agent Team Required Reading — role-specific tags are
+**ALL** and **REVIEW**; the principles most relevant to cumulative
+drift detection are §9 "post-implementation conformance audit", §11
+"do not speculate", and §20 "authoritative source precedence").
 
 **Checks (cumulative drift, not per-PR):**
 - Have implementation patterns diverged across handlers? (e.g., three different
