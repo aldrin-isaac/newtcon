@@ -84,8 +84,29 @@ newtcon delivers exactly three operator surfaces, in this order:
    `POST /api/apply`'s `per_target[]` response. The operator sees, per
    target, whether the per-Node ChangeSet committed atomically, partially
    failed at validate / deliver / verify, or did not run because an earlier
-   target failed and the batch policy was configured to halt. Same surface
-   handles apply, refresh, and remove. See [`API_CONTRACT.md`](API_CONTRACT.md).
+   target failed and the batch policy was configured to halt. **No
+   preview-time multi-target apply safety classification.** newtcon does
+   **not** classify multi-target Composer applies as "safe under partial
+   success" vs "fragile" at preview time. There is no such discriminator
+   on `POST /api/preview` responses and no plan to add one. The operator's
+   affordance for partial-failure awareness is **runtime substrate
+   visibility**: per-write streaming events as each substrate operation
+   lands (see [`API_CONTRACT.md`](API_CONTRACT.md) §Streaming
+   substrate-operation events), per-target results with per-write
+   granularity in the terminal aggregate (`per_target[*].per_write[]` on
+   `POST /api/apply`), and typed verify-failure envelopes
+   (`*WriteResult.verification.errors[].device_response`) when post-deliver
+   assertions disagree, per `DESIGN_PRINCIPLES_NEWTRON.md` §14 (Verify
+   Your Writes; Observe Everything Else). The substrate-faithful signal
+   is "what actually happened" — visible in real time as each write lands
+   — not "what could have happened" — preview-time heuristic speculation
+   about cross-target coupling. A consumer of newtcon's APIs that wants
+   a fragility hint may derive one client-side from spec metadata (if a
+   future spec-author surface exposes one); the contract does not
+   compute, attach, or expose such a label. The classification was
+   considered (issue #22, closed PR #43) and rejected in favor of
+   runtime visibility. Same surface handles apply, refresh, and remove.
+   See [`API_CONTRACT.md`](API_CONTRACT.md).
 2. **Operator Inbox** — actionable cards for drift, convergence stragglers,
    partial operations, reference-count warnings, reconcile-due signals.
 3. **Change Workbench** — staged batches of intents with dry-run preview,
