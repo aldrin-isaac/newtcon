@@ -135,6 +135,29 @@ agent) proposes them, the PR is rejected on principle:
   HTTP API gap requesting the substrate primitive — are rejected at
   review on principle.
 
+- **Preview-time multi-target apply safety classification.** newtcon
+  does not classify multi-target Composer applies as "safe under
+  partial success" vs "fragile" at preview time. There is no such
+  discriminator on `POST /api/preview` responses and no plan to add
+  one. The operator's affordance for partial-failure awareness is
+  **runtime substrate visibility** — per-write streaming
+  `substrate_op` events, per-target results with per-write
+  granularity (`per_target[*].per_write[]` on `POST /api/apply`), and
+  typed verify-failure envelopes when post-deliver assertions
+  disagree. The substrate-faithful signal is "what actually
+  happened," visible in real time as each write lands, not "what
+  could have happened" as a preview-time heuristic. See
+  [`../CLAUDE.md`](../CLAUDE.md) §Project Scope (Composer bullet,
+  "No preview-time multi-target apply safety classification") for
+  the full statement and rationale; the substrate side is
+  `DESIGN_PRINCIPLES_NEWTRON.md` §14 (Verify Your Writes; Observe
+  Everything Else). The classification was considered (issue #22,
+  closed PR #43) and rejected in favor of runtime visibility.
+  Proposals to attach a `classification` field (or equivalent) to
+  preview responses are rejected at review on principle; a consumer
+  that wants a fragility hint may derive one client-side from spec
+  metadata if a future spec-author surface exposes one.
+
 - **Status dashboard as primary surface.** Status surfaces exist (inside
   inbox cards, inside operation traces), but they are not the landing page.
   The operator lands on actionable work, not on green/red lights.
