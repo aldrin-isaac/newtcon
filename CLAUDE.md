@@ -69,79 +69,121 @@ disagree, the philosophy wins.
 
 ## Project Scope
 
-newtcon delivers exactly three operator surfaces, in this order:
+newtcon's user-facing mission is **the operator-facing web console for
+production network operators** — a daily-work tool. The operator who uses
+newtcon for a year must be more capable than they were when they started.
+The mission is unchanged from the project's outset; **what changed is the
+engine partition underneath it**. Per
+[`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md)
+(Status: Accepted, 2026-05-28), the substrate that delivers the operator
+workflows is split across three peer tools — newtron per-device, newtrun
+orchestration, newtcon observation-history-plus-the-browser-frontend.
 
-1. **Service Composer** — pick a service spec, pick N target interfaces across
-   M nodes, preview the resulting ChangeSets, commit. The commit is **atomic
-   per-Node** — each target Node's ChangeSet lands as a single TxPipeline
-   write (newtron's `cs.Apply`, `ApplyDrift`, or `ReplaceAll`, depending on
-   the verb; see `../newtron/docs/newtron/unified-pipeline-architecture.md`
-   §6, §8 and `DESIGN_PRINCIPLES_NEWTRON.md` §8, §11). When a Composer
-   batch spans multiple Nodes (M > 1), the per-Node commits are independent:
-   newtron operates per-device and exposes no cross-Node atomicity
-   primitive, so a multi-Node batch is **structured best-effort**, with
-   each target's outcome reported separately in
-   `POST /api/apply`'s `per_target[]` response. The operator sees, per
-   target, whether the per-Node ChangeSet committed atomically, partially
-   failed at validate / deliver / verify, or did not run because an earlier
-   target failed and the batch policy was configured to halt. **No
-   preview-time multi-target apply safety classification.** newtcon does
-   **not** classify multi-target Composer applies as "safe under partial
-   success" vs "fragile" at preview time. There is no such discriminator
-   on `POST /api/preview` responses and no plan to add one. The operator's
-   affordance for partial-failure awareness is **runtime substrate
-   visibility**: per-write streaming events as each substrate operation
-   lands (see [`API_CONTRACT.md`](API_CONTRACT.md) §Streaming
-   substrate-operation events), per-target results with per-write
-   granularity in the terminal aggregate (`per_target[*].per_write[]` on
-   `POST /api/apply`), and typed verify-failure envelopes
-   (`*WriteResult.verification.errors[].device_response`) when post-deliver
-   assertions disagree, per `DESIGN_PRINCIPLES_NEWTRON.md` §14 (Verify
-   Your Writes; Observe Everything Else). The substrate-faithful signal
-   is "what actually happened" — visible in real time as each write lands
-   — not "what could have happened" — preview-time heuristic speculation
-   about cross-target coupling. A consumer of newtcon's APIs that wants
-   a fragility hint may derive one client-side from spec metadata (if a
-   future spec-author surface exposes one); the contract does not
-   compute, attach, or expose such a label. The classification was
-   considered (issue #22, closed PR #43) and rejected in favor of
-   runtime visibility. Same surface handles apply, refresh, and remove.
-   See [`API_CONTRACT.md`](API_CONTRACT.md).
-2. **Operator Inbox** — actionable cards for drift, convergence stragglers,
-   partial operations, reference-count warnings, reconcile-due signals.
-3. **Change Workbench** — staged batches of intents with dry-run preview,
-   commit, stash, and revert. The commit is **atomic per-Node** — each
-   target Node's batch lands as a single `Lock → snapshot → fn →
-   commit-or-restore → Unlock` cycle whose inner application is a Redis
-   `TxPipeline` write (see
-   `../newtron/docs/newtron/unified-pipeline-architecture.md` §8 and
-   `DESIGN_PRINCIPLES_NEWTRON.md` §8, §11, §31). When a Workbench batch
-   spans multiple Nodes, the per-Node commits are independent and
-   sequential: newtron operates per-device and exposes no cross-Node
-   atomicity primitive, so a multi-Node commit is **structured
-   best-effort**, with each Node's outcome reported separately in
-   `POST /api/workbench/{batch_id}/commit`'s `per_target[]` /
-   `per_node_atomicity[]` response and `cross_node_atomicity.atomic`
-   fixed at `false`. The operator sees, per target, whether the per-Node
-   batch committed atomically, partially failed at validate / deliver /
-   verify, or did not run because an earlier target failed and the batch
-   policy was configured to halt. Revert follows the same per-Node
-   atomicity model. **No multi-batch atomic rollback.** newtron exposes
-   per-operation reverse primitives (`DESIGN_PRINCIPLES_NEWTRON.md` §15
-   operational symmetry); newtcon's Workbench exposes per-batch revert
-   composed from those primitives. There is **no** "revert the last N
-   committed batches in one call" primitive in newtron and **no**
-   corresponding Workbench surface for history-walking undo. An operator
-   who wants to undo a sequence of prior batches reverts each batch
-   individually in reverse order, with per-batch per-Node atomicity at
-   each step. Composers of an "undo last N batches" UI affordance (if
-   any) would do so as a client-side sequence of
-   `POST /api/workbench/{batch_id}/revert` calls; the per-step results
-   are per-Node atomic, the overall sequence is best-effort. See
-   [`API_CONTRACT.md`](API_CONTRACT.md) §Change Workbench, especially
-   "The atomicity model — read this first."
+newtcon ships **two artifacts**:
 
-**Out of scope** (do not implement, do not stub, do not propose):
+### Artifact 1 — newtcon-server (Go HTTP service)
+
+The post-rebalance newtcon-server is the substrate newtcon *uniquely*
+owns. It is the smaller, observation-side service that the rebalanced
+architecture leaves on newtcon's side of the boundary. Four layers:
+
+1. **Observation History** — the SQLite polling store with adaptive
+   per-Node polling, `change_id` / `observation_id` /
+   `observation_gap` markers, and the
+   `source: newtron_mediated | out_of_band` discrimination engine.
+   This is the load-bearing reason newtcon-server exists and is the
+   binding "no black boxes" affordance for operators who need to see
+   substrate change over time (including changes that newtcon did not
+   initiate). See [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints —
+   Observation History.
+2. **Report Bug** — substrate-canonical bug-report body composition
+   with the `clipboard` / `direct_file` delivery modes. Depends on
+   Observation History for recent-context blocks and on newtrun's
+   run state for operation-trace blocks. See
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Report Bug.
+3. **Provenance** (probably thin proxy) — read-only substrate
+   inspection (intents, projection, changesets, verify). Per the
+   ADR-0001 verdict's borderline-bucket framing, the **final shape is
+   deferred**: as the Observation History layer matures the right
+   call sharpens (likely a thin proxy in front of newtron with
+   cross-reference fields). See [`API_CONTRACT.md`](API_CONTRACT.md)
+   §Endpoints — Provenance.
+4. **Teaching catalogs** (static content) — Manual-Mode Parity and
+   Rehearsal. Static markdown / structured content addressable by
+   ID. Could be served by any static HTTP server; rides along with
+   newtcon-server for convenience. See
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Manual-Mode
+   Parity (teach surface) and §Endpoints — Rehearsal (teach surface).
+
+newtcon-server is **roughly 25-35 % of the line-count and complexity**
+of the pre-rebalance architecture (per ADR-0001 §Consequences). The
+post-rebalance contract reflects this scale.
+
+### Artifact 2 — the browser frontend
+
+The browser frontend is the load-bearing operator experience. It
+delivers the **three operator workflows** by composing two HTTP
+backends:
+
+1. **Service Composer** — pick a service spec, pick N target
+   interfaces across M nodes, preview the resulting ChangeSets,
+   commit. Delivered by the frontend over **newtrun-server**'s
+   orchestration substrate (`POST /api/runs/inline` for stateless
+   compose-and-run; SSE event replay for streaming substrate
+   visibility). The atomicity model — **per-Node atomic, multi-Node
+   structured best-effort** — is unchanged; newtrun-server's
+   per-scenario lifecycle and step-progress events surface the same
+   substrate signal the architected newtcon-server contract did.
+2. **Operator Inbox** — actionable cards for drift, convergence
+   stragglers, partial operations, reference-count warnings,
+   reconcile-due signals. Delivered by the frontend composing
+   newtrun-server's run history (`GET /api/runs`,
+   `GET /api/runs/{suite}/events` SSE) with newtcon-server's
+   Observation History.
+3. **Change Workbench** — staged batches of intents with dry-run
+   preview, commit, stash, and revert. Delivered by the frontend
+   over newtrun-server's scenario substrate (`POST /api/suites`,
+   `POST /api/runs/inline`, scenario CRUD per newtron#33). The
+   per-Node atomicity model is preserved; the staging substrate is
+   newtrun's scenario YAML.
+
+The browser frontend also surfaces newtcon-server's Observation
+History, Provenance, Report Bug, and Teaching Catalogs alongside the
+three operator workflows. The operator opens **one tool**; the frontend
+composes two backends and surfaces a single integrated console.
+
+### What the rebalance preserves and what it changes
+
+**Preserved:**
+
+- The mission — daily-work operator console for production operators.
+- The three operator workflows — Composer, Inbox, Workbench all still
+  deliver, just over a sharper substrate boundary.
+- The nine operator-philosophy invariants — binding on every contract
+  decision, every UI element, every error envelope.
+- The aesthetic discipline — calm at first surface, navigably deep
+  beneath; the operator wants to open this tool.
+- The "simple yet powerful, no tedious graphical CLI" litmus test.
+- Per-Node atomicity for Composer applies and Workbench commits.
+- The reference-aware-removals discipline.
+- The "show before do" discipline (preview before commit, always).
+
+**Changed:**
+
+- The orchestration engine for the state-changing workflows moves out
+  of newtcon-server and into newtrun-server. The browser frontend
+  consumes newtrun-server directly for those workflows.
+- newtcon-server's contract scope narrows to Observation History +
+  Report Bug + Provenance (probably thin) + Teaching catalogs.
+- Streaming substrate-operation events are surfaced by newtrun-server's
+  SSE (`GET /api/runs/{suite}/events` carrying `EventStepProgress`
+  with verbatim `sonic.DeviceOp` per newtron's §46 wire-shape
+  principle). newtcon-server's previously-architected SSE surface for
+  apply/preview/workbench moves to newtrun-server.
+
+### Out of scope
+
+(Do not implement, do not stub, do not propose.)
 
 - **Drag-and-drop blueprint editor** — the Apstra paradigm. Operators
   do not design networks in newtcon. Read-mostly topology
@@ -151,10 +193,17 @@ newtcon delivers exactly three operator surfaces, in this order:
 - Authentication/authorization (deferred until operator surfaces are validated)
 - Multi-tenant features
 - Mobile-first layouts
+- **Re-implementing orchestration substrate that newtrun-server
+  already exposes.** Per the survey-adjacent-tools rule below and
+  ADR-0001's substantive analysis, surfaces that duplicate
+  newtrun-server's orchestration capabilities are rejected at PR
+  review on principle, even when they would be in-scope as
+  "operator workflow."
 
-If a feature is not one of the three surfaces above and not in
-`docs/roadmap.md`, it does not belong in newtcon. Out-of-scope work
-is rejected at PR review.
+If a feature is not one of the four newtcon-server layers above (and
+not part of the browser frontend's composition of the two backends),
+and not in `docs/roadmap.md`, it does not belong in newtcon.
+Out-of-scope work is rejected at PR review.
 
 **Future-considered** (NOT in current scope, but tracked for future
 promotion — see [`docs/roadmap.md`](docs/roadmap.md)):
@@ -184,13 +233,67 @@ design decisions in unfamiliar areas:
 | newtron HLD | `docs/newtron/hld.md` | Architecture, intent model, Redis interaction |
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Intent → Replay → Render → Deliver |
+| **newtrun HLD** (peer tool) | `docs/newtrun/hld.md` | The orchestration substrate the browser frontend consumes for Composer / Inbox / Workbench workflows. newtrun-server's HTTP API (newtron#22/#23/#24, landed; newtron#33, in flight) is the load-bearing surface for state-changing operator workflows post-rebalance. **Peer status** — see §Survey adjacent tools below. |
+| newtrun HOWTO (peer tool) | `docs/newtrun/howto.md` | Scenario authoring, suite layout, lifecycle verbs. |
+| newtrun LLD (peer tool) | `docs/newtrun/lld.md` | Types and method signatures the HTTP API mirrors. |
 | AI Instructions | `docs/ai-instructions.md` | Universal behavioral directives for Claude Code, scoped by activity phase (ALL / PLAN / IMPL / EXPLAIN / TEST / REVIEW). Binding on every newtcon agent role — see §Agent Team Required Reading. |
 | Documentation Editing Guidelines | `docs/editing-guidelines.md` | Universal documentation-craft principles, scoped by document type (ALL / DESIGN / HLD / LLD / HOWTO / README / API / GUIDE) and quality-tiered. Binding on every newtcon agent that authors or edits documentation — see §Agent Team Required Reading. |
 | **DESIGN_PRINCIPLES_NEWTRON** (foundational) | `docs/DESIGN_PRINCIPLES_NEWTRON.md` | newtron's authoritative principles. **Required reading for the Architect and Architecture Reviewer before every Contract PR.** newtcon's design must derive from and not contradict these. |
 
-**newtcon does not re-document newtron's substrate.** When the UI exposes an
-intent record, a ChangeSet, or a projection, those terms mean what newtron's
-docs say they mean. Link, don't paraphrase.
+**newtcon does not re-document newtron's or newtrun's substrate.** When
+the UI exposes an intent record, a ChangeSet, a projection, a scenario,
+a step, or a run, those terms mean what the upstream docs say they mean.
+Link, don't paraphrase.
+
+### Survey adjacent tools before scoping a new surface
+
+**The lesson of ADR-0001
+([`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md))
+made binding.** Before scoping a new operator surface, the Architect (and
+the Architecture Reviewer, and the Critic for any cross-cutting check)
+MUST verify against the existing capabilities of newtrun and any other
+adjacent project tool whether the proposed surface is **genuinely new
+substrate** or a **presentation layer over substrate the project already
+has**.
+
+The pre-rebalance failure mode was structural: newtrun was named in this
+section as "[a] document [to] read before making design decisions in
+unfamiliar areas," but it was operationally treated as adjacent context
+rather than as a peer with overlapping operator-facing scope. The result
+was that the Composer / Inbox / Workbench contract surfaces substantially
+re-implemented orchestration capabilities newtrun already shipped, and
+the only operator-visible delta was a browser frontend versus YAML +
+terminal. ADR-0001 made the substrate boundary honest; this rule
+prevents the failure mode from recurring.
+
+The survey discipline:
+
+1. **Identify peer tools.** At minimum: newtron (per-device substrate),
+   newtrun (orchestration substrate, now extended with
+   newtrun-server's HTTP surface — see the table above). Any future
+   adjacent project tool added to the substrate stack joins this list.
+2. **Read their actual capabilities.** Not their docs' surface
+   description — their HLD, their HTTP API, their state model.
+   ADR-0001's substrate analysis is the worked example: §What
+   newtrun actually is (verified by reading the source).
+3. **Classify the proposed surface.** Per ADR-0001's three buckets:
+   **A (duplicative)** — peer tool already produces this substrate;
+   reject the surface and use the peer; **B (uniquely newtcon)** —
+   substrate the peer cannot produce by construction; proceed;
+   **C (borderline)** — peer could produce with modest extension;
+   weigh cost-of-extension against cost-of-newtcon-implementation
+   substantively, not by reflex.
+4. **Document the classification in the Contract PR description.**
+   The "Considered alternatives" section (mandatory per
+   [`AGENTS.md`](AGENTS.md) §Architect) MUST include "would this be
+   better implemented in newtrun (or another peer tool)?" as one
+   of the alternatives, with non-strawman reasoning either way.
+
+The Architecture Reviewer rejects Contract PRs whose Considered
+Alternatives section lacks an explicit peer-tool survey for any
+surface that touches orchestration, lifecycle, scenarios, runs,
+events, or any other substrate already present in newtrun. The Critic
+applies the same check on the consistency side.
 
 ## newtron API Consumption Rule
 
