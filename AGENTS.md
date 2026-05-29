@@ -63,7 +63,7 @@ Reference: <https://code.claude.com/docs/en/agent-teams>.
 | **Tech Lead** | Opus (`claude-opus-4-7`) | 1 (per-feature) | Feature kickoff | Slicing features into independent issues; acceptance criteria per slice |
 | **Implementer** | Sonnet (`claude-sonnet-4-6`) | N (parallel pool) | Per-slice issue | Code + tests + docs for one slice end-to-end |
 | **Critic** | Opus (`claude-opus-4-7`) | 1 (mandatory, per-PR) | Every PR before merge | Consistency review: scope, contract compliance, file ownership, principle compliance |
-| **Drift Auditor** | Opus (`claude-opus-4-7`) | 1 (weekly cron) | Weekly | Cumulative diff scan, systemic drift detection, operator report |
+| **Drift Auditor** | Opus (`claude-opus-4-7`) | 1 (recurring weekly) | Weekly + before each operator-validation gate | Cumulative diff scan, systemic drift detection, operator report |
 
 No PM role. No separate Test role. No "Frontend Engineer" and "Backend Engineer"
 splits (slices cross the stack).
@@ -151,6 +151,19 @@ explicitly designed, reasoned about, and documented.
    handing the PR to the Architecture Reviewer).
 
 **Inputs:** the above; the current state of newtcon.
+
+**Survey adjacent tools before scoping a new surface.** Before
+authoring any Contract PR that proposes a new operator surface, the
+Architect surveys newtron, newtrun, and any other adjacent project
+tool for substrate overlap with the proposed surface, and documents
+the classification (Bucket A duplicative / B uniquely newtcon / C
+borderline) in the PR's "Considered alternatives" section. See
+[`CLAUDE.md`](CLAUDE.md) §Survey adjacent tools for the binding
+rule, the survey discipline's four steps, and the failure mode that
+made it binding (ADR-0001's substrate analysis is the worked
+example). Skipping the survey is the structural failure mode the
+rule exists to prevent; the Architecture Reviewer rejects on this
+basis per the binding clause in CLAUDE.md.
 
 **Outputs:** a PR that edits exactly one PR class (`CLAUDE.md` OR
 `API_CONTRACT.md` OR `docs/architecture.md` OR an ADR — not mixed).
@@ -414,7 +427,21 @@ rejection that the Implementer must address.
 
 ### Drift Auditor (Opus)
 
-**Invoked when:** weekly, via cron (Sunday 00:00 UTC by default).
+**Invoked when:** the Drift Auditor SHALL be invoked weekly, and
+additionally before each operator-validation gate (per
+[`team-launch.md`](team-launch.md) §Completion criteria C7 and
+§Operator's residual role — the moments at which mission-fidelity
+drift would be most consequential to miss). Until cron is
+operationalized, the team lead spawns the role manually at week-end
+and before any aesthetic-validation request.
+
+The weekly cadence is the binding minimum; the operator-validation-gate
+invocation is an additional trigger, not a substitute. This recurring
+posture is the operator's verdict response to the first cumulative
+audit (`docs/audits/2026-05-28.md`): the per-PR reviewer seats
+(Critic, Architecture Reviewer) evaluate PR shape, not cumulative
+trajectory, and the trajectory check exists only when the Drift
+Auditor runs.
 
 **Inputs:** the week's merged diff (all PRs since last audit), `CLAUDE.md`,
 `AGENTS.md`, `API_CONTRACT.md`, `docs/architecture.md`,
