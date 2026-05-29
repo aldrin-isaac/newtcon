@@ -222,17 +222,18 @@ forward-reference rather than restate.
    path against `newtrun-server`. The canonical contract is
    [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Report Bug.
 3. **Teaching catalogs accessible.** Manual-Mode Parity and
-   Rehearsal teach surfaces served by newtcon-server and reachable
-   through the browser frontend's information architecture without
-   the operator having to know they exist. The contract surfaces
-   are [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints —
-   Manual-Mode Parity (teach surface) and §Endpoints — Rehearsal
-   (teach surface). Note the discoverability risk named in
-   ADR-0001 §"What becomes harder" #4: with the Composer no longer
-   sitting alongside the catalogs, the frontend's information
-   architecture is responsible for surfacing them at the moments
-   the operator would reach for them (manual fall-back, practice
-   before high-stakes apply).
+   Rehearsal teaching surfaces served by newtcon-server and
+   reachable through the browser frontend's information
+   architecture without the operator having to know they exist.
+   The contract surfaces are
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Manual-Mode
+   Parity (teaching surface) and §Endpoints — Rehearsal
+   (teaching surface). Note the discoverability risk named in
+   ADR-0001 §"Risks the decision creates" #4: with the Composer
+   no longer sitting alongside the catalogs, the frontend's
+   information architecture is responsible for surfacing them at
+   the moments the operator would reach for them (manual
+   fall-back, practice before high-stakes apply).
 4. **Browser frontend delivering the three operator workflows over
    `newtrun-server`.** Service Composer, Operator Inbox, and
    Change Workbench all reachable from one browser entry point,
