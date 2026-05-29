@@ -594,5 +594,3 @@ non-binding): Svelte/SvelteKit, React + Vite, Solid, HTMX + minimal
 JS. The decision will be recorded as
 [ADR-0002](adr/0002-frontend-framework.md) authored by the first
 frontend slice.
-</content>
-</invoke>
