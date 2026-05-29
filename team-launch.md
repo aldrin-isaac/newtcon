@@ -81,11 +81,32 @@ The backlog lives in GitHub Issues at `aldrin-isaac/newtcon`.
 **Sources:**
 
 - Architect warmup-style consistency reports (findings → issues).
-- Drift-Auditor weekly reports (drift detected → issues).
-- The three operator surfaces from `CLAUDE.md` §Project Scope and
-  their currently-stubbed contracts (Inbox, Workbench).
-- The two surfaces the philosophy requires that the contract does not
-  yet expose: Provenance / why-mode and Rehearsal.
+- Drift-Auditor reports (drift detected → issues). The Drift
+  Auditor runs weekly plus before each operator-validation gate
+  per [`AGENTS.md`](AGENTS.md) §Drift Auditor.
+- **The four newtcon-server layers** — Observation History,
+  Report Bug, Provenance, Teaching catalogs (Manual-Mode Parity +
+  Rehearsal) — per [`CLAUDE.md`](CLAUDE.md) §Project Scope
+  "Artifact 1 — newtcon-server" and
+  [`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md)
+  §"What stays in newtcon." Observation History and Report Bug
+  carry the load; Provenance is a borderline-deferred surface
+  whose final shape (full handlers vs thin proxy) sharpens with
+  implementation; Teaching catalogs are static, author-curated
+  content.
+- **The browser frontend** delivering the three operator
+  workflows (Composer / Inbox / Workbench) over newtrun-server's
+  HTTP surface, and surfacing the four newtcon-server layers
+  alongside, per [`CLAUDE.md`](CLAUDE.md) §Project Scope
+  "Artifact 2 — the browser frontend." The state-changing
+  workflows' substrate dependencies are filed upstream as
+  newtrun-side feature requests per ADR-0001 §"What moves
+  upstream"; the browser-frontend slices in newtcon-server's
+  backlog consume those surfaces as they land.
+- Open `gap` and `philosophy-debt` issues against the rebalanced
+  scope (e.g., #56 CLI policy inconsistency between Rehearsal and
+  Manual-Parity; #76 operator-defined-automation surface absent
+  per invariant #8).
 
 **Issue labels:**
 
