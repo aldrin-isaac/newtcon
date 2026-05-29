@@ -34,21 +34,19 @@ applies (see [`CLAUDE.md`](CLAUDE.md) §Greenfield).
 
 ## Conventions
 
-- All requests and responses are JSON (`Content-Type: application/json`)
-  except where an endpoint explicitly admits Server-Sent Events
-  (`Content-Type: text/event-stream`) via Accept-header negotiation.
-  Endpoints that admit SSE are enumerated in
-  §Streaming substrate-operation events; no endpoint streams without
-  an explicit `Accept: text/event-stream` request header.
+- All requests and responses on surviving newtcon-server endpoints are
+  JSON (`Content-Type: application/json`). Post-ADR-0001 rebalance,
+  no surviving newtcon-server endpoint streams Server-Sent Events
+  — SSE substrate for state-changing operator workflows lives on
+  newtrun-server's `GET /api/runs/{suite}/events` per newtron#22, not
+  on newtcon-server. See §Streaming substrate-operation events (the
+  rebalance stub) for the historical surface and the upstream pointer.
 - Timestamps are RFC 3339 UTC strings.
 - Resource identifiers are domain names (e.g., service name, node name,
   interface name) — never opaque internal IDs.
 - Errors return a structured `Error` object (see §Error Schema) with a
   domain-meaningful message. HTTP status codes follow the standard semantics
-  but are secondary to the error body. SSE-streaming endpoints surface
-  mid-stream errors per §Streaming substrate-operation events
-  ("Mid-stream errors") — the `error` event carries the same typed
-  `Error` body as a non-2xx JSON response.
+  but are secondary to the error body.
 - Pagination, when needed, is cursor-based (`?cursor=<opaque>&limit=<int>`).
   Endpoints below that omit pagination return the full set.
 
@@ -77,13 +75,18 @@ endpoint that returns the kind. Anywhere this contract returns
 `kind: "X"`, the `details` body matches the §`X` schema below.
 
 The same shape is used by **nested per-target failures**, not only the
-top-level `error` envelope. Endpoints that report per-target failures
-inside a 200 response (e.g., `POST /api/workbench/{batch_id}/commit`'s
-`per_target[*].failure`) MUST use the same five `kind` values and the
-matching `details` schemas defined here. A handler that invents a new
-`kind` (e.g., `newtron_internal`) for a per-target failure is a contract
-violation; the per-target failure has the same shape as the top-level
-`error` body.
+top-level `error` envelope. Endpoints across the rebalance boundary
+that report per-target failures inside a 200 response — surviving
+newtcon-server endpoints (e.g., a multi-Node Observation History
+fan-out where one Node reads succeed and another's 503) AND the
+moved orchestration surfaces specified by newtrun-server's contract
+per ADR-0001 (Composer apply per-target failure, Workbench commit
+per-node failure, etc.) — MUST use the same five `kind` values and
+the matching `details` schemas defined here. A handler that invents
+a new `kind` (e.g., `newtron_internal`) for a per-target failure is
+a contract violation; the per-target failure has the same shape as
+the top-level `error` body. The substrate vocabulary is shared
+across the rebalance boundary.
 
 ### Vocabulary boundaries between kinds
 
@@ -273,20 +276,26 @@ Field rules:
   grounded (e.g., "peer_as 4294967296 exceeds 32-bit ASN range", not
   "Invalid value for peer_as"). A generic message is a contract smell.
 
-Existing endpoints that return `kind: "validation_failure"` per this
-contract — `/api/preview` validate failures, `/api/inbox` unknown
-`kind`/verb, `/api/workbench/stage` invalid targets,
-`/api/workbench/{batch_id}/commit` with a dry-run `preview_id`,
-`/api/workbench/{batch_id}/revert/preview` with invalid handles,
+Surviving newtcon-server endpoints that return
+`kind: "validation_failure"` per this contract —
 `/api/projection/nodes/{node}` unowned `table` filter,
-`/api/rehearsal/walkthroughs` unknown `category` — populate this
-schema. Free-form `details.allowed_verbs`,
-`details.invalid_targets`, `details.invalid_handles`,
-`details.owned_tables`, and `details.invalid_intent_handles` mentioned
-in those sections are surfaced inside `rejections[*]` per the schema:
-`reason: "unknown_value"` with `allowed`, or `reason: "target_absent"`
-with `substrate_field`, etc. The free-form field names in those
-sections are descriptive of the operator-visible information; the wire
+`/api/rehearsal/walkthroughs` unknown `category`,
+`/api/manual/services/{service}/instances/.../teach` unknown
+service, `/api/manual/configdb/.../teach` unknown table,
+`/api/manual/scenarios` unknown `category`,
+`/api/report-bug/preview` unknown template, the Observation
+History query endpoints with malformed window parameters — populate
+this schema. The moved orchestration surfaces' validation_failure
+returns (Composer / Inbox / Workbench preview-and-validate) are
+specified by newtrun-server's contract per ADR-0001 §What moves
+upstream, but they MUST use the same five `kind` values and matching
+`details` schemas defined here — the substrate vocabulary is
+shared across the rebalance boundary. Free-form `details.*` field
+names referenced in surviving sections (`details.owned_tables` on
+projection filter, etc.) are surfaced inside `rejections[*]` per
+the schema (`reason: "unknown_value"` with `allowed`,
+`reason: "target_absent"` with `substrate_field`, etc.); the
+free-form names describe the operator-visible information, the wire
 shape is the typed `rejections[]`.
 
 ### `details` for `kind: "drift_refusal"`
@@ -332,8 +341,8 @@ Shape:
           ],
           "drift_entry_count": 14,
           "by_type": { "missing": 9, "extra": 2, "modified": 3 },
-          "inbox_card_url": "/api/inbox/<opaque>",
-          "drift_card_id": "<opaque>",
+          "browser_card_kind": "drift",
+          "browser_card_correlation": { "network": "default", "node": "switch1" },
           "projection_url": "/api/projection/nodes/switch1"
         }
       ],
@@ -344,7 +353,7 @@ Shape:
       "resolution_hint": {
         "verb": "reconcile_delta | reconcile_full",
         "rationale": "delta is sufficient when drift_entry_count is small and a config reload is not desired; full is required when drift includes daemon-restart-class changes",
-        "stage_via": "/api/inbox/<card_id>/action/preview",
+        "stage_via_browser_workflow": "operator-inbox-drift-card",
         "rationale_ref": {
           "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#6-delta-reconcile",
           "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#21-reconstruct-dont-record"
@@ -362,34 +371,46 @@ Shape:
 Field rules:
 
 - **`per_target[]`** has one entry per Node that drifted. Single-Node
-  operations have one entry; multi-Node operations (Composer apply,
-  Workbench commit/dry-run) may have many. A drift refusal with empty
+  operations have one entry; multi-Node operator workflows (Composer
+  apply across N targets, Workbench commit across N nodes — both
+  delivered by the browser frontend over newtrun-server per
+  ADR-0001) may produce many. A drift refusal with empty
   `per_target[]` is a contract violation — the operator must know
   WHICH Node refused.
-- **`drift_entries[]`** uses the `DriftEntry` schema defined by the
-  `kind: "drift"` card's `detail.drift_entries[]`
-  (§Endpoints — Operator Inbox). Same fields (`table`, `key`, `type`,
-  `expected`, `actual`); same semantics. Re-coining a different shape
-  here would teach two parallel vocabularies for the same substrate.
+- **`drift_entries[]`** uses the canonical `DriftEntry` substrate
+  shape (newtron's `sonic.DriftEntry`, per
+  `DESIGN_PRINCIPLES_NEWTRON.md` §46's "one typed diff vocabulary").
+  Same fields (`table`, `key`, `type`, `expected`, `actual`); same
+  semantics. The shape is also used by the browser frontend's
+  Operator Inbox drift cards (delivered by the browser frontend
+  composing newtcon-server's Observation History with newtrun-server
+  per the §Operator Inbox stub) and by §Observation History's diff
+  entries — one substrate vocabulary across the rebalance boundary.
 - **`drift_entry_count`** and **`by_type`** are summary counts that
   duplicate information derivable from `drift_entries[]`; they are
   REQUIRED because UI rendering must surface counts without parsing
   the full entries array (the entries array can be large, and the
   operator's first view is the count).
-- **`inbox_card_url`** / **`drift_card_id`** point to the existing
-  Inbox drift card for the same `(network, node)` tuple, when one
-  exists. The operator navigates from the refusal directly to the
-  card and chooses a reconciliation verb there (operator-philosophy
-  invariant #5 "why-mode is always available" — every refusal is one
-  click from the operator's action surface). When no Inbox card has
-  been derived yet (e.g., the drift was only observed at refusal
-  time and the Inbox derivation has not run), both fields are
-  `null`; the operator polls `/api/inbox` and the card will appear
-  on the next derivation.
+- **`browser_card_kind`** and **`browser_card_correlation`** identify
+  the operator-facing browser-frontend card the refusal correlates
+  with. The browser frontend's Operator Inbox renders a `drift` card
+  (per the §Operator Inbox stub above) keyed on
+  `(browser_card_correlation.network, browser_card_correlation.node)`
+  — the operator navigates from the refusal to the card and chooses
+  a reconciliation verb there (operator-philosophy invariant #5
+  "why-mode is always available" — every refusal is one click from
+  the operator's action surface). The fields are descriptive
+  (kind + correlation tuple) rather than constructing a URL, because
+  the browser frontend's URL space is the frontend's concern, not the
+  contract's, post-rebalance. When the Observation History layer has
+  not yet detected the drift through observed-state diff (e.g., the
+  drift was first surfaced at this refusal time), the
+  `browser_card_correlation` is still emitted so the frontend can
+  surface the card on the operator's next view.
 - **`projection_url`** points to the Provenance projection endpoint
-  for the Node so the operator sees what newtron believed the
-  CONFIG_DB should be at refusal time — the half of the drift the
-  device cannot show directly.
+  (§Endpoints — Provenance below) for the Node so the operator sees
+  what newtron believed the CONFIG_DB should be at refusal time —
+  the half of the drift the device cannot show directly.
 - **`guard_mode`** is `actuated` for every drift refusal in
   practice; the contract surfaces it because
   `unified-pipeline-architecture.md` §8 makes the mode the cause of
@@ -397,21 +418,28 @@ Field rules:
   the device SHOULD match its own intents"). A `topology` value is
   reserved and not currently emitted; surfacing the enum on the wire
   documents the substrate cause.
-- **`resolution_hint`** names a concrete next-action verb in
-  newtcon's vocabulary (`reconcile_delta` or `reconcile_full` from
-  the Inbox action verb set) AND links to the preview path that
-  stages it. The hint is NOT prescriptive — the operator may
-  choose differently — but it is concrete enough to act on without
-  reading another doc (invariant #7's "substrate-grounded
+- **`resolution_hint`** names a concrete next-action verb in the
+  shared operator vocabulary (`reconcile_delta` or `reconcile_full`
+  from the operator-Inbox action verb set, which the browser frontend
+  surfaces over newtrun-server post-rebalance) AND names the
+  browser-frontend workflow where the operator stages it
+  (`stage_via_browser_workflow`, e.g.,
+  `"operator-inbox-drift-card"`). The hint is NOT prescriptive — the
+  operator may choose differently — but it is concrete enough to act
+  on without reading another doc (invariant #7's "substrate-grounded
   explanation" is binding even on the refusal).
 
-Existing endpoints that return `kind: "drift_refusal"` per this
-contract — `/api/preview` and `/api/apply` on Composer,
-`/api/inbox/{card_id}/action/preview` and `/api/inbox/{card_id}/action`
-on Inbox, `/api/workbench/{batch_id}/dry_run` on Workbench — populate
-this schema. The previously documented free-form `details.per_target[]`
+Surviving newtcon-server endpoints that return
+`kind: "drift_refusal"` per this contract — `/api/history/nodes/{node}/diff`
+(when drift is observed mid-window), the §Endpoints — Provenance
+projection reads when computing projection against a drifted Node —
+populate this schema. The moved orchestration surfaces (Composer
+preview / apply, Inbox action preview / action, Workbench dry_run /
+commit) also produce `kind: "drift_refusal"` from newtrun-server's
+runs; the shape is shared per the substrate-vocabulary discipline
+above. The previously documented free-form `details.per_target[]`
 on workbench dry-run with `DriftEntry[]` is the same shape as
-`per_target[*].drift_entries[]` here.
+`per_target[*].drift_entries[]` here — one substrate vocabulary.
 
 ### `details` for `kind: "precondition_failure"`
 
@@ -440,11 +468,11 @@ Shape:
         "preview_id": "<opaque>",
         "issued_at": "2026-05-25T14:08:01Z",
         "expired_at": "2026-05-25T14:13:01Z",
-        "preview_kind": "composer_preview | workbench_dry_run | workbench_commit_preview | workbench_revert_preview | workbench_stash_preview | workbench_restore_preview | inbox_dismiss_preview | inbox_action_preview"
+        "preview_kind": "report_bug_preview | observation_history_query_preview"
       },
       "next_action_hint": {
         "verb": "re_preview",
-        "endpoint": "/api/preview",
+        "endpoint": "/api/report-bug/preview",
         "rationale": "re-issue the same preview request; the operator's intent did not change, only the TTL expired"
       },
       "provenance_url": null,
@@ -612,25 +640,34 @@ Field rules:
   are truncated at 4 KiB with a `...[truncated]` marker.
 - **`affected_nodes`** lists the Nodes the failing operation needed
   to read or write. Single-Node operations have one entry; multi-Node
-  Composer/Workbench operations may have many. `null` for endpoints
-  that are not Node-scoped (e.g., `/api/services` listing).
+  operator workflows (Composer apply / Workbench commit across N
+  nodes, delivered by the browser frontend over newtrun-server per
+  ADR-0001) may have many. `null` for endpoints that are not
+  Node-scoped (e.g., a bare upstream-reachability surface).
 - **`last_known`** is the substrate snapshot newtcon-server has from
   prior successful calls. The `kind` discriminator names what the
-  payload is so the consumer parses it correctly. Today's endpoints
-  populate `kind` as follows:
+  payload is so the consumer parses it correctly. Surviving
+  newtcon-server endpoints populate `kind` as follows:
   - `/api/operations/{operation_id}` 503 → `kind: "operation_pipeline"`,
-    `payload` is the last-observed pipeline snapshot.
+    `payload` is the last-observed pipeline snapshot (from the
+    operations-store correlation per §Operations capture-path).
   - `/api/operations/{operation_id}/verify` 503 →
     `kind: "verify_assertion"`, `payload` is the last-observed
     assertion snapshot.
   - `/api/intents/{intent_id}` 503 → `kind: "intent_record"`,
     `payload` is the most recent record snapshot in newtcon-server's
     request-cache window.
-  - `/api/workbench/{batch_id}/diff` 503 → `kind: "projection_diff"`,
-    `payload` is the most recent successful diff.
-  - `/api/inbox` 503 (newtron_reachable false in the body, surfaced
-    here when the endpoint chooses to 503 instead of degrading) →
-    `kind: "inbox_cards"`, `payload` is the last-observed card set.
+  - `/api/projection/nodes/{node}` 503 →
+    `kind: "projection_snapshot"`, `payload` is the most recent
+    projection snapshot newtcon-server has from the Observation
+    History store.
+  - `/api/history/nodes/{node}/snapshot` 503 →
+    `kind: "observed_snapshot"`, `payload` is the most recent
+    observed snapshot.
+  - `/api/report-bug/preview` 503 (the bug-report composition could
+    not reach newtron for the operation-context block) →
+    `kind: "operation_pipeline"`, `payload` is whatever pipeline
+    snapshot newtcon-server has cached.
   - All other endpoints → `kind: "none"`, `payload` is `null`. The
     consumer renders an unavailability state without stale
     substrate.
@@ -644,14 +681,14 @@ Field rules:
 This schema replaces the previously documented free-form
 `details.last_known.<key>` shapes (`pipeline`, `record`, `assertion`,
 `projection_diff`, `unreachable_nodes`) and the bare
-`details.unreachable_nodes[]` field. Per-endpoint sections that mention
-"`details.last_known.<key>`" populate `last_known.payload` per the
-discriminator table above. The `details.unreachable_nodes[]` field on
-`/api/preview`, `/api/workbench/{batch_id}/dry_run`,
-`/api/workbench/{batch_id}/commit/preview`, and
-`/api/workbench/{batch_id}/revert/preview` populates the
-`affected_nodes` field of this schema (newtron unreachable for those
-specific Nodes; the rest of the network may be reachable).
+`details.unreachable_nodes[]` field. Surviving newtcon-server
+endpoints that emit a `details.unreachable_nodes[]` substrate (the
+Observation History per-Node reads when they fan out, the Provenance
+projection endpoint when it fans across multiple Nodes) populate
+the `affected_nodes` field of this schema (newtron unreachable for
+those specific Nodes; the rest of the network may be reachable).
+The moved orchestration surfaces' equivalent fan-out failures are
+specified by newtrun-server's contract per ADR-0001.
 
 ### `details` for `kind: "internal"`
 
@@ -701,10 +738,14 @@ Field rules:
   errors with the same `phase` value have a starting hypothesis
   for the ops ticket; the substrate is in logs.
 - **`partial_results`** carries any per-target results completed
-  before the catastrophic failure (used by
-  `/api/workbench/{batch_id}/commit`'s 502 path). Shape matches the
-  `per_target[]` of the originating endpoint's success response.
-  `null` when no partial work was completed.
+  before the catastrophic failure. Shape matches the `per_target[]`
+  of the originating endpoint's success response. `null` when no
+  partial work was completed. On surviving newtcon-server endpoints
+  this surfaces, e.g., on a Report Bug compose-and-deliver call that
+  partially succeeded against the configured delivery integration;
+  the moved orchestration surfaces' equivalent (e.g., the previously
+  documented Workbench commit 502 partial path) are specified by
+  newtrun-server's contract per ADR-0001 §What moves upstream.
 - **No stack trace, no exception type, no file/line.** A
   `details.stack_trace` field is a contract violation; the
   Architecture Reviewer rejects any addition.
@@ -714,6 +755,227 @@ Field rules:
   known (e.g., a known newtron-server bug class), the failure
   should be re-classified as one of the other four kinds, not
   emitted as `internal` with explanatory `rationale_ref` text.
+
+## Shared substrate shapes
+
+**Promoted from §Endpoints — Service Composer per ADR-0001 rebalance
+([`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md))
+cross-section cleanup.** The typed substrate shapes — `ChangeSet`,
+`Validate`, `Confidence`, `Reverses`, `PerWrite` — were previously
+defined under the now-stubbed Composer section but are referenced
+from surviving newtcon-server surfaces (§Endpoints — Operations,
+§Endpoints — Provenance, §Endpoints — Observation History,
+§Endpoints — Report Bug). The canonical definitions live here, in
+one place, per `editing-guidelines.md` §4 ("each concept explained
+exactly once") and `DESIGN_PRINCIPLES_NEWTRON.md` §46 ("wire shape
+mirrors substrate").
+
+### `ChangeSet`
+
+The canonical CONFIG_DB substrate-effect substrate per
+`DESIGN_PRINCIPLES_NEWTRON.md` §11 ("The ChangeSet Is the Universal
+Contract"). Carries `writes[]`, `deletes[]`, `intent_records[]`, and
+`rationale_ref`. The shape mirrors newtron's `ConfigChange[]` typed
+array (newtron `api.md` §S11 `WriteResult`, landed via newtron#11):
+
+- **`writes[]`** — each entry is one CONFIG_DB add or modify
+  (newtron's `ChangeType: "add" | "modify"`). Fields:
+  - `table` — REQUIRED, the CONFIG_DB table name.
+  - `key` — REQUIRED, the CONFIG_DB key (post-table-prefix), `|` as
+    multi-part separator.
+  - `fields` — REQUIRED, object mapping field name to scalar-as-string
+    (CONFIG_DB stores all values as strings).
+- **`deletes[]`** — each entry is one CONFIG_DB delete (newtron's
+  `ChangeType: "delete"`). `table` and `key` REQUIRED;
+  `fields` discriminates whole-row delete (`null`) from field-level
+  delete (array of field names).
+- **`intent_records[]`** — each entry is one NEWTRON_INTENT row the
+  ChangeSet prepends per
+  `unified-pipeline-architecture.md` §3 ("the intent record IS the
+  decision substrate"). Surfaced as a first-class field rather than
+  buried in `writes[]` per operator-philosophy invariant #1 (the
+  operator needs to inspect the decision substrate without scanning
+  for `table == "NEWTRON_INTENT"`).
+- **`rationale_ref`** — REQUIRED, the typed
+  `{substrate, principle}` shape.
+
+The shape is shared across the rebalance boundary: the moved
+orchestration surfaces produce ChangeSets through newtrun-server's
+`newtron` action consuming newtron's `WriteResult`; surviving
+newtcon-server surfaces (Operations, Provenance changesets,
+Observation History composition, Report Bug substrate blocks) consume
+the same shape verbatim from newtcon-server's operations store.
+
+### `Validate`
+
+The two-kinds-of-refusal substrate per
+`DESIGN_PRINCIPLES_NEWTRON.md` §13. Carries:
+
+- **`ok`** — REQUIRED, `true` iff both `preconditions[]` and
+  `schema_violations[]` are empty.
+- **`preconditions[]`** — REQUIRED, business-logic refusals (the
+  operation's subject is absent or present-but-conflicting).
+  Operator affordance: "fix the situation."
+- **`schema_violations[]`** — REQUIRED, schema-validation refusals
+  (out-of-range value, unknown enum, etc.). Operator affordance:
+  "fix the value."
+
+Each row shape matches §Error Schema's
+`validation_failure.details.rejections[]` (`locator`, `reason`,
+`message`, `expected`, `actual`, `allowed`) plus a per-row
+`rationale_ref`. The `reason` enum is the same bounded set as
+§Error Schema's.
+
+### `Confidence`
+
+Makes the system's confidence in a per-target result explicit on the
+wire, per operator-philosophy invariant #9 ("Confidence and limits
+are explicit"). Carries:
+
+- **`level`** — REQUIRED, bounded categorical: `high` |
+  `conditional` | `low`.
+- **`reasons[]`** — REQUIRED, empty when `level == "high"`. Each
+  entry has bounded `code` (e.g., `shared_resource_count_estimated`,
+  `verify_pending`, `verify_skipped_by_request`,
+  `inbox_signal_stale`, `inbox_signal_unavailable`,
+  `newtron_cache_miss_for_last_known`, `precondition_check_partial`),
+  required `message` (substrate-grounded short text), optional
+  `gap_issue` (only when the reason corresponds to a filed newtron
+  gap), and required `rationale_ref`.
+
+**Aggregation rule.** When `aggregate.confidence` is reported, the
+aggregate `level` is the WORST level across per-target entries;
+aggregate `reasons[]` is the union of unique `code` values. Healthy
+cases report `level: "high"` (the schema deliberately surfaces `high`
+on healthy responses so the operator learns the vocabulary).
+
+### `Reverses`
+
+Makes `DESIGN_PRINCIPLES_NEWTRON.md` §15 ("Symmetric Operations —
+What You Create, You Can Remove") binding on the wire. Appears on
+preview-of-remove substrate shapes (delivered by the browser
+frontend over newtrun-server per the moved-surface stubs, observed
+into newtcon-server's substrate stores). Carries:
+
+- **`reverse_strategy`** — REQUIRED, bounded enum:
+  `symmetric_verb | reconcile_delta | reconcile_full`.
+- **`originating_intents[]`** — REQUIRED, non-empty. Each entry
+  names the originating intent's `intent_id` / `intent_url`,
+  `operation`, `resource_key`, `name`, `applied_at`, and the
+  `applied_by_operation` block (operation_id + operation_url +
+  operator_workflow + operator_identity).
+- **`inverse_of_inverse`** — REQUIRED. Names the forward verb that
+  would undo this reverse, the browser-frontend workflow at which
+  the operator restages the forward verb
+  (`stage_via_browser_workflow`), a `stage_via_body_sketch` of the
+  forward operation's parameters populated from the original
+  intent's `user_params`, and a `rationale` + `rationale_ref` pair.
+
+### `manual_equivalent.newtron_http`
+
+The bounded enum surfacing the operator-philosophy invariant #2
+(manual-mode parity) on every endpoint that admits one. The enum
+discriminator `status` is bounded by the values
+`available | partial_match | pending_newtron_gap | deferred_indefinitely | not_applicable`,
+each defining a typed shape:
+
+- **`{ "status": "available", "method", "path", "query"?, "body"? }`**
+  — an endpoint that is documented as part of newtron's public HTTP
+  API (or newtrun-server's public HTTP API per ADR-0001) AND is
+  verified registered in the corresponding `buildMux()` / handler
+  registration, and answers the same question with the same
+  substrate. Both halves of the check are required: documentation
+  alone is insufficient (see the api.md ↔ buildMux drift tracked at
+  [newtron#20](https://github.com/aldrin-isaac/newtron/issues/20)),
+  and a wired-but-undocumented route is also insufficient (it is not
+  yet public surface).
+- **`{ "status": "partial_match", "method", "path", "query"?, "body"?, "note": "<rationale>" }`**
+  — an endpoint exists that answers a related but not identical
+  question; the `note` explains the gap honestly.
+- **`{ "status": "pending_newtron_gap", "gap_issue": "<URL>", "expected_shape": { … } }`**
+  — no upstream HTTP shape exists today, AND the substrate is filed
+  as a gap awaiting upstream delivery on an open timeline; tracked
+  under the Gap-Handling Protocol (`CLAUDE.md` §Gap-Handling
+  Protocol).
+- **`{ "status": "deferred_indefinitely", "gap_issue": "<URL>", "re_evaluation_trigger": { "text": "<verbatim substrate>", "newtcon_context": ["<ref>", ...] } }`**
+  — no upstream HTTP shape exists today, AND the upstream lead has
+  considered the substrate and indefinitely deferred it. No upstream
+  delivery is expected on a defined timeline. Consumers MUST NOT
+  surface this as "pending" or "expected"; the operator-facing
+  rendering must convey "considered and deferred" honestly.
+  `re_evaluation_trigger` is REQUIRED on this shape; its `text`
+  subfield is REQUIRED and is byte-for-byte the lead's wording on
+  the linked `gap_issue`, and its `newtcon_context` subfield is
+  OPTIONAL.
+- **`{ "status": "not_applicable", "rationale": "<text>" }`** — no
+  upstream HTTP shape applies, by design, because the substrate is
+  not addressable in the upstream model.
+
+The shape MUST be one of these five — silently fabricating an
+endpoint URL is forbidden. `newtron_cli` (sibling field on every
+`manual_equivalent` block) always points to the equivalent CLI
+invocation when one exists; it is `null` when no CLI equivalent
+applies.
+
+**Semantic distinction — `pending_newtron_gap` vs
+`deferred_indefinitely`.** Both shapes name "no upstream HTTP shape
+exists today" but they teach different operator-facing models, and
+the distinction is binding (operator-philosophy invariant #9, "False
+confidence is worse than no confidence"). `pending_newtron_gap`
+means the substrate is **filed and tracked with an open expectation
+of delivery**: the upstream team is expected to ship it.
+`deferred_indefinitely` means the substrate has been **considered
+and explicitly deferred**: the gap_issue documents the deferral
+verdict, no delivery is on the upstream roadmap, and a consumer that
+surfaces it as "pending" lies to the operator. The
+`re_evaluation_trigger` makes the deferral's contingency visible:
+the deferral is not "wontfix" (that would be a separate verdict),
+it is "deferred unless the named condition fires."
+
+**Honest lifecycle.** A given substrate may move through three
+honest states over its lifetime:
+`deferred_indefinitely → pending_newtron_gap → available`.
+Transitions are operator-visible per Contract PR.
+
+Per ADR-0001 rebalance, `manual_equivalent.newtron_http` substrate
+on surviving newtcon-server surfaces may target newtrun-server's
+HTTP API as the upstream rather than newtron-server's directly; the
+enum and shapes are unchanged because newtrun-server is in the same
+upstream-substrate position newtron-server was, only one level up.
+
+### `PerWrite`
+
+The per-substrate-operation entry type. Per ADR-0001, the canonical
+substrate for `PerWrite` lives **upstream** in newtrun-server's
+`EventStepProgress` payload (per newtron#24's `StepProgress`
+callback), which embeds the verbatim `sonic.DeviceOp` substrate per
+`DESIGN_PRINCIPLES_NEWTRON.md` §46 ("Wire Shape Mirrors Substrate").
+The shape carries:
+
+- `seq` — zero-based ordinal per target.
+- `operation_id` — newtcon-server's operation ID (correlated against
+  newtrun-server's `run_id` + `step_index`).
+- `target` — `{network, node, interface?}`.
+- `kind` — `redis_write | redis_delete | daemon_wait | verify_read`.
+- `substrate` — `{table, key, fields?}`.
+- `result` — `applied | rejected | skipped`.
+- `cli_command` — the operator's-own-tools command equivalent.
+- `device_response` — verbatim wire reply from the device.
+- `at` — RFC 3339 timestamp.
+- `rationale_ref` — typed `{substrate, principle}`.
+- `source` — reserved per newtron#12 deferral
+  (REQUIRED key, value REQUIRED to be `null` in v0).
+
+Surviving newtcon-server surfaces that embed `PerWrite` shapes (§Operations
+`per_write[]` on observed operations, §Observation History
+`change_per_write[]` correlation entries, §Report Bug
+`failed_write.substrate.per_write` body section) consume the shape
+verbatim from newtrun-server's substrate as observed by
+newtcon-server, preserving the §46 wire-shape principle across the
+rebalance boundary. The full historical specification of `PerWrite`
+lives in newtrun-server's contract (newtron repo); this section
+documents the shape because surviving newtcon-server surfaces
+reference it.
 
 ## Streaming substrate-operation events
 
@@ -888,10 +1150,39 @@ this contract.
 
 ## Endpoints — Operations
 
-These endpoints expose the per-operation trace used by Service Composer
-apply, Inbox card actions, and (later) Change Workbench commit. The trace
-shape is the same regardless of which surface initiated the operation —
-the pipeline is one pipeline (`unified-pipeline-architecture.md` §2).
+**Sharpening deferred per ADR-0001 rebalance ([`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md)).**
+The Operations log is **uniquely-newtcon** substrate per ADR-0001
+§"What stays in newtcon" — the long-lived per-operation history
+beyond a single newtrun run, which is what makes `operation_url`
+valid across time and is the substrate the Observation History
+correlation engine (§Endpoints — Observation History `source`
+classification) writes to. The shape documented in this section
+(`pipeline` object, `verify` object, `retention` block) is the
+canonical operator-facing specification and is preserved verbatim
+across the rebalance.
+
+**What did change is provenance of writes to the operations store**:
+post-rebalance, the state-changing surfaces that mint operations
+(Service Composer apply, Inbox card actions, Change Workbench commit)
+moved to newtrun-server per ADR-0001 §Bucket A. newtcon-server now
+**observes** those operations via newtrun-server's HTTP read surface
+(`GET /api/runs/{suite}` and `GET /api/runs/{suite}/events` SSE per
+newtron#22, landed 2026-05-29) and writes them into its own operations
+store for long-lived retention plus observation-history correlation.
+A future Contract PR may sharpen the surface to add a `source_run_id`
+companion pointing into newtrun-server's run state, or to surface
+`EventStepProgress` per-run lineage as a first-class field, as the
+Observation History correlation engine matures and the right call
+sharpens. The operator-facing wire shape is unchanged in this PR;
+the substrate underneath shifts.
+
+These endpoints expose the per-operation trace produced by Service
+Composer apply, Inbox card actions, and Change Workbench commit
+operations the operator initiates through the browser frontend over
+newtrun-server (per the moved-surface stubs above). The trace shape
+is the same regardless of which operator workflow initiated the
+operation — the pipeline is one pipeline
+(`unified-pipeline-architecture.md` §2).
 
 The trace separates two concerns that `unified-pipeline-architecture.md`
 itself separates:
@@ -940,18 +1231,37 @@ operations are observation history; observation history is
 newtcon's domain per `CLAUDE.md` §No Hidden State and §Endpoints —
 Observation History "Why this lives in newtcon, not newtron".
 
-The capture path is the synchronous one: every state-changing
-endpoint in this contract (`POST /api/apply`,
-`POST /api/inbox/{card_id}/action`,
-`POST /api/workbench/{batch_id}/commit`,
-`POST /api/workbench/{batch_id}/revert`) issues the underlying
-newtron RPC, receives newtron's `WriteResult` (per
-`../newtron/docs/newtron/api.md` §15), and writes the full pipeline
-trace + verify assertion + initiator metadata into newtcon-server's
-operations store within the same request. The operation is
-addressable at `GET /api/operations/{operation_id}` as soon as the
-state-changing endpoint returns. There is no propagation delay and
-no separate ingestion path.
+**The capture path is observation of newtrun-server's run state.**
+Post-rebalance per ADR-0001, the state-changing surfaces that mint
+operations (Composer apply, Inbox action, Workbench commit / revert)
+moved to newtrun-server's `POST /api/runs/inline` (newtron#23). The
+browser frontend initiates each operation as a scenario run against
+newtrun-server; newtron-side RPCs are issued by newtrun-server's
+`newtron` action, which receives newtron's `WriteResult` (per
+`../newtron/docs/newtron/api.md` §15) and surfaces it through
+newtrun-server's `EventStepProgress` events (per newtron#24's
+`StepProgress` callback). newtcon-server **observes** these events
+via newtrun-server's HTTP read surface — subscribing to
+`GET /api/runs/{suite}/events` (SSE per newtron#22) for in-flight
+operations and polling `GET /api/runs/{suite}` for terminal-state
+reconciliation — and writes the full pipeline trace + verify
+assertion + initiator metadata into newtcon-server's operations
+store. The operation is addressable at
+`GET /api/operations/{operation_id}` as soon as the upstream
+substrate (newtrun-server's `EventStepProgress` for the terminal
+event of the underlying newtron call) is observed and recorded.
+
+Capture cadence is bounded by newtrun-server's `EventStepProgress`
+emission rate plus newtcon-server's poll-and-subscribe pipeline; for
+in-flight operations the substrate is available with sub-second
+freshness via the SSE subscription, for terminal-state
+reconciliation a periodic poll closes any missed-event gaps. The
+binding guarantee on this surface is that **every operation_id
+addressable through this endpoint has its full pipeline trace +
+verify assertion captured**; the exact upstream-observation cadence
+is an implementation detail of newtcon-server, exposed through
+`/api/health` for operator inspection per `CLAUDE.md` §No Hidden
+State.
 
 **Storage substrate (informational, not contractual).** v0 uses the
 same SQLite store as Observation History (`internal/history/`, per
@@ -1052,7 +1362,7 @@ contract above; never falls back to newtron.
   "network": "default",
   "node": "switch1",
   "initiator": {
-    "surface": "composer | inbox | workbench",
+    "operator_workflow": "composer | inbox | workbench",
     "verb": "ApplyService | RemoveService | RefreshService | Reconcile | RollbackZombie | ...",
     "started_at": "2026-05-25T14:06:00Z"
   },
@@ -1118,7 +1428,7 @@ contract above; never falls back to newtron.
         }
       ]
     },
-    "confidence": { /* Confidence object — see §POST /api/preview "Confidence (typed)" */ }
+    "confidence": { /* Confidence object — see §Shared substrate shapes "Confidence" */ }
   },
   "terminal": {
     "reached": true,
@@ -1229,8 +1539,13 @@ Field rules:
   decision substrate; the operator must be able to read it directly,
   not via a digest.
 - **`terminal.outcome == "partial"`** is reserved for multi-target
-  operations initiated by Composer or Workbench; per-node operation
-  traces use `success` or `failure` only.
+  operator workflows (Composer apply across N targets, Workbench
+  commit across N nodes — both delivered by the browser frontend
+  over newtrun-server per ADR-0001); per-node operation traces use
+  `success` or `failure` only. The aggregate "partial" outcome
+  lives on the newtrun-server run state (per-step in
+  `EventStepProgress`); the newtcon-server operations store
+  surfaces the per-node traces it observed.
 - **Terminal-state derivation.** `terminal.outcome == "success"` requires
   every `pipeline.*.stage` ∈ `{complete, skipped}` AND `verify.state` ∈
   `{complete, skipped}` AND (when `verify.state == "complete"`)
@@ -1501,14 +1816,16 @@ in their own environment (ssh access, redis-cli on the device, etc.).
 
 ### How this surface differs from per-operation `cli_command` annotations
 
-Every substrate-operation event in this contract's streaming surface
-(`per_write[*].cli_command`, see
-[§Streaming substrate-operation events](#streaming-substrate-operation-events))
-already carries the literal `ssh <device>` + `redis-cli` /
-`redis-del` / `redis-hgetall` command that reproduces THAT
-substrate-operation by hand. That per-substrate-op annotation is the
-"this is the device-level command equivalent to THIS specific write"
-teaching, surfaced inline at the moment the operation executes.
+Every substrate-operation event in the per-write substrate
+(`per_write[*].cli_command` in the §Shared substrate shapes
+"PerWrite" carried on §Operations responses, on §Observation History
+change records, and on §Report Bug body sections; surfaced live on
+newtrun-server's `EventStepProgress` SSE per ADR-0001) already
+carries the literal `ssh <device>` + `redis-cli` / `redis-del` /
+`redis-hgetall` command that reproduces THAT substrate-operation by
+hand. That per-substrate-op annotation is the "this is the
+device-level command equivalent to THIS specific write" teaching,
+surfaced inline at the moment the operation executes.
 
 The Manual-Mode Parity teaching surface is one level up. It is the
 operator's **discovery ground** for the device-level equivalent of an
@@ -1751,10 +2068,10 @@ contract.
   },
   "see_also": [
     {
-      "kind": "newtcon_surface",
+      "kind": "browser_workflow",
       "name": "Composer apply for service transit",
-      "endpoint": "/api/preview",
-      "rationale": "newtron-mediated path: stage the service via Composer; the apply produces the NEWTRON_INTENT record and renders the BGP_NEIGHBOR / INTERFACE / etc. ChangeSet."
+      "operator_workflow": "service-composer",
+      "rationale": "The newtron-mediated path is delivered by the browser frontend over newtrun-server per ADR-0001: stage the service via Composer; the apply produces the NEWTRON_INTENT record and renders the BGP_NEIGHBOR / INTERFACE / etc. ChangeSet."
     },
     {
       "kind": "rehearsal_walkthrough",
@@ -2371,10 +2688,10 @@ newtron-side state is mutated.
   "step_count": 4,
   "see_also": [
     {
-      "kind": "newtcon_surface",
+      "kind": "browser_workflow",
       "name": "Composer remove-service",
-      "endpoint": "/api/preview",
-      "rationale": "newtron-mediated path: when the entry IS owned by an intent, the substrate-faithful removal is remove-service through Composer. Use this scenario only when no intent claims the entry."
+      "operator_workflow": "service-composer",
+      "rationale": "The newtron-mediated path is delivered by the browser frontend over newtrun-server per ADR-0001: when the entry IS owned by an intent, the substrate-faithful removal is remove-service through Composer. Use this scenario only when no intent claims the entry."
     },
     {
       "kind": "rehearsal_walkthrough",
@@ -2630,9 +2947,9 @@ surfaces:
 
 | ID | Minted by | Resolves to (internally, opaque to consumer) |
 |----|-----------|---------------------------------------------|
-| `intent_id` | Service Composer apply, Workbench commit, Inbox action — every place a NEWTRON_INTENT record is written | `(network, node, resource_key)` — the addressing tuple newtron uses for an intent record |
-| `operation_id` | Every state-changing endpoint (apply, commit, inbox action) | `(network, node, operation_sequence)` — the addressing tuple newtcon-server uses for an operation trace |
-| `changeset_id` | Per `operation_id`, one or more `changeset_id`s — one per per-Node bundle the operation rendered | `(operation_id, per_node_sequence)` |
+| `intent_id` | Every state-changing operator workflow that writes a NEWTRON_INTENT record — Service Composer apply, Workbench commit, Inbox action (all delivered by the browser frontend over newtrun-server per ADR-0001) — the ID is minted by the underlying newtron RPC and observed by newtcon-server through newtrun-server's run state | `(network, node, resource_key)` — the addressing tuple newtron uses for an intent record |
+| `operation_id` | Minted by newtcon-server's operations store (see §Endpoints — Operations capture path) when it records an observed operation from newtrun-server's `EventStepProgress` substrate | `(network, node, operation_sequence)` — the addressing tuple newtcon-server uses for an operation trace |
+| `changeset_id` | Per `operation_id`, one or more `changeset_id`s — one per per-Node bundle the operation rendered. Minted by newtcon-server alongside `operation_id` from the observed substrate. | `(operation_id, per_node_sequence)` |
 
 The structure of an ID is an implementation concern of
 newtcon-server; consumers MUST treat all IDs as opaque. The mapping
@@ -2640,12 +2957,12 @@ table above is documentation of provenance, not a wire contract.
 
 `intent_id`, `operation_id`, and `changeset_id` are surfaced as link
 fields throughout the rest of the contract (`intent_url` on
-Workbench commit results, `operation_url` on apply/inbox/commit
-responses, etc.). Provenance endpoints are the targets of those
-links. Every shape that exposes one of these IDs MUST also expose
-its `*_url` companion so the UI follows-the-link without
-constructing paths from opaque IDs (the contract owns URL
-construction).
+operation traces, `operation_url` on Observation History changes,
+`changeset_url` on Report Bug substrate blocks, etc.). Provenance
+endpoints are the targets of those links. Every shape that exposes
+one of these IDs MUST also expose its `*_url` companion so the UI
+follows-the-link without constructing paths from opaque IDs (the
+contract owns URL construction).
 
 ### Retention
 
@@ -2751,7 +3068,7 @@ operation-history mapping.
     "kind": "operator_action | service_spec_resolution | reconcile_replay | provisioning_replay",
     "operation_id": "<opaque>",
     "operation_url": "/api/operations/<opaque>",
-    "surface": "composer | inbox | workbench | provisioning",
+    "operator_workflow": "composer | inbox | workbench | provisioning",
     "operator_identity": "operator:aldrin",
     "started_at": "2026-05-25T14:06:00Z",
     "origin_rationale_ref": {
@@ -2797,7 +3114,7 @@ operation-history mapping.
   },
   "rebuild_implication": {
     "summary": "Reversing this intent removes 8 projection entries across BGP_NEIGHBOR, INTERFACE, INTERFACE_IP, and decrements references on ACL_TABLE|PROTECT_RE_IN_1ED5F2C7 (becomes orphaned), ROUTE_MAP|TRANSIT_IN_A1B2C3D4 (decremented; 3 consumers remain), VRF|Vrf_TRANSIT (decremented; 1 consumer remains).",
-    "deeply_inspectable_via": "/api/workbench/stage with the symmetric reverse verb, then /api/workbench/{batch_id}/dry_run",
+    "deeply_inspectable_via_browser_workflow": "change-workbench (compose a scenario with the symmetric reverse verb in the browser frontend, then dry-run it against newtrun-server per ADR-0001)",
     "rebuild_implication_rationale_ref": {
       "substrate": "newtron/docs/newtron/intents.md#52-content-hashed-naming",
       "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
@@ -2829,9 +3146,11 @@ Field rules:
 - **`origin.kind`** distinguishes substrate-causes for the intent's
   existence:
   - `operator_action` — the intent was written because the operator
-    directly invoked a verb (Composer apply, Inbox action,
-    Workbench commit). `operation_url` points to the operation
-    trace.
+    directly invoked a verb through the browser frontend (Composer
+    apply, Inbox action, Workbench commit — all delivered over
+    newtrun-server per ADR-0001 §What moves upstream).
+    `operation_url` points to the operation trace newtcon-server
+    captured by observing newtrun-server's run state.
   - `service_spec_resolution` — the intent was synthesized by a
     parent operation as a derived resource (e.g., a `vrf|*` intent
     created by an `ApplyService` because the service spec required
@@ -2846,6 +3165,13 @@ Field rules:
   - `provisioning_replay` — the intent was written by a Day-1
     provisioning operation
     (`unified-pipeline-architecture.md` §1 "Topology Mode").
+- **`origin.operator_workflow`** is the bounded enum
+  `composer | inbox | workbench | provisioning` naming the operator
+  workflow the intent was authored through. The workflows are
+  browser-frontend surfaces (Composer / Inbox / Workbench delivered
+  over newtrun-server per ADR-0001); the enum is preserved as the
+  operator-facing vocabulary even though the underlying initiation
+  path moved upstream.
 - **`changesets[]`** lists every ChangeSet that wrote, modified, or
   deleted this intent record. For the typical case (intent written
   once and currently `actuated`), the list has one entry. For an
@@ -2858,12 +3184,16 @@ Field rules:
   (`DESIGN_PRINCIPLES_NEWTRON.md` §43 "Intent DAG"). The list is
   one-hop only; the operator clicks through to walk further.
 - **`rebuild_implication`** is a textual summary of what reversing
-  the intent would do, plus a deep-inspect link to the Workbench
-  surface that lets the operator stage the symmetric reverse and
-  see the full ChangeSet. The summary is a hint; the substrate is
-  in the linked Workbench dry-run, not in the summary itself
-  (operator-philosophy invariant #1: counts and summaries do not
-  substitute for the substrate).
+  the intent would do, plus a `deeply_inspectable_via_browser_workflow`
+  pointer naming the browser-frontend workflow that lets the operator
+  stage the symmetric reverse and see the full ChangeSet (the Change
+  Workbench workflow delivered over newtrun-server per ADR-0001).
+  The summary is a hint; the substrate is in the linked browser-
+  workflow's dry-run (newtrun-server's
+  `POST /api/runs/inline` with the scenario opted-out of the
+  topology-reconcile gate), not in the summary itself (operator-
+  philosophy invariant #1: counts and summaries do not substitute
+  for the substrate).
 - **`manual_equivalent.newtron_http.status: "available"`** because
   the substrate IS exposed by existing newtron endpoints; the
   endpoint shape is a composite read with client-side filtering, as
@@ -3241,7 +3571,8 @@ decorations live in newtcon-server.
 Field rules:
 
 - **`per_node[*].signal_unavailable`** uses the same pattern as the
-  Inbox surface: a Node whose underlying signal is currently
+  browser-frontend Operator Inbox cards (per the §Operator Inbox
+  stub above): a Node whose underlying signal is currently
   unreadable is NOT silently dropped (that would violate
   `CLAUDE.md` §No Hidden State). It appears with
   `signal_unavailable: true`, an empty `tables`, and a
@@ -3427,11 +3758,12 @@ operator needs a stable URL to navigate to from elsewhere.
 
 Field rules:
 
-- **Relationship to §POST /api/preview "ChangeSet (typed)".** The
+- **Relationship to §Shared substrate shapes "ChangeSet".** The
   `writes[]`, `deletes[]`, and (here, in flattened form) the
-  NEWTRON_INTENT rows that the typed ChangeSet's `intent_records[]`
-  carries are the same per-entry substrate the typed ChangeSet
-  defines. This endpoint extends the typed shape with three
+  NEWTRON_INTENT rows that the canonical ChangeSet's
+  `intent_records[]` carries are the same per-entry substrate the
+  canonical ChangeSet defines. This endpoint extends the canonical
+  shape with three
   post-execution additions: `prior_fields` (the snapshot before
   the write, available only post-commit because newtron's
   Lock/snapshot/restore cycle captures it during execution),
@@ -3580,7 +3912,7 @@ Idempotent; safe to poll. No newtron-side state is mutated.
       }
     ]
   },
-  "confidence": { /* Confidence object — see §POST /api/preview "Confidence (typed)" */ },
+  "confidence": { /* Confidence object — see §Shared substrate shapes "Confidence" */ },
   "interpretation": {
     "verdict": "verify_failed_on_subset",
     "verdict_rationale_ref": {
@@ -3595,7 +3927,7 @@ Idempotent; safe to poll. No newtron-side state is mutated.
       },
       {
         "verb": "stage_reconcile_delta",
-        "rationale": "if verify failures correspond to a drift detection signal, a delta reconcile would re-apply the missing entries; stage via Workbench",
+        "rationale": "if verify failures correspond to a drift detection signal, a delta reconcile would re-apply the missing entries; stage via the browser-frontend Operator Inbox drift card (delivered over newtrun-server per ADR-0001)",
         "manual_equivalent_newtron_cli": "newtron switch1 intent reconcile -x --mode delta"
       }
     ]
@@ -3606,7 +3938,7 @@ Idempotent; safe to poll. No newtron-side state is mutated.
       "status": "partial_match",
       "method": "POST",
       "path": "/network/default/node/switch1/verify-committed",
-      "note": "Re-runs verify against the LAST committed ChangeSet on the device, not the historical ChangeSet for this specific operation_id. The historical assertion captured by newtcon-server at this operation's apply time is the authoritative answer to the substrate question 'did this operation verify?'; the live re-verify answers a different question ('does the device's current state still match the LAST commit?'). The contract surfaces the captured assertion here; an operator who wants a live re-verify uses Workbench to stage a fresh operation."
+      "note": "Re-runs verify against the LAST committed ChangeSet on the device, not the historical ChangeSet for this specific operation_id. The historical assertion captured by newtcon-server at this operation's apply time is the authoritative answer to the substrate question 'did this operation verify?'; the live re-verify answers a different question ('does the device's current state still match the LAST commit?'). The contract surfaces the captured assertion here; an operator who wants a live re-verify stages a fresh operation through the browser-frontend Change Workbench workflow (delivered over newtrun-server per ADR-0001)."
     }
   }
 }
@@ -3669,7 +4001,7 @@ Field rules:
   used here because an existing newtron endpoint answers a related
   but not identical question; the `note` explains the gap honestly.
   The bounded enum and the per-shape rules are defined canonically
-  at §POST /api/inbox/{card_id}/action/preview "`manual_equivalent.newtron_http`";
+  at §Shared substrate shapes "`manual_equivalent.newtron_http`";
   this site uses one of those shapes, it does not redefine the
   enum.
 
@@ -3919,7 +4251,7 @@ detail (steps, CLI commands, lab-device guidance) is at
       "category": "partial_commit",
       "name": "Partial Workbench commit recovery",
       "walkthrough_count": 1,
-      "description": "Walkthroughs for cross-Node Workbench commits that succeeded on some Nodes and failed on others (Workbench's per-Node atomicity model)."
+      "description": "Walkthroughs for cross-Node Workbench commits that succeeded on some Nodes and failed on others (the per-Node atomicity model preserved across ADR-0001 — the Workbench workflow is delivered by the browser frontend over newtrun-server post-rebalance, but the atomicity substrate is unchanged because newtron's `cs.Apply` mediation is unchanged)."
     }
   ],
   "walkthroughs": [
@@ -4249,14 +4581,14 @@ is mutated.
   "step_count": 3,
   "out_of_scope": [
     "Issuing the reconcile through newtron's own pipeline. That path exists (newtron's HTTP API `/intent/reconcile` and the equivalent CLI command), and the operator should know it; this walkthrough deliberately practices the hand-equivalent so the operator builds the substrate-level mental model independently of newtron.",
-    "Detecting drift via newtron's Inbox card. The Inbox card exists (see §Endpoints — Operator Inbox); this walkthrough is for the operator who has decided to diagnose drift without newtron's help."
+    "Detecting drift via the browser-frontend Operator Inbox card. The Inbox card is delivered by the browser frontend (see §Endpoints — Operator Inbox stub above; the underlying substrate is composed from newtcon-server's Observation History plus newtrun-server's run state per ADR-0001); this walkthrough is for the operator who has decided to diagnose drift without that automation in the path."
   ],
   "see_also": [
     {
-      "kind": "newtcon_surface",
+      "kind": "browser_workflow",
       "name": "Operator Inbox — drift card",
-      "endpoint": "/api/inbox",
-      "rationale": "newtron-mediated path: read the drift card, follow the recommended action."
+      "operator_workflow": "operator-inbox",
+      "rationale": "The newtron-mediated path is delivered by the browser frontend per ADR-0001: open the operator-inbox drift card, follow the recommended action."
     },
     {
       "kind": "newtron_principle",
@@ -4582,19 +4914,28 @@ Every observed change is classified by `source`. The classification
 is the operator's first lever for separating "the automation did
 this" from "someone bypassed the automation."
 
-- **`newtron_mediated`** — newtcon can correlate the observed change
-  to a newtcon-known operation (one of: a Composer apply, a
-  Workbench commit, an Inbox action, a Provisioning operation
-  reported by newtron) by matching the substrate writes the
-  operation produced against the diff between the prior and current
-  observation. The `operation_url` companion field is populated.
-  Notably absent from this list: any "newtcon-mediated manual write"
-  source. The refined invariant #2 removed that path (see
+- **`newtron_mediated`** — newtcon-server can correlate the observed
+  change to a known operation in its operations store (one of: a
+  Composer apply, a Workbench commit, an Inbox action, a
+  Provisioning operation — all post-rebalance delivered by the
+  browser frontend over newtrun-server per ADR-0001, with the
+  operations store populated by newtcon-server observing
+  newtrun-server's run state per §Operations capture-path) by
+  matching the substrate writes the operation produced against the
+  diff between the prior and current observation. The
+  `operation_url` companion field is populated. The correlation
+  composes two substrates: newtcon-server's operations store
+  (long-lived per-operation history per ADR-0001 §B.1) and the
+  Observation History polling layer's per-Node snapshots; the match
+  is the substrate-grounded answer to "which run-mediated
+  operation produced this observed change." Notably absent from
+  this list: any "newtcon-mediated manual write" source. The
+  refined invariant #2 removed that path (see
   [§Endpoints — Manual-Mode Parity (teaching surface)](#endpoints--manual-mode-parity-teaching-surface));
   operator manual writes via ssh + redis-cli are taught by newtcon
   but executed by the operator, so they appear in observation
-  history as `out_of_band` (the operator was the agent; newtcon was
-  not in the path).
+  history as `out_of_band` (the operator was the agent; neither
+  newtcon-server nor newtrun-server was in the path).
 - **`out_of_band`** — newtcon observed a substrate change for which
   it cannot find a correlated operation. Either someone wrote
   CONFIG_DB directly via a non-newtcon path (a different newtron
@@ -4721,8 +5062,8 @@ contract, never re-coining it:
   partial_match | pending_newtron_gap | deferred_indefinitely |
   not_applicable`. The bounded enum and the per-shape rules
   (including the `re_evaluation_trigger` requirement on
-  `deferred_indefinitely`) are defined canonically at §POST
-  /api/inbox/{card_id}/action/preview "`manual_equivalent.newtron_http`".
+  `deferred_indefinitely`) are defined canonically at
+  §Shared substrate shapes "`manual_equivalent.newtron_http`".
 
 ### `GET /api/history/nodes/{node}`
 
@@ -5132,9 +5473,10 @@ Field rules:
   State, observation history is honest about its inputs. Each
   read carries the same `newtron_endpoint_status` discriminator
   vocabulary as `manual_equivalent.newtron_http.status` (bounded
-  enum and per-shape rules defined canonically at §POST
-  /api/inbox/{card_id}/action/preview), so the operator knows which
-  newtron capability is currently exercised.
+  enum and per-shape rules defined canonically at
+  §Shared substrate shapes "`manual_equivalent.newtron_http`"),
+  so the operator knows which newtron capability is currently
+  exercised.
 
 **Errors:**
 
@@ -5450,7 +5792,7 @@ Idempotent; safe to poll. No state mutated.
     ],
     "honesty": {
       "is_authoritative_reversal": false,
-      "is_authoritative_reversal_rationale": "the undo sequence is mechanically derived from the observed diff; it reproduces the pre-change CONFIG_DB and NEWTRON_INTENT state but does NOT re-run newtron's symmetric-reverse pipeline (per DESIGN_PRINCIPLES_NEWTRON §15, the canonical reverse is the inverse operation rendered by newtron, not a mechanical undo). The mechanical undo is correct as a substrate reversal but does not produce a newtron operation trace, an intent record reversal, or a verify assertion. Operators who need the canonical reverse stage it via Workbench using the §15 symmetric-reverse verb; the undo_command_sequence is the manual-mode operator-tools alternative when newtron is unavailable.",
+      "is_authoritative_reversal_rationale": "the undo sequence is mechanically derived from the observed diff; it reproduces the pre-change CONFIG_DB and NEWTRON_INTENT state but does NOT re-run newtron's symmetric-reverse pipeline (per DESIGN_PRINCIPLES_NEWTRON §15, the canonical reverse is the inverse operation rendered by newtron, not a mechanical undo). The mechanical undo is correct as a substrate reversal but does not produce a newtron operation trace, an intent record reversal, or a verify assertion. Operators who need the canonical reverse stage it via the browser-frontend Change Workbench workflow using the §15 symmetric-reverse verb (delivered over newtrun-server per ADR-0001); the undo_command_sequence is the manual-mode operator-tools alternative when neither newtcon-server nor newtrun-server is in the path.",
       "rationale_ref": {
         "substrate": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove",
         "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
@@ -5477,15 +5819,21 @@ Field rules:
   scoping-to-relevant-subset is a rendering accommodation, not a
   substrate elision.
 - **`source_classification.match_method`** is bounded:
-  - `newtcon_initiated_authoritative` — newtcon-server initiated
-    the operation itself (Composer apply, Inbox action, Workbench
-    commit). The correlation is not inferential; newtcon was the
-    agent of the change and captured the operation_id at apply
-    time. The observed diff is validated against the captured
-    ChangeSet writes for substrate-consistency, but the
-    correlation itself is authoritative — "historical changes made
-    via newtcon must be maintained by newtcon" is operationalized
-    at this level. Confidence: high.
+  - `newtcon_initiated_authoritative` — the operation was authored
+    by the operator through a browser-frontend workflow that
+    newtcon-server captured into its operations store (Composer
+    apply, Inbox action, Workbench commit — all delivered over
+    newtrun-server per ADR-0001; newtcon-server observes each
+    operation as a run on newtrun-server and writes the
+    operation_id + ChangeSet + verify assertion into its store per
+    §Operations capture-path). The correlation is not inferential
+    against this composed substrate; newtcon-server's operations
+    store IS the authoritative record of operator-initiated changes
+    in the rebalanced architecture. The observed diff is validated
+    against the captured ChangeSet writes for substrate-
+    consistency, but the correlation itself is authoritative —
+    "historical changes made via newtcon must be maintained by
+    newtcon" is operationalized at this level. Confidence: high.
   - `changeset_writes_match_observed_diff` — newtcon's captured
     ChangeSet for the operation exactly matches the observed
     substrate diff. Used when the operation was reported by
@@ -5528,10 +5876,12 @@ Field rules:
   sequence is a substrate reversal, not a newtron-canonical
   symmetric reverse — is binding per invariant #9 and per
   `DESIGN_PRINCIPLES_NEWTRON.md` §15. An operator who needs the
-  canonical reverse uses Workbench to stage the symmetric reverse
-  verb; the undo command sequence is the operator's-own-tools
-  fallback when newtcon or newtron is unavailable. The honest
-  framing is part of the contract, not a footnote.
+  canonical reverse uses the browser-frontend Change Workbench
+  workflow to stage the symmetric reverse verb (delivered over
+  newtrun-server per ADR-0001); the undo command sequence is the
+  operator's-own-tools fallback when neither newtcon-server nor
+  newtrun-server is in the path. The honest framing is part of
+  the contract, not a footnote.
 - **`out_of_band_subkind`** is populated only on
   `source: "out_of_band"` entries; same bounded enum as the
   list endpoint.
@@ -5779,9 +6129,9 @@ Every endpoint in this section MUST satisfy:
    how stale the underlying observation is at request time.
 7. **Honest `manual_equivalent` framing.** Every endpoint
    declares `manual_equivalent.newtron_http.status` as one of
-   the bounded values defined canonically at §POST
-   /api/inbox/{card_id}/action/preview
-   "`manual_equivalent.newtron_http`". For observation history,
+   the bounded values defined canonically at
+   §Shared substrate shapes "`manual_equivalent.newtron_http`".
+   For observation history,
    the typical answer is `not_applicable` (the substrate is
    newtcon's, not newtron's) — but the rationale field names
    the operator's-tools alternative (poll newtron's reads
@@ -5842,19 +6192,22 @@ construction; the contract guarantees the substrate is present.
 
 | Surface | What it does | What it does NOT do |
 |---------|--------------|---------------------|
-| `POST /api/apply`, `POST /api/workbench/{batch_id}/commit`, `POST /api/inbox/{card_id}/action` | Execute substrate operations. Stream / return `PerWrite` entries (per §Streaming substrate-operation events). | Author bug reports. The operator sees the failure; nothing automates the diagnostic-to-report-body translation. |
-| `GET /api/operations/{operation_id}` | Inspect a single operation's pipeline trace, verify assertion, terminal state. | Synthesize a bug report from that trace. The data is available to read; the operator must compose the report by hand. |
-| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source`. The upstream substrate is `deferred_indefinitely` per [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) (re-evaluation trigger documented at §Streaming substrate-operation events "`source`"); until re-evaluation, `PerWrite.source` is `null` and operators classify the call-site manually. |
+| Browser-frontend state-changing operator workflows (Composer apply, Inbox action, Workbench commit — delivered over newtrun-server per ADR-0001) | Execute substrate operations. Stream `EventStepProgress` events from newtrun-server carrying `PerWrite` entries (per §Shared substrate shapes "PerWrite"; the upstream wire substrate is documented in newtrun-server's contract). | Author bug reports. The operator sees the failure; nothing automates the diagnostic-to-report-body translation. |
+| `GET /api/operations/{operation_id}` | Inspect a single operation's pipeline trace, verify assertion, terminal state (captured by newtcon-server observing newtrun-server's run state per §Operations capture-path). | Synthesize a bug report from that trace. The data is available to read; the operator must compose the report by hand. |
+| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source`. The upstream substrate is `deferred_indefinitely` per [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) (re-evaluation trigger documented at §Streaming substrate-operation events "`source`" stub which points at newtrun-server's `EventStepProgress` substrate); until re-evaluation, `PerWrite.source` is `null` and operators classify the call-site manually. |
 | **`POST /api/report-bug/preview` / `POST /api/report-bug`** (this surface) | Collect the substrate + operation context + recent-history context + (when available) call-site, route to the correct repository, render a structured Markdown body, return for operator review, and (on confirmation) deliver the body to a configured integration target. | Auto-file the report without operator review. The operator confirms the rendered body before any external system is touched, per `CLAUDE.md` §Preview Before Commit, Always. |
 
-The surface is read-mostly with respect to newtron substrate (it
-reads from newtron via `internal/newtronc/` to populate operation
-context and recent-history context); the only state-changing effect
-is the production of an external artifact (a GitHub issue, or a
-clipboard payload). That external mutation is exactly why the
-preview/apply pairing is mandatory on this surface — the artifact's
-shape and content must be operator-approved before it lands in an
-external system that the operator's collaborators will see.
+The surface is read-mostly with respect to upstream substrate (it
+reads via `internal/newtronc/` from newtron-server for intent and
+projection substrate, and via newtcon-server's operations store
+[populated by observing newtrun-server's run state per
+§Operations capture-path] for operation context and recent-history
+context); the only state-changing effect is the production of an
+external artifact (a GitHub issue, or a clipboard payload). That
+external mutation is exactly why the preview/apply pairing is
+mandatory on this surface — the artifact's shape and content must
+be operator-approved before it lands in an external system that the
+operator's collaborators will see.
 
 ### Honesty about what this surface IS NOT
 
@@ -5909,7 +6262,7 @@ operator needs. It does **not**:
   mint new operation IDs; it consumes existing ones.
 - `per_write_seq` — OPTIONAL request input. The `seq` of a specific
   `PerWrite` entry within `operation_id`'s `per_target[*].per_write[]`
-  (per §Streaming substrate-operation events). When supplied, the
+  (per §Shared substrate shapes "PerWrite"). When supplied, the
   report is scoped to one substrate operation within the operation;
   when omitted, the report covers the operation as a whole.
 
@@ -5918,11 +6271,13 @@ operator needs. It does **not**:
 This surface uses the existing contract vocabulary. No new types are
 coined.
 
-- `PerWrite` — defined in §Streaming substrate-operation events.
-  Carries `seq`, `target`, `kind`, `substrate`, `result`,
-  `cli_command`, `device_response`, `at`, `rationale_ref`,
-  `source`. The Report Bug body embeds these verbatim; the report
-  is substrate-canonical by construction.
+- `PerWrite` — defined canonically in §Shared substrate shapes
+  "PerWrite". Carries `seq`, `target`, `kind`, `substrate`,
+  `result`, `cli_command`, `device_response`, `at`, `rationale_ref`,
+  `source`. The Report Bug body embeds these verbatim from
+  newtcon-server's operations store (which observes them from
+  newtrun-server's `EventStepProgress` substrate per ADR-0001);
+  the report is substrate-canonical by construction.
 - Operation trace — defined in §Endpoints — Operations.
   Carries the pipeline (`Intent → Replay → Render → Deliver`),
   verify-stage assertion, terminal outcome. Embedded by reference
@@ -6119,9 +6474,10 @@ Field rules:
 
 - **`templates[]`** — the bounded catalog. New template IDs are a
   Contract PR; the four IDs above are the v0 set, scoped to cover
-  the failure modes the §Streaming substrate-operation events
-  contract surfaces (per-write rejection, verify-assertion failure,
-  drift refusal, mid-stream abort). Other failure modes (e.g.,
+  the failure modes the per-write substrate exposes via
+  §Shared substrate shapes "PerWrite" and the upstream
+  newtrun-server `EventStepProgress` (per-write rejection,
+  verify-assertion failure, drift refusal, mid-stream abort). Other failure modes (e.g.,
   zombie-detected, ref-count-warning-stuck) get templates in
   follow-up Contract PRs; until then, the operator selects the
   closest applicable template and uses the narrative to clarify.
@@ -6223,9 +6579,11 @@ Field rules:
 - **`per_write_seq`** — OPTIONAL. When supplied, the report is
   scoped to one specific substrate operation within the operation.
   When supplied, `per_write_target` is ALSO REQUIRED — `seq` is
-  per-target (per §Streaming substrate-operation events
-  "Per-Node atomicity honesty"), so `(target, seq)` is the unique
-  identifier. Supplying one without the other → 400
+  per-target (the per-Node atomicity honesty discipline is
+  upstream in newtrun-server's `EventStepProgress` substrate per
+  newtron's `DESIGN_PRINCIPLES_NEWTRON.md` §11 / §46, and observed
+  into newtcon-server's operations store per §Operations
+  capture-path), so `(target, seq)` is the unique identifier. Supplying one without the other → 400
   `validation_failure` with
   `details.rejections[*].reason: "missing_required"`. Unknown
   `(target, seq)` within `operation_id` → 400
@@ -6318,7 +6676,7 @@ Field rules:
       "id": "failed_write",
       "rendered_markdown": "**Substrate:** `BGP_NEIGHBOR|default|10.1.0.1`\n**Fields attempted:**\n```\nasn=65002\nlocal_addr=10.1.0.0\nadmin_status=up\n```\n**CLI equivalent:**\n```\nredis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65002 local_addr 10.1.0.0 admin_status up\n```\n**Device response (verbatim):**\n```\nfrrcfgd: rejected BGP_NEIGHBOR|default|10.1.0.1: invalid asn\n```",
       "substrate": {
-        "per_write": { /* full PerWrite shape per §Streaming substrate-operation events */ }
+        "per_write": { /* full PerWrite shape per §Shared substrate shapes "PerWrite" */ }
       }
     },
     {
@@ -6492,9 +6850,9 @@ Field rules:
   deferred_indefinitely | not_captured` — the same
   three-state honest-lifecycle vocabulary the canonical
   `manual_equivalent.newtron_http.status` enum applies to
-  this substrate (defined at §POST
-  /api/inbox/{card_id}/action/preview
-  "`manual_equivalent.newtron_http`"; see also the
+  this substrate (defined at
+  §Shared substrate shapes "`manual_equivalent.newtron_http`";
+  see also the
   `deferred_indefinitely → pending_newtron_gap → available`
   honest-lifecycle clause there). The `pending_newtron_gap`
   value is intentionally absent on this surface today because
@@ -6517,11 +6875,12 @@ Field rules:
     wording from the newtron#12 deferral comment in `text` and
     the navigation cross-references (`newtcon#42`, `PR #51`)
     in `newtcon_context`. The shape and verbatim discipline are
-    defined canonically at §POST
-    /api/inbox/{card_id}/action/preview
-    "`manual_equivalent.newtron_http`"; the consumption site for
-    this specific substrate is §Streaming substrate-operation
-    events "`source`". The body is still useful — the
+    defined canonically at
+    §Shared substrate shapes "`manual_equivalent.newtron_http`";
+    the consumption site for this specific substrate is
+    §Streaming substrate-operation events "`source`" (now the
+    moved-stub pointing at newtrun-server's `EventStepProgress`
+    substrate per ADR-0001). The body is still useful — the
     automation team can find the call-site by other means (grep
     on the substrate `(table, key)` for the emitting function);
     the report just does not auto-populate the name.
@@ -6869,10 +7228,11 @@ pattern — maybe this is one underlying bug").
 Field rules:
 
 - The list returns summary entries; the full record is reached
-  via `report_url`. This matches the pattern in
-  `GET /api/inbox` vs `GET /api/inbox/{card_id}` and
-  `GET /api/workbench/stashes` vs
-  `GET /api/workbench/stashes/{stash_id}`.
+  via `report_url`. This matches the list-vs-detail pattern used
+  across the contract — e.g., `GET /api/history/nodes/{node}`
+  (list of changes on a Node) vs
+  `GET /api/history/changes/{change_id}` (detail of one observed
+  change).
 - The retention window is deliberately under-specified in this
   contract; the operator chooses, and the substrate (a sqlite
   store) is documented in `docs/architecture.md`. Reports
@@ -6935,8 +7295,8 @@ Every endpoint in this section MUST satisfy:
    whose `substrate` is null or summarized is a contract
    violation.
 2. **PerWrite is embedded verbatim.** The `failed_write`
-   section embeds the full `PerWrite` shape per §Streaming
-   substrate-operation events. The bug report does not
+   section embeds the full `PerWrite` shape per
+   §Shared substrate shapes "PerWrite". The bug report does not
    re-serialize, re-key, or selectively elide the PerWrite —
    the automation team that reads the report sees the same
    substrate the operator saw at apply time, by construction.
@@ -6979,9 +7339,9 @@ Every endpoint in this section MUST satisfy:
 7. **Honest `manual_equivalent` framing.** Every endpoint in
    this section declares
    `manual_equivalent.newtron_http.status` as one of the
-   bounded values defined canonically at §POST
-   /api/inbox/{card_id}/action/preview
-   "`manual_equivalent.newtron_http`". The typical answer is
+   bounded values defined canonically at
+   §Shared substrate shapes "`manual_equivalent.newtron_http`".
+   The typical answer is
    `not_applicable` (bug-report authorship is a newtcon
    presentation concern, not a newtron substrate operation) —
    but the rationale field names the operator's-tools
