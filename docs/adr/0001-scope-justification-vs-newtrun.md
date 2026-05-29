@@ -13,7 +13,7 @@ Date: 2026-05-28
 - **2026-05-28 — Withdrawn (lead-level, subsequently overturned).** PR #84
   was closed by the team lead with a "mission-fidelity finding" comment
   arguing the verdict conflated *substrate consumed* with *operator-facing
-  product delivered* and that newcontron's deprecation list would ship
+  product delivered* and that newtcon's deprecation list would ship
   newtcon without the three primary surfaces the operator originally named.
   The withdrawal comment is preserved in PR #84's GitHub history as part
   of the audit trail.
