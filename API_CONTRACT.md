@@ -1302,11 +1302,12 @@ is exactly the substrate the operator most needs to inspect, and
 silently evicting it because the clock ran out would be the
 hidden-state pattern `CLAUDE.md` §No Hidden State exists to
 prevent.) An operation that is structurally stuck — newtron-server
-crashed before the synchronous response landed, leaving the trace
-in `pipeline.deliver.stage == "in_progress"` indefinitely — is
-surfaced as an Operator Inbox card (zombie-intent or convergence-
-straggler kind, per §Endpoints — Operator Inbox) for the operator
-to resolve; it is never silently aged out.
+crashed mid-execution, leaving newtrun-server's `EventStepProgress`
+without a terminal event and newtcon-server's observed trace in
+`pipeline.deliver.stage == "in_progress"` indefinitely — is
+surfaced as a browser-frontend Operator Inbox card (zombie-intent
+or convergence-straggler kind, per the §Endpoints — Operator Inbox
+stub) for the operator to resolve; it is never silently aged out.
 
 **Eviction semantics.** When the retention window elapses, the
 operations store deletes the record and the `operation_id` becomes
@@ -1562,9 +1563,9 @@ Field rules:
 - **`retention.captured_at`** is REQUIRED. The timestamp at which
   newtcon-server wrote this operation into its operations store —
   for terminal operations this is approximately
-  `terminal.at`; for in-flight operations this is when the
-  initiating state-changing endpoint received newtron's first
-  response.
+  `terminal.at`; for in-flight operations this is when
+  newtcon-server first observed the operation in newtrun-server's
+  run state (per §Operations capture-path).
 - **`retention.retained_until_at_least`** is REQUIRED. The earliest
   timestamp at which the pruner is permitted to evict this record.
   Computed as `captured_at + deployment_floor_seconds` for terminal
@@ -1650,12 +1651,14 @@ Field rules:
   `details.last_known.payload` carries the last-observed pipeline
   snapshot from the operations store; `details.affected_nodes[]`
   lists the Node the operation targets. This case is rare — once
-  the synchronous state-changing endpoint returned, the full trace
-  is captured in newtcon's store and this endpoint serves
-  unconditionally; the 503 path applies only to in-flight
-  operations whose terminal-state signals (e.g., a verify
-  assertion still in `in_progress` that newtcon polls newtron to
-  update) are blocked on newtron reachability.
+  newtcon-server has observed the operation's terminal
+  `EventStepProgress` from newtrun-server's run state per
+  §Operations capture-path, the full trace is captured in newtcon's
+  store and this endpoint serves unconditionally; the 503 path
+  applies only to in-flight operations whose terminal-state signals
+  (e.g., a verify assertion still in `in_progress` that
+  newtcon-server polls newtron to update) are blocked on newtron
+  reachability.
 
 ## Endpoints — Change Workbench (third surface)
 
