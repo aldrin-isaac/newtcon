@@ -165,6 +165,20 @@ rebalance is the operator-verdict response. Criteria 1–7 below are
 the substantive completion gates; criterion 0 governs the cadence in
 which the team approaches them.
 
+Criteria 1–7 were rewritten under the post-ADR-0001 rebalance per
+the operator's verdict (`/tmp/newtcon-rebalance-verdict.md`
+§"The cascade once the test-framework features land"). The
+operator-facing mission is unchanged: the three operator workflows
+(Composer / Inbox / Workbench) still deliver, and the aesthetic
+litmus test ("does the operator want to open this tool?") still
+applies. What changed is the substrate partition — newtcon ships
+**two artifacts**, and the completion gates name both. The
+canonical statement of the two-artifact shape, the four
+newtcon-server layers, and the three browser-frontend operator
+workflows lives in [`CLAUDE.md`](CLAUDE.md) §Project Scope and
+[`docs/architecture.md`](docs/architecture.md); the criteria below
+forward-reference rather than restate.
+
 0. **Ship-before-resaturate.** The current operator surface in flight
    must be shipped and operator-validated before further contract
    refinement is allowed beyond the cycle in progress at the time
@@ -183,22 +197,84 @@ which the team approaches them.
    issues; it ends when the operator signs off on empirical
    validation per §Operator's residual role.
 
-1. **All three primary surfaces implemented** — Service Composer,
-   Operator Inbox, Change Workbench — with their full
-   `API_CONTRACT.md` endpoint sets.
-2. **Provenance and Rehearsal surfaces implemented.** Required by
-   philosophy invariants #5 and #6, both declared non-negotiable.
-3. **All operator-philosophy invariants expressed in the contract.**
-   No invariant is "philosophy-debt" — every one has corresponding
-   contract surface.
-4. **No outstanding `bug` or `gap` issues** in the backlog.
-5. **All tests pass.** `go build ./...`, `go vet ./...`,
-   `go test ./...`, plus frontend tests once the frontend lands.
-6. **Drift-auditor reports two consecutive weeks of no high-severity
-   drift.** Stability signal.
-7. **Operator has validated aesthetics empirically** on the three
-   primary surfaces — meaning the operator has actually opened the
-   running tool, used each surface, and approved.
+1. **Observation History layer working end-to-end.** The substrate
+   that is the load-bearing reason newtcon-server exists per
+   ADR-0001 §Bucket B.1: adaptive per-Node polling running against
+   live `newtron-server`, persistent SQLite store of snapshots and
+   diffs, `change_id` / `observation_id` / `observation_gap`
+   markers surfaced honestly when polling missed a window, and the
+   `source` classification engine distinguishing changes newtcon
+   correlated against the operations store from changes it did not.
+   The canonical contract is
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Observation
+   History (including the `source` enum surfaced there); the
+   substrate path is `docs/architecture.md` §"`internal/history/`
+   — the persistent-substrate package."
+2. **Report Bug layer working end-to-end.** Substrate-canonical
+   body composition delivered through `clipboard` and
+   `direct_file` modes, with the four bug-report templates
+   (`substrate_write_failure`, `verify_assertion_failure`,
+   `drift_mis_classification`, `mid_stream_abort`) rendering
+   against live operation-trace, observation-history-recent-context,
+   and intent / projection blocks. Depends on criterion 1 (the
+   recent-context block reads through the Observation History store
+   per ADR-0001 §Bucket B.3) and on the operations store's capture
+   path against `newtrun-server`. The canonical contract is
+   [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints — Report Bug.
+3. **Teaching catalogs accessible.** Manual-Mode Parity and
+   Rehearsal teach surfaces served by newtcon-server and reachable
+   through the browser frontend's information architecture without
+   the operator having to know they exist. The contract surfaces
+   are [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints —
+   Manual-Mode Parity (teach surface) and §Endpoints — Rehearsal
+   (teach surface). Note the discoverability risk named in
+   ADR-0001 §"What becomes harder" #4: with the Composer no longer
+   sitting alongside the catalogs, the frontend's information
+   architecture is responsible for surfacing them at the moments
+   the operator would reach for them (manual fall-back, practice
+   before high-stakes apply).
+4. **Browser frontend delivering the three operator workflows over
+   `newtrun-server`.** Service Composer, Operator Inbox, and
+   Change Workbench all reachable from one browser entry point,
+   each composed per the workflow definitions in
+   [`CLAUDE.md`](CLAUDE.md) §"Artifact 2 — the browser frontend"
+   and the substrate paths in
+   [`docs/architecture.md`](docs/architecture.md) §"Operator
+   workflows (browser frontend over `newtrun-server`)." The
+   per-Node atomicity model is preserved end-to-end through the
+   substrate chain (`newtrun-server` mediates `newtron-server`'s
+   per-Node atomic apply). The frontend also surfaces
+   newtcon-server's Observation History, Provenance, Report Bug,
+   and Teaching Catalogs — the operator opens **one tool**. The
+   framework selection is recorded as
+   [ADR-0002](docs/adr/0002-frontend-framework.md), authored by the
+   first frontend slice.
+5. **All tests pass.** On newtcon-server:
+   `go build -o bin/newtcon-server ./cmd/newtcon-server`,
+   `go vet ./...`, `go test ./... -count=1`. On the browser
+   frontend, the test commands recorded against the chosen
+   framework in [ADR-0002](docs/adr/0002-frontend-framework.md).
+   No cross-repo test obligation on `newtrun-server` or
+   `newtron-server` — their HTTP contracts are consumed, not
+   replicated; gaps are filed upstream per
+   [`CLAUDE.md`](CLAUDE.md) §Gap-Handling Protocol.
+6. **Drift-Auditor reports two consecutive weeks of no
+   high-severity drift.** Stability signal over the rebalanced
+   scope. The Drift Auditor runs on a weekly cadence (per task #51
+   and the operator verdict §"The drift audit that landed
+   alongside it surfaces the right meta-lesson… the fix is making
+   the drift auditor a recurring role on a cadence"); the cadence
+   binding is codified in `AGENTS.md` per PR-Cascade-5.
+7. **Operator has validated aesthetics empirically.** The
+   aesthetic litmus test ("does the operator want to open this
+   tool?") applies to the running browser frontend in its
+   composed form: the three operator workflows in flight against
+   `newtrun-server`, the four newtcon-server-backed surfaces
+   alongside them, all in one tool the operator actually opens
+   and uses. Co-equal with capability per
+   [`CLAUDE.md`](CLAUDE.md) §"Aesthetic discipline is co-equal
+   with capability" and [`docs/operator-philosophy.md`](docs/operator-philosophy.md).
+   No agent can answer this; the operator must.
 
 When criteria 1–6 are met, the lead reports to the operator with a
 completion summary and waits for criterion 7 (operator's empirical
@@ -212,14 +288,14 @@ follows ADR-0001's acceptance is an unusual posture for the team:
 normally autonomous mode processes the backlog; the rebalance
 restructures the backlog. Expect a brief slower phase while the
 cascade lands — the API_CONTRACT.md split, the architecture document
-rewrite, the CLAUDE.md §Project Scope rewrite, and the rewrites of
-criteria 1 and 7 above all need to settle into the new shape
-(the operator-facing workflows are unchanged; the engine partition
-underneath them is reshuffled per the ADR's
-§"The mission is unchanged; the engine implementation is reshuffled"
-framing). After the cascade lands, normal autonomous-mode cadence
-resumes on the rebalanced scope. The team lead does not treat the
-rebalance as cause to relax criterion 0 — quite the opposite, the
+rewrite, the CLAUDE.md §Project Scope rewrite, and the rewrite of
+criteria 1–7 above all need to settle into the new shape (the
+operator-facing workflows are unchanged; the engine partition
+underneath them is reshuffled per the ADR's §"The mission is
+unchanged; the engine implementation is reshuffled" framing). After
+the cascade lands, normal autonomous-mode cadence resumes on the
+rebalanced scope. The team lead does not treat the rebalance as
+cause to relax criterion 0 — quite the opposite, the
 ship-before-resaturate discipline is what prevents the cascade
 itself from re-saturating the contract backlog before the
 implementation lane catches up on the new scope.
