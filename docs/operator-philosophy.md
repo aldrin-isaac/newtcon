@@ -29,13 +29,39 @@ the tool is for. **newtcon's job is not to complete tasks for the
 operator. Its job is to make the operator more capable than the same
 operator without it** — measured over months of use, not minutes.
 
+## Vocabulary: what "the substrate" means in this document
+
+Throughout this document, **the substrate** means the canonical typed
+data that newtron and newtrun expose over HTTP: **CONFIG_DB entries,
+intent records, ChangeSets, projection snapshots, verify assertions,
+observation snapshots, and per-write operation records.** Those are the
+network engineer's working categories — what the device holds, what the
+automation intends, what changed, what was attempted, what landed —
+named once so the rest of the document can refer to them collectively.
+
+The term is project-specific; the categories are not. A network engineer
+who reads "CONFIG_DB entry" pictures a Redis hash on the device; who
+reads "intent record" pictures the automation's stated goal for the
+device; who reads "ChangeSet" pictures the delta about to be applied;
+who reads "projection snapshot" pictures the automation's current best
+read of device state. The substrate is the union of those things and a
+few more — observation snapshots over time, verify assertions after a
+write, per-write operation records the device returned. When this
+document says "the substrate" without further qualification, those are
+the categories under discussion.
+
+The substrate is what the operator inspects, queries, and acts against
+when working with the automation. The next section's litmus test, and
+the nine invariants below, all turn on whether the substrate is legible
+to the operator.
+
 ## The litmus test
 
 An operator who uses newtcon for a year must be **more capable** than
 they were when they started. The strongest expression of "more
 capable" is operators who file PRs at the method level, not tickets at
-the symptom level. They can run the failed substrate operation
-manually, isolate device-vs-automation, name the method in the
+the symptom level. They can run the failed write manually against the
+device, isolate device-vs-automation, name the method in the
 automation that produced the wrong config, and propose a fix.
 Operators who do that have become participants in the automation, not
 its consumers.
@@ -160,22 +186,21 @@ it operational. The strongest expression of capability amplification
 is operators who become **participants in the automation, not
 consumers of it.**
 
-- The operator sees changes executing **in real time** — each
-  substrate write as it lands, not just "operation complete."
-  Streaming substrate observability, not aggregate success.
+- The operator sees changes executing **in real time** — each write to
+  the device as it lands, not just "operation complete." Streaming
+  per-write visibility, not aggregate success.
 - When the device rejects a change, the operator sees **exactly which
   write failed**, what was attempted, and what the device returned.
-  Per-substrate-operation granularity on failures, not aggregate
-  error.
+  Per-write granularity on failures, not aggregate error.
 - The operator can take the failed write and try it manually against
   the device themselves, **isolating device-vs-automation**. The
   failed write is shown in copy-paste-ready form; the operator's own
   ssh session is the venue.
 - The operator can point at the **exact method in the automation**
-  that produced the bad config. In verbose mode, every substrate
-  operation carries the call-site (file:line / function name) of the
-  automation method that emitted it. The operator learns the names of
-  the automation's parts.
+  that produced the bad config. In verbose mode, every write carries
+  the call-site (file:line / function name) of the automation method
+  that emitted it. The operator learns the names of the automation's
+  parts.
 - The operator **files a PR** against the automation, not a ticket.
   They name the method, propose the fix. The automation team accepts
   the patch.
