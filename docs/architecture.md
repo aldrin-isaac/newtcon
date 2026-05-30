@@ -584,22 +584,13 @@ guarantees are preserved.
 
 ## Frontend framework selection
 
-Deferred to the first frontend slice. The Architect makes the call
-based on:
-
-- Bundle size (operator console, not consumer app — small dependency
-  surface preferred).
-- TypeScript first-class (both `newtcon-server`'s and
-  `newtrun-server`'s HTTP APIs are typed; the frontend must consume
-  typed shapes without runtime parsing).
-- Component model that supports the three operator workflows and the
-  four observation-side surfaces without exotic patterns.
-- Two-backend composition ergonomics — the frontend will hold typed
-  clients for both `newtcon-server`'s API and `newtrun-server`'s API
-  and compose them in the workflow layer.
-
-Candidate frameworks under consideration (informational,
-non-binding): Svelte/SvelteKit, React + Vite, Solid, HTMX + minimal
-JS. The decision will be recorded as
-[ADR-0002](adr/0002-frontend-framework.md) authored by the first
-frontend slice.
+Resolved by [ADR-0002](adr/0002-frontend-framework.md) (Status:
+Accepted, 2026-05-29): **vanilla HTML + TypeScript-as-typed-ES-
+modules**, no SPA framework, no client-side framework runtime, no
+bundler. `tsc` is the only build dependency; output is plain ES
+modules served as static files by `newtcon-server`. See the ADR for
+the four-criteria evaluation (bundle size, TypeScript first-class,
+component model fit, two-backend composition), the considered
+alternatives (vanilla-without-TypeScript, HTMX, Svelte/SvelteKit,
+React + Vite, Solid), and the operator-philosophy + newtron-principles
+defenses.
