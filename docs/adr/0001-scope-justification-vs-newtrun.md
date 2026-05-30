@@ -135,8 +135,8 @@ plus the eight surface families now defined in `API_CONTRACT.md`:
    classification.
 8. **Report Bug** — substrate-canonical bug-report body
    composition + delivery (`clipboard` / `direct_file`).
-9. Streaming substrate-operation events (cross-cutting; SSE on
-   the three state-changing endpoints).
+9. Streaming per-write events (formerly "Streaming substrate-operation
+   events") (cross-cutting; SSE on the three state-changing endpoints).
 
 ## Decision
 
@@ -192,8 +192,9 @@ concrete deprecate / keep / fold list.
    composition layer is a YAML generator the frontend could write
    into newtrun's suite directory directly.
 
-3. **Streaming substrate-operation events (SSE wrapping).**
-   newtrun's progress reporter (`pkg/newtrun/progress.go`,
+3. **Streaming per-write events (formerly "Streaming substrate-operation
+   events") (SSE wrapping).** newtrun's progress reporter
+   (`pkg/newtrun/progress.go`,
    `ProgressReporter` / `consoleProgress` / `StateReporter`) already
    emits per-step events to two sinks (console + persistent state
    file). Extending that to a third sink (SSE to a browser) is a
