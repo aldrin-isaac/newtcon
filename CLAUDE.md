@@ -13,6 +13,18 @@ interpretation of the phrase.
 The authoritative document is [`docs/operator-philosophy.md`](docs/operator-philosophy.md).
 This section is a derivative summary.
 
+**Vocabulary.** This section uses **the substrate** as a shorthand for the
+canonical typed data that newtron and newtrun expose over HTTP — CONFIG_DB
+entries, intent records, ChangeSets, projection snapshots, verify
+assertions, observation snapshots, and per-write operation records. The
+canonical definition lives at
+[`docs/operator-philosophy.md`](docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document)
+§Vocabulary; this section, and every CLAUDE.md section that uses the
+term in the canonical sense, inherits that definition by reference per
+editing-guidelines §43. Compound phrases like "orchestration capability"
+and "scenario YAML" elsewhere in this file describe newtrun's surfaces
+in their own terms; they are not the canonical substrate.
+
 **The principle:** newtron makes the network intelligent. newtcon
 presents that intelligent network to the operator. The automation
 **must make the operator MORE capable, not less**. An autopilot that
@@ -75,15 +87,16 @@ newtcon for a year must be more capable than they were when they started.
 The mission is unchanged from the project's outset; **what changed is the
 engine partition underneath it**. Per
 [`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md)
-(Status: Accepted, 2026-05-28), the substrate that delivers the operator
-workflows is split across three peer tools — newtron per-device, newtrun
-orchestration, newtcon observation-history-plus-the-browser-frontend.
+(Status: Accepted, 2026-05-28), the implementation that delivers the
+operator workflows is split across three peer tools — newtron
+per-device, newtrun orchestration, newtcon
+observation-history-plus-the-browser-frontend.
 
 newtcon ships **two artifacts**:
 
 ### Artifact 1 — newtcon-server (Go HTTP service)
 
-The post-rebalance newtcon-server is the substrate newtcon *uniquely*
+The post-rebalance newtcon-server is the service newtcon *uniquely*
 owns. It is the smaller, observation-side service that the rebalanced
 architecture leaves on newtcon's side of the boundary. Four layers:
 
@@ -96,7 +109,7 @@ architecture leaves on newtcon's side of the boundary. Four layers:
    substrate change over time (including changes that newtcon did not
    initiate). See [`API_CONTRACT.md`](API_CONTRACT.md) §Endpoints —
    Observation History.
-2. **Report Bug** — substrate-canonical bug-report body composition
+2. **Report Bug** — substrate-grounded bug-report body composition
    with the `clipboard` / `direct_file` delivery modes. Depends on
    Observation History for recent-context blocks and on newtrun's
    run state for operation-trace blocks. See
@@ -128,8 +141,8 @@ backends:
 1. **Service Composer** — pick a service spec, pick N target
    interfaces across M nodes, preview the resulting ChangeSets,
    commit. Delivered by the frontend over **newtrun-server**'s
-   orchestration substrate (`POST /api/runs/inline` for stateless
-   compose-and-run; SSE event replay for streaming substrate
+   orchestration capability (`POST /api/runs/inline` for stateless
+   compose-and-run; SSE event replay for streaming per-write
    visibility). The atomicity model — **per-Node atomic, multi-Node
    structured best-effort** — is unchanged; newtrun-server's
    per-scenario lifecycle and step-progress events surface the same
@@ -142,9 +155,9 @@ backends:
    Observation History.
 3. **Change Workbench** — staged batches of intents with dry-run
    preview, commit, stash, and revert. Delivered by the frontend
-   over newtrun-server's scenario substrate (`POST /api/suites`,
+   over newtrun-server's scenario mechanism (`POST /api/suites`,
    `POST /api/runs/inline`, scenario CRUD per newtron#33). The
-   per-Node atomicity model is preserved; the staging substrate is
+   per-Node atomicity model is preserved; the staging mechanism is
    newtrun's scenario YAML.
 
 The browser frontend also surfaces newtcon-server's Observation
@@ -158,7 +171,7 @@ composes two backends and surfaces a single integrated console.
 
 - The mission — daily-work operator console for production operators.
 - The three operator workflows — Composer, Inbox, Workbench all still
-  deliver, just over a sharper substrate boundary.
+  deliver, just over a sharper architectural boundary.
 - The nine operator-philosophy invariants — binding on every contract
   decision, every UI element, every error envelope.
 - The aesthetic discipline — calm at first surface, navigably deep
@@ -175,7 +188,7 @@ composes two backends and surfaces a single integrated console.
   consumes newtrun-server directly for those workflows.
 - newtcon-server's contract scope narrows to Observation History +
   Report Bug + Provenance (probably thin) + Teaching catalogs.
-- Streaming substrate-operation events are surfaced by newtrun-server's
+- Streaming per-write events are surfaced by newtrun-server's
   SSE (`GET /api/runs/{suite}/events` carrying `EventStepProgress`
   with verbatim `sonic.DeviceOp` per newtron's §46 wire-shape
   principle). newtcon-server's previously-architected SSE surface for
@@ -193,7 +206,7 @@ composes two backends and surfaces a single integrated console.
 - Authentication/authorization (deferred until operator surfaces are validated)
 - Multi-tenant features
 - Mobile-first layouts
-- **Re-implementing orchestration substrate that newtrun-server
+- **Re-implementing orchestration capability that newtrun-server
   already exposes.** Per the survey-adjacent-tools rule below and
   ADR-0001's substantive analysis, surfaces that duplicate
   newtrun-server's orchestration capabilities are rejected at PR
@@ -233,17 +246,17 @@ design decisions in unfamiliar areas:
 | newtron HLD | `docs/newtron/hld.md` | Architecture, intent model, Redis interaction |
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Intent → Replay → Render → Deliver |
-| **newtrun HLD** (peer tool) | `docs/newtrun/hld.md` | The orchestration substrate the browser frontend consumes for Composer / Inbox / Workbench workflows. newtrun-server's HTTP API (newtron#22/#23/#24, landed; newtron#33, in flight) is the load-bearing surface for state-changing operator workflows post-rebalance. **Peer status** — see §Survey adjacent tools below. |
+| **newtrun HLD** (peer tool) | `docs/newtrun/hld.md` | The orchestration capability the browser frontend consumes for Composer / Inbox / Workbench workflows. newtrun-server's HTTP API (newtron#22/#23/#24, landed; newtron#33, in flight) is the load-bearing surface for state-changing operator workflows post-rebalance. **Peer status** — see §Survey adjacent tools below. |
 | newtrun HOWTO (peer tool) | `docs/newtrun/howto.md` | Scenario authoring, suite layout, lifecycle verbs. |
 | newtrun LLD (peer tool) | `docs/newtrun/lld.md` | Types and method signatures the HTTP API mirrors. |
 | AI Instructions | `docs/ai-instructions.md` | Universal behavioral directives for Claude Code, scoped by activity phase (ALL / PLAN / IMPL / EXPLAIN / TEST / REVIEW). Binding on every newtcon agent role — see §Agent Team Required Reading. |
 | Documentation Editing Guidelines | `docs/editing-guidelines.md` | Universal documentation-craft principles, scoped by document type (ALL / DESIGN / HLD / LLD / HOWTO / README / API / GUIDE) and quality-tiered. Binding on every newtcon agent that authors or edits documentation — see §Agent Team Required Reading. |
 | **DESIGN_PRINCIPLES_NEWTRON** (foundational) | `docs/DESIGN_PRINCIPLES_NEWTRON.md` | newtron's authoritative principles. **Required reading for the Architect and Architecture Reviewer before every Contract PR.** newtcon's design must derive from and not contradict these. |
 
-**newtcon does not re-document newtron's or newtrun's substrate.** When
-the UI exposes an intent record, a ChangeSet, a projection, a scenario,
-a step, or a run, those terms mean what the upstream docs say they mean.
-Link, don't paraphrase.
+**newtcon does not re-document newtron's typed data or newtrun's
+orchestration vocabulary.** When the UI exposes an intent record, a
+ChangeSet, a projection, a scenario, a step, or a run, those terms mean
+what the upstream docs say they mean. Link, don't paraphrase.
 
 ### Survey adjacent tools before scoping a new surface
 
@@ -253,8 +266,8 @@ made binding.** Before scoping a new operator surface, the Architect (and
 the Architecture Reviewer, and the Critic for any cross-cutting check)
 MUST verify against the existing capabilities of newtrun and any other
 adjacent project tool whether the proposed surface is **genuinely new
-substrate** or a **presentation layer over substrate the project already
-has**.
+capability** or a **presentation layer over capability the project
+already has**.
 
 The pre-rebalance failure mode was structural: newtrun was named in this
 section as "[a] document [to] read before making design decisions in
@@ -263,23 +276,24 @@ rather than as a peer with overlapping operator-facing scope. The result
 was that the Composer / Inbox / Workbench contract surfaces substantially
 re-implemented orchestration capabilities newtrun already shipped, and
 the only operator-visible delta was a browser frontend versus YAML +
-terminal. ADR-0001 made the substrate boundary honest; this rule
+terminal. ADR-0001 made the architectural boundary honest; this rule
 prevents the failure mode from recurring.
 
 The survey discipline:
 
-1. **Identify peer tools.** At minimum: newtron (per-device substrate),
-   newtrun (orchestration substrate, now extended with
+1. **Identify peer tools.** At minimum: newtron (per-device capability),
+   newtrun (orchestration capability, now extended with
    newtrun-server's HTTP surface — see the table above). Any future
-   adjacent project tool added to the substrate stack joins this list.
+   adjacent project tool added to the project's tool stack joins this
+   list.
 2. **Read their actual capabilities.** Not their docs' surface
    description — their HLD, their HTTP API, their state model.
-   ADR-0001's substrate analysis is the worked example: §What
+   ADR-0001's capability-boundary analysis is the worked example: §What
    newtrun actually is (verified by reading the source).
 3. **Classify the proposed surface.** Per ADR-0001's three buckets:
-   **A (duplicative)** — peer tool already produces this substrate;
+   **A (duplicative)** — peer tool already produces this capability;
    reject the surface and use the peer; **B (uniquely newtcon)** —
-   substrate the peer cannot produce by construction; proceed;
+   capability the peer cannot produce by construction; proceed;
    **C (borderline)** — peer could produce with modest extension;
    weigh cost-of-extension against cost-of-newtcon-implementation
    substantively, not by reflex.
@@ -292,8 +306,8 @@ The survey discipline:
 The Architecture Reviewer rejects Contract PRs whose Considered
 Alternatives section lacks an explicit peer-tool survey for any
 surface that touches orchestration, lifecycle, scenarios, runs,
-events, or any other substrate already present in newtrun. The Critic
-applies the same check on the consistency side.
+events, or any other capability already present in newtrun. The
+Critic applies the same check on the consistency side.
 
 ## newtron API Consumption Rule
 
