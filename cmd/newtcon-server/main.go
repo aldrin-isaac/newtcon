@@ -36,6 +36,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address for newtcon-server")
 	newtronURL := flag.String("newtron-url", "", "newtron-server base URL (e.g., http://127.0.0.1:9090)")
 	newtronTimeout := flag.Duration("newtron-timeout", 10*time.Second, "per-request timeout for newtron-server calls")
+	webDir := flag.String("web-dir", "web/dist", "directory of compiled frontend static assets to serve at /; empty or non-existent disables static serving")
 	flag.Parse()
 
 	nc := newtronc.New(*newtronURL, newtronc.WithTimeout(*newtronTimeout))
@@ -56,6 +57,12 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Static-asset serving must be registered after all /api/* routes so
+	// that the more-specific /api/* patterns take precedence in the mux.
+	// server.RegisterStaticAssets logs a warning and skips registration when
+	// webDir is empty or does not exist; the /api/* handlers remain active.
+	server.RegisterStaticAssets(mux, *webDir)
+
 	handler := server.ApplyMiddleware(mux)
 
 	srv := &http.Server{
@@ -64,8 +71,8 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("newtcon-server listening on %s (newtron-url=%q newtron-timeout=%s)",
-		*addr, *newtronURL, *newtronTimeout)
+	log.Printf("newtcon-server listening on %s (newtron-url=%q newtron-timeout=%s web-dir=%q)",
+		*addr, *newtronURL, *newtronTimeout, *webDir)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Printf("server exited: %v", err)
 		os.Exit(1)
