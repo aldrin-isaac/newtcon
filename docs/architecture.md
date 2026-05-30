@@ -4,10 +4,10 @@ newtcon ships **two artifacts** that compose into one operator-facing
 console: a smaller observation-side Go HTTP service (`newtcon-server`)
 and a browser frontend that delivers the three operator workflows
 (Composer / Inbox / Workbench) by composing two backends —
-`newtrun-server` for orchestration substrate and `newtcon-server` for
+`newtrun-server` for orchestration capability and `newtcon-server` for
 observation history, report bug, provenance, and teaching catalogs.
 
-The substrate boundary is set by
+The architectural boundary is set by
 [`docs/adr/0001-scope-justification-vs-newtrun.md`](adr/0001-scope-justification-vs-newtrun.md)
 (Status: Accepted, 2026-05-28). This document describes the
 post-rebalance shape: what `newtcon-server` owns, what it consumes
@@ -16,15 +16,24 @@ operator-facing workflows live.
 
 For binding rules, see [`../CLAUDE.md`](../CLAUDE.md). For API
 definitions, see [`../API_CONTRACT.md`](../API_CONTRACT.md). For team
-structure, see [`../AGENTS.md`](../AGENTS.md). For the substrate
-analysis that justifies the partition, see
+structure, see [`../AGENTS.md`](../AGENTS.md). For the capability-
+boundary analysis that justifies the partition, see
 [`docs/adr/0001-scope-justification-vs-newtrun.md`](adr/0001-scope-justification-vs-newtrun.md).
+
+**Vocabulary.** This document uses **the substrate** as a shorthand for
+the canonical typed data that newtron and newtrun expose over HTTP —
+CONFIG_DB entries, intent records, ChangeSets, projection snapshots,
+verify assertions, observation snapshots, and per-write operation
+records. The canonical definition lives at
+[`operator-philosophy.md`](operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document)
+§Vocabulary; this document inherits that definition by reference per
+editing-guidelines §43.
 
 ## The two artifacts
 
 ### Artifact 1 — `newtcon-server` (Go HTTP service)
 
-`newtcon-server` is the substrate `newtcon` uniquely owns per ADR-0001
+`newtcon-server` is the service `newtcon` uniquely owns per ADR-0001
 §"What stays in newtcon." Four layers, each surfacing one operator
 concern, all served from one process:
 
@@ -34,7 +43,7 @@ concern, all served from one process:
    `source: newtron_mediated | out_of_band` discrimination engine.
    This is the load-bearing reason `newtcon-server` exists per
    ADR-0001 §Bucket B.1.
-2. **Report Bug** — substrate-canonical bug-report body composition
+2. **Report Bug** — substrate-grounded bug-report body composition
    with `clipboard` / `direct_file` delivery modes. Depends on
    Observation History for recent-context blocks and on `newtcon-server`'s
    operations store (populated by observing `newtrun-server`'s run
@@ -79,7 +88,7 @@ delivers the three operator workflows by composing two HTTP backends.
   History.
 - **Change Workbench** — staged batches of intents with dry-run
   preview, commit, stash, and revert. Delivered by the frontend over
-  `newtrun-server`'s scenario substrate. Scenario CRUD is in flight
+  `newtrun-server`'s scenario mechanism. Scenario CRUD is in flight
   upstream as newtron#33.
 
 The browser frontend also surfaces `newtcon-server`'s Observation
@@ -96,8 +105,8 @@ frontend slice authors it).
 
 ## Layering
 
-The post-rebalance pipeline, with the substrate boundaries set by the
-two HTTP-spoken backends:
+The post-rebalance pipeline, with the architectural boundaries set by
+the two HTTP-spoken backends:
 
 ```
                             Browser frontend (static assets in web/)
@@ -154,7 +163,7 @@ Each layer's responsibility is bounded:
   is the substrate path for the Provenance layer's per-Node
   projection reads, the Observation History layer's per-Node CONFIG_DB
   polling, and any other newtcon-server surface that needs
-  per-device substrate.
+  per-device data.
 
 - **`internal/newtrunc`** owns `newtrun-server` integration. It is
   the only package that makes HTTP requests to `newtrun-server`. It
@@ -248,21 +257,21 @@ These are not in `newtcon` and will not be added. If a contributor
   capture-path) but does not author them. A contributor proposing a
   state-changing endpoint on `newtcon-server` that re-implements an
   orchestration capability `newtrun-server` already exposes is making
-  the case for re-introducing the duplicative substrate ADR-0001
+  the case for re-introducing the duplicative capability ADR-0001
   retired; the Architecture Reviewer rejects on principle.
 
 - **`newtcon-server` does not maintain its own orchestration
-  substrate.** Scenario authoring, run state, step-progress
+  capability.** Scenario authoring, run state, step-progress
   streaming, run lifecycle, and per-target/per-Node atomicity
-  enforcement are `newtrun-server`'s substrate per ADR-0001. The
+  enforcement are `newtrun-server`'s capability per ADR-0001. The
   per-Node atomicity model the three operator workflows surface is
-  preserved through the substrate chain (`newtrun-server` mediates
+  preserved through the capability chain (`newtrun-server` mediates
   `newtron-server`'s `cs.Apply`, which uses Redis `TxPipeline`); it
   is not enforced or duplicated at the `newtcon-server` layer.
 
 - **`newtcon-server` does not stream Server-Sent Events.** Per
   `API_CONTRACT.md` §Conventions post-rebalance, no surviving
-  `newtcon-server` endpoint admits SSE. The SSE substrate for
+  `newtcon-server` endpoint admits SSE. The SSE surface for
   state-changing operator workflows is `newtrun-server`'s
   `GET /api/runs/{suite}/events` per newtron#22.
   `newtcon-server` consumes that SSE in `internal/newtrunc` to
@@ -285,7 +294,7 @@ These predate the rebalance and remain binding. Per
   visualization is *future-considered*, not out of scope; see the
   [roadmap](roadmap.md). The rejected paradigm is the canvas, not the
   topology lifecycle. Topology spec edits — when they land — route
-  through `newtrun-server`'s scenario substrate, mediated by
+  through `newtrun-server`'s scenario mechanism, mediated by
   `newtron-server`'s typed verbs, like every other operator-initiated
   spec change.
 
@@ -294,8 +303,8 @@ These predate the rebalance and remain binding. Per
   operator action.
 
 - **Multi-batch / history-walking rollback.** No "undo the last N
-  committed batches in one call" surface, because no substrate primitive
-  exists upstream for it. Per-batch revert exists in the Change
+  committed batches in one call" surface, because no upstream
+  primitive exists for it. Per-batch revert exists in the Change
   Workbench workflow (delivered by the browser frontend over
   `newtrun-server`), and is per-Node atomic; multi-batch undo is
   operator-orchestrated as a sequence of revert calls, per
@@ -304,7 +313,7 @@ These predate the rebalance and remain binding. Per
 - **Preview-time multi-target apply safety classification.** No
   `classification` field on preview responses, no plan to add one.
   The operator's affordance for partial-failure awareness is runtime
-  substrate visibility — `EventStepProgress` events carrying verbatim
+  per-write visibility — `EventStepProgress` events carrying verbatim
   `sonic.DeviceOp` substrate, per-target results with per-write
   granularity, typed verify-failure envelopes — observed through
   `newtrun-server`'s SSE and through `newtcon-server`'s operations
@@ -371,7 +380,7 @@ The Operator Inbox additionally composes `newtrun-server`'s run state
 from the per-Node CONFIG_DB diff). The browser frontend issues the
 composition; no `newtcon-server` endpoint mediates it.
 
-The Change Workbench's staging substrate is `newtrun-server`'s
+The Change Workbench's staging mechanism is `newtrun-server`'s
 scenario YAML. Scenario CRUD (`POST /api/suites`, `PUT/DELETE` on
 scenarios) is in flight upstream as newtron#33; until that lands, the
 browser frontend's Workbench is read-only against existing scenarios.
@@ -396,7 +405,7 @@ its two-backend composition.
   operations store (for operation-trace blocks), the Observation
   History store (for recent-context blocks), and `newtron-server`
   via `internal/newtronc` (for intent record and projection blocks).
-  The composition produces a substrate-canonical Markdown body the
+  The composition produces a substrate-grounded Markdown body the
   operator reviews before confirming delivery to clipboard or a
   configured integration target.
 
