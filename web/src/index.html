@@ -3,15 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Immediate redirect to the services-listing surface. -->
+    <!-- meta-refresh is the static-file-safe redirect; no JS required. -->
+    <meta http-equiv="refresh" content="0; url=/surfaces/services/" />
     <title>newtcon</title>
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       html, body {
         height: 100%;
-        font-family: ui-monospace, "Cascadia Code", "Source Code Pro",
-                     Menlo, Consolas, "DejaVu Sans Mono", monospace;
-        background: #0d1117;
-        color: #c9d1d9;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        background: #f9f9f8;
+        color: #1a1a1a;
       }
       main {
         display: flex;
@@ -22,22 +26,13 @@
         gap: 0.5rem;
         text-align: center;
       }
-      h1 {
-        font-size: 1.125rem;
-        font-weight: 500;
-        letter-spacing: 0.04em;
-        color: #58a6ff;
-      }
-      p {
-        font-size: 0.875rem;
-        color: #8b949e;
-      }
+      p { font-size: 0.875rem; color: #6b7280; }
+      a { color: #4a90d9; }
     </style>
   </head>
   <body>
     <main>
-      <h1>newtcon</h1>
-      <p>operator console for newtron — loading&hellip;</p>
+      <p>Redirecting to <a href="/surfaces/services/">services</a>&hellip;</p>
     </main>
     <script type="module" src="app.js"></script>
   </body>

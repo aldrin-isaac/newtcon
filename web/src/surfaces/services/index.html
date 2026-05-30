@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Services — newtcon</title>
+    <link rel="stylesheet" href="/surfaces/services/services.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <span class="site-name">newtcon</span>
+      <nav class="site-nav" aria-label="primary">
+        <a href="/" class="nav-link nav-link--active" aria-current="page">Services</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <div class="page-heading">
+        <h1>Services</h1>
+        <p class="page-subtitle">
+          These are the <strong>service specs</strong> newtron knows about.
+          Service specs are part of
+          <a href="/docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document">the substrate</a>;
+          the canonical definition lives in
+          <a href="/docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document"><code>docs/operator-philosophy.md</code> §Vocabulary</a>.
+        </p>
+      </div>
+
+      <div id="services-root" aria-live="polite" aria-busy="true">
+        <!-- Populated by services.ts mount() -->
+        <p class="status-loading">Loading&#x2026;</p>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <a href="/docs/operator-philosophy.md" class="why-link">Why does this page exist?</a>
+      &mdash;
+      <a href="https://github.com/aldrin-isaac/newtcon/blob/main/docs/operator-philosophy.md" rel="noreferrer noopener">operator philosophy</a>
+    </footer>
+
+    <script type="module" src="/surfaces/services/services.js"></script>
+    <script type="module">
+      import { mount } from "/surfaces/services/services.js";
+      const root = document.getElementById("services-root");
+      if (root) root.setAttribute("aria-busy", "true");
+      mount().then(() => {
+        if (root) root.removeAttribute("aria-busy");
+      });
+    </script>
+  </body>
+</html>
