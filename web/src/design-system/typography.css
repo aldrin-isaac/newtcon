@@ -1,0 +1,66 @@
+/*
+ * typography.css — type system for newtcon.
+ *
+ * System fonts only. No web font downloads in F3 — bundle weight cost not
+ * justified for first-page polish; future typography ADR may revisit.
+ *
+ * Three font stacks, each with a semantic role per
+ * docs/operator-philosophy.md §What aesthetic discipline demands:
+ * "Typography is load-bearing. Type choices carry meaning: domain vocabulary
+ * in one face, identifiers in another, code in a third. Sizes and weights
+ * establish hierarchy without ornament."
+ *
+ *   --font-sans   domain vocabulary, navigation, prose. The operator's OS
+ *                 typeface — familiar, legible, not imposing.
+ *   --font-mono   identifiers, type badges, error codes, inline code. Signals
+ *                 "this is a substrate value you can copy and use directly."
+ *                 Per invariant #7: errors carry the substrate — mono renders
+ *                 substrate values the operator might paste into a terminal.
+ *   --font-ui     (currently same as --font-sans; split reserved for a future
+ *                 ADR that may choose a display typeface for the wordmark or
+ *                 headings. Kept separate so the split costs one variable
+ *                 change, not a grep-and-replace across all surfaces.)
+ *
+ * Type scale — five named sizes:
+ *
+ *   --text-xs     0.75rem  / 12px  column header labels (uppercase, tracked)
+ *   --text-sm     0.8125rem/ 13px  badges, footnotes, secondary labels
+ *   --text-base   0.9375rem/ 15px  body text, table cells, primary prose
+ *   --text-lg     1.125rem / 18px  (reserved — section headings if needed)
+ *   --text-xl     1.375rem / 22px  page-level h1
+ *
+ * Line heights:
+ *
+ *   --leading-tight  1.3  for short-label elements (badges, column headers)
+ *   --leading-base   1.5  for body text (comfortable reading rhythm)
+ *   --leading-prose  1.65 for longer passages (subtitle, empty-state text)
+ *
+ * All sizes are rem-based so the operator's browser font-size preference
+ * is respected (operator-philosophy invariant #9: confidence and limits
+ * are explicit — including respecting the operator's own accessibility
+ * settings).
+ */
+
+:root {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+
+  --font-mono:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+
+  --font-ui: var(--font-sans);
+
+  /* Scale */
+  --text-xs:   0.75rem;
+  --text-sm:   0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.375rem;
+
+  /* Leading */
+  --leading-tight:  1.3;
+  --leading-base:   1.5;
+  --leading-prose:  1.65;
+}

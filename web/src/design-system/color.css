@@ -1,0 +1,65 @@
+/*
+ * color.css — semantic color palette for newtcon.
+ *
+ * Six named semantic colors. Each has one meaning; no color is decorative.
+ * Per docs/operator-philosophy.md §What aesthetic discipline demands:
+ * "Color is semantic, not decorative. A small palette. Each color has a
+ * meaning the operator can name; no decorative use of color anywhere."
+ *
+ * Rules of use:
+ *   --color-surface          page background. Everything sits on this.
+ *   --color-surface-elevated header, footer, cards. Creates gentle depth
+ *                            without shadow or border noise.
+ *   --color-text-primary     all primary content: headings, table cells,
+ *                            labels. Near-black, warm (not pure #000).
+ *   --color-text-secondary   supporting text: subtitles, column headers,
+ *                            status indicators, why-mode footer. Readable
+ *                            but visually lighter than primary.
+ *   --color-accent           links, active nav underline, type badges,
+ *                            inline code backgrounds. One quiet blue.
+ *                            Never used for decoration; always carries
+ *                            interactivity or type-distinguishing meaning.
+ *   --color-danger           error borders and error tint backgrounds.
+ *                            Intentionally muted — the operator should
+ *                            read the error, not flinch from it. Per
+ *                            operator-philosophy invariant #7: errors
+ *                            carry the substrate, they don't alarm.
+ *
+ * Extending this palette requires an Architecture-class PR (AGENTS.md
+ * §Architect). Adding a seventh color for convenience is rejected on
+ * principle — restraint is the discipline, not a default.
+ */
+
+:root {
+  /* Base page surface: very slightly warm off-white. Not pure #fff, which reads
+   * as a blank document. Not gray, which reads as disabled. This is the calm
+   * background the substrate content rests on. */
+  --color-surface:          #f7f6f4;
+
+  /* Elevated surface: pure white for header, footer, cards. The contrast with
+   * --color-surface is gentle (~4-point luminance) — enough to create depth,
+   * not enough to compete with content. */
+  --color-surface-elevated: #ffffff;
+
+  /* Primary text: near-black with a trace of warmth. Not pure #000 (too
+   * harsh on off-white backgrounds). Passes WCAG AA at any size on both
+   * surface colors. */
+  --color-text-primary:     #1c1917;
+
+  /* Secondary text: a muted slate-gray for supporting information — column
+   * headers, subtitles, why-mode footer, status-loading indicators. Readable
+   * at the sizes used (0.8125rem–0.875rem) on both surface colors. */
+  --color-text-secondary:   #57534e;
+
+  /* Accent: a single desaturated steel-blue for links, active nav indicators,
+   * type badges, and inline code backgrounds. Desaturated so it reads as
+   * "meaningful distinction" rather than "call to action" — the operator's
+   * attention is on the substrate, not on the interactive chrome. */
+  --color-accent:           #4a7fa5;
+
+  /* Danger: a muted sienna-red for error containers only. Intentionally
+   * de-alarmed: the operator must read the error, not freeze at red. The
+   * color signals "attention needed here" without reading as a system alert.
+   * Used for border and tinted background; never for solid fills or text. */
+  --color-danger:           #b45309;
+}

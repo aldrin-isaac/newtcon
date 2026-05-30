@@ -1,19 +1,23 @@
 /*
  * services.css — styling for the services-listing surface.
  *
- * F2 baseline: system font stack, restrained palette, deliberate whitespace.
- * F3 (newtcon#106) will introduce the design-system seed (typography.css,
- * color.css, spacing.css, motion.css) and refine these rules. This file
- * intentionally avoids framework chrome and dark-theme defaults — the page
- * should pass the aesthetic litmus test ("does the operator want to open this
- * tool?") before F3 lands.
+ * Imports the design-system seed (typography, color, spacing, motion) and
+ * writes surface-specific rules in terms of those tokens only. No raw hex
+ * values, no raw pixel sizes outside the token scale.
  *
- * Color intent: near-white background, near-black text, one quiet accent
- * (desaturated blue) for links and type badges. Nothing demands attention;
- * everything is legible.
+ * F3 (newtcon#106): design-system seed applied. The baseline F2 rules are
+ * preserved in meaning; the values are replaced with token references so
+ * future design-system changes propagate here automatically.
  */
 
-/* Reset — minimal, scoped to what this page needs. */
+@import "/design-system/color.css";
+@import "/design-system/typography.css";
+@import "/design-system/spacing.css";
+@import "/design-system/motion.css";
+
+/* ---- Reset ---------------------------------------------------------------- */
+/* Minimal, scoped to what this page needs. */
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -24,123 +28,135 @@ html, body {
   height: 100%;
 }
 
-/* System font stack: the operator's own OS typeface. No web font downloads. */
+/* ---- Base ----------------------------------------------------------------- */
+
 body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  font-size: 0.9375rem;   /* 15px at 16px base */
-  line-height: 1.5;
-  color: #1a1a1a;
-  background: #f9f9f8;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
 
-/* ---- Header ------------------------------------------------------------ */
+/* ---- Header -------------------------------------------------------------- */
 
 .site-header {
   display: flex;
   align-items: center;
-  gap: 2rem;
-  padding: 0.75rem 2rem;
-  border-bottom: 1px solid #e0e0dc;
-  background: #fff;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
+  background: var(--color-surface-elevated);
 }
 
 .site-name {
-  font-size: 0.8125rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #4a5568;
+  color: var(--color-text-secondary);
 }
 
 .site-nav {
   display: flex;
-  gap: 1.25rem;
+  gap: var(--space-5);
 }
 
 .nav-link {
-  font-size: 0.875rem;
-  color: #4a5568;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
   text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .nav-link:hover {
-  color: #1a1a1a;
+  color: var(--color-text-primary);
 }
 
 .nav-link--active {
-  color: #1a1a1a;
+  color: var(--color-text-primary);
   font-weight: 500;
-  border-bottom: 2px solid #4a90d9;
+  border-bottom: 2px solid var(--color-accent);
   padding-bottom: 2px;
 }
 
-/* ---- Main -------------------------------------------------------------- */
+/* ---- Main ---------------------------------------------------------------- */
 
 #main {
   flex: 1;
   width: 100%;
-  max-width: 72rem;
+  max-width: var(--measure-page);
   margin: 0 auto;
-  padding: 2.5rem 2rem 3rem;
+  padding: var(--space-6) var(--space-6) var(--space-8);
 }
 
 .page-heading {
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-6);
 }
 
 h1 {
-  font-size: 1.375rem;
+  font-size: var(--text-xl);
   font-weight: 600;
-  color: #1a1a1a;
-  margin-bottom: 0.5rem;
+  line-height: var(--leading-tight);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-2);
 }
 
 .page-subtitle {
-  font-size: 0.875rem;
-  color: #5a6478;
-  max-width: 60ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
+  color: var(--color-text-secondary);
+  max-width: var(--measure-prose);
 }
 
 .page-subtitle a {
-  color: #4a90d9;
+  color: var(--color-accent);
+  text-decoration: none;
 }
 
-/* ---- Services table ---------------------------------------------------- */
+.page-subtitle a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Services table ------------------------------------------------------ */
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
 }
 
 thead th {
   text-align: left;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #6b7280;
-  padding: 0 1rem 0.6rem 0;
-  border-bottom: 1px solid #e0e0dc;
+  color: var(--color-text-secondary);
+  padding: 0 var(--space-4) var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
 }
 
 tbody tr {
-  border-bottom: 1px solid #f0f0ec;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-surface) 60%, var(--color-text-secondary) 10%);
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 tbody tr:last-child {
   border-bottom: none;
 }
 
+tbody tr:hover {
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+
 tbody td {
-  padding: 0.75rem 1rem 0.75rem 0;
+  padding: var(--space-3) var(--space-4) var(--space-3) 0;
   vertical-align: top;
-  color: #1a1a1a;
+  color: var(--color-text-primary);
 }
 
 .svc-name {
@@ -149,157 +165,217 @@ tbody td {
 }
 
 .svc-type {
-  font-family:
-    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
-    "DejaVu Sans Mono", monospace;
-  font-size: 0.8125rem;
-  color: #4a5568;
-  background: #f0f4f8;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface-elevated));
   border-radius: 3px;
   padding: 0.15em 0.45em;
   white-space: nowrap;
 }
 
-/* ---- States ------------------------------------------------------------ */
+/* ---- States -------------------------------------------------------------- */
+
+/*
+ * Loading state: fade in on mount. The #services-root has aria-busy="true"
+ * while loading; the class is used for the visual state transition.
+ * Per motion.css: the fade-in uses --duration-base so the transition feels
+ * intentional without delaying the operator.
+ */
+
+#services-root {
+  animation: content-appear var(--duration-base) var(--ease-standard) both;
+}
+
+@keyframes content-appear {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 
 .status-loading {
-  color: #6b7280;
-  font-size: 0.875rem;
-  padding: 1rem 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  padding: var(--space-4) 0;
 }
 
 .state-empty {
-  padding: 2rem 0;
-  color: #4a5568;
-  font-size: 0.875rem;
+  padding: var(--space-6) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
+  max-width: var(--measure-prose);
 }
 
 .state-empty p + p {
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 
+/*
+ * Error state: restrained. The operator needs to read the error, not
+ * react to a visual alarm. A quiet amber-left-border and a near-white
+ * background tint signal "attention here" without shouting.
+ * Per invariant #7: errors carry the substrate — the visual should not
+ * compete with the substrate content.
+ */
+
 .state-error {
-  padding: 1.25rem 1.5rem;
-  border: 1px solid #fca5a5;
-  border-left: 4px solid #ef4444;
+  padding: var(--space-5) var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 25%, var(--color-surface-elevated));
+  border-left: 3px solid var(--color-danger);
   border-radius: 4px;
-  background: #fff5f5;
-  max-width: 60ch;
+  background: color-mix(in srgb, var(--color-danger) 4%, var(--color-surface-elevated));
+  max-width: var(--measure-prose);
 }
 
 .error-kind {
-  font-size: 0.8125rem;
-  font-family:
-    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
-    "DejaVu Sans Mono", monospace;
-  color: #7f1d1d;
-  margin-bottom: 0.4rem;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: color-mix(in srgb, var(--color-danger) 80%, var(--color-text-primary));
+  margin-bottom: var(--space-2);
 }
 
 .error-message {
-  font-size: 0.875rem;
-  color: #1a1a1a;
-  margin-bottom: 0.75rem;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+  line-height: var(--leading-prose);
 }
 
 .error-substrate {
-  font-size: 0.8125rem;
-  color: #1a1a1a;
-  margin-bottom: 0.4rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-2);
+  line-height: var(--leading-prose);
 }
 
 .error-substrate code {
-  font-family:
-    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
-    "DejaVu Sans Mono", monospace;
-  font-size: 0.8125rem;
-  background: #fee2e2;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-elevated));
   border-radius: 3px;
   padding: 0.1em 0.35em;
 }
 
 .error-rationale {
-  font-size: 0.8125rem;
-  color: #5a6478;
-  margin-bottom: 0.4rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+  line-height: var(--leading-prose);
 }
 
 .error-hint {
-  font-size: 0.8125rem;
-  color: #5a6478;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-prose);
 }
 
 .error-hint a {
-  color: #4a90d9;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.error-hint a:hover {
+  text-decoration: underline;
 }
 
 .error-details {
-  margin-top: 0.75rem;
-  font-size: 0.8125rem;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
 }
 
 .error-details summary {
   cursor: pointer;
-  color: #5a6478;
+  color: var(--color-text-secondary);
   user-select: none;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.error-details summary:hover {
+  color: var(--color-text-primary);
 }
 
 .error-details-body {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: #fff5f5;
-  border: 1px solid #fca5a5;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--color-danger) 6%, var(--color-surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--color-danger) 20%, var(--color-surface-elevated));
   border-radius: 3px;
-  font-family:
-    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
-    "DejaVu Sans Mono", monospace;
-  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   white-space: pre-wrap;
   overflow-x: auto;
-  color: #1a1a1a;
+  color: var(--color-text-primary);
 }
 
 .error-raw {
-  font-size: 0.8125rem;
-  color: #6b7280;
-  font-family:
-    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
-    "DejaVu Sans Mono", monospace;
-  margin-top: 0.4rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  margin-top: var(--space-2);
 }
 
 .pending-note {
-  margin-top: 1.25rem;
-  font-size: 0.8125rem;
-  color: #6b7280;
+  margin-top: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-prose);
 }
 
 .pending-note a {
-  color: #4a90d9;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.pending-note a:hover {
+  text-decoration: underline;
 }
 
 .note {
-  color: #6b7280;
-  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
 }
 
 .note a {
-  color: #4a90d9;
+  color: var(--color-accent);
+  text-decoration: none;
 }
 
-/* ---- Footer ------------------------------------------------------------ */
+.note a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Footer -------------------------------------------------------------- */
 
 .site-footer {
-  padding: 1rem 2rem;
-  border-top: 1px solid #e0e0dc;
-  background: #fff;
-  font-size: 0.8125rem;
-  color: #6b7280;
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
+  background: var(--color-surface-elevated);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 
-.why-link {
-  color: #4a90d9;
+/*
+ * Why-mode links: discoverable but secondary. Small text (--text-sm, same as
+ * footer baseline), restrained color (--color-accent), generous visual
+ * separation from the main content (provided by the footer's border-top +
+ * own padding). The links should not pull the operator's eye during normal
+ * use; they should be easy to find when sought.
+ */
+
+.why-link,
+.site-footer a {
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
+
+.why-link:hover,
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Global link reset --------------------------------------------------- */
 
 a {
   text-decoration: none;
