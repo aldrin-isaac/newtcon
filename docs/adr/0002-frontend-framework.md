@@ -666,10 +666,13 @@ The first three slices consuming this ADR are:
 
 - **newtcon#104** scaffolds `web/` with `package.json` (pinning
   `typescript` exactly), `tsconfig.json` (`target: "ES2022"`,
-  `module: "ES2022"`, `moduleResolution: "node16"`, `outDir: "dist"`),
+  `module: "Node16"`, `moduleResolution: "node16"`, `outDir: "dist"`),
   the build script that runs `tsc` and copies static assets, and
   the test-runner choice. `newtcon-server` gains a `--web-dir`
-  flag and static-file serving at `/`.
+  flag and static-file serving at `/`. (TypeScript 5.5+ enforces
+  `module: "Node16"` whenever `moduleResolution: "node16"` — error
+  TS5110 — so the pair is the only legal combination that produces
+  browser-loadable native ES modules without a bundler.)
 
 - **newtcon#105** implements the read-only services-listing page
   in plain HTML + TypeScript + CSS, consuming `GET /api/services`
