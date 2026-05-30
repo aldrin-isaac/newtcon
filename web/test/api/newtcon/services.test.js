@@ -3,10 +3,11 @@
 // Tests run under Node.js's built-in node:test module (web/README.md §Test runner).
 // The module under test is imported from dist/ (compiled output of src/).
 //
-// Three scenarios per the acceptance criteria of newtcon#105 §criterion 7:
+// Scenarios covered:
 //   1. Success path — 200 response, correct ServiceListResponse decoding.
 //   2. ApiError path — non-200 response with a structured error envelope.
 //   3. Network failure — fetch() rejects; plain Error is thrown.
+//   4. cache: "no-store" — verifies the no-cache discipline (newtcon#105 D8).
 //
 // fetch() is shimmed via globalThis.fetch before each test and restored after.
 
@@ -32,9 +33,18 @@ function mockResponse(status, body) {
   };
 }
 
-/** Install a fetch stub that returns the given response. */
+/** Install a fetch stub that returns the given response, capturing call args. */
 function stubFetch(response) {
-  globalThis.fetch = async (_url) => response;
+  let _lastUrl;
+  let _lastInit;
+  globalThis.fetch = async (url, init) => {
+    _lastUrl = url;
+    _lastInit = init;
+    return response;
+  };
+  // Expose call args for assertion.
+  globalThis.fetch._lastUrl = () => _lastUrl;
+  globalThis.fetch._lastInit = () => _lastInit;
 }
 
 /** Stub fetch to reject with the given error. */
@@ -189,6 +199,24 @@ describe("fetchServices()", () => {
         );
         return true;
       }
+    );
+  });
+
+  test("passes cache: 'no-store' to fetch (D8 — no client-side caching)", async () => {
+    const payload = { services: [] };
+    stubFetch(mockResponse(200, JSON.stringify(payload)));
+
+    await fetchServices();
+
+    const init = globalThis.fetch._lastInit();
+    assert.ok(
+      init !== undefined && init !== null,
+      "fetch should be called with an init object"
+    );
+    assert.equal(
+      init.cache,
+      "no-store",
+      "fetch init.cache must be 'no-store' to prevent stale service lists"
     );
   });
 });

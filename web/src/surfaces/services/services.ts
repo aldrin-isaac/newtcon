@@ -9,7 +9,8 @@
 //     instance_count, health, and last_modified are zero-valued in v1 and must
 //     not be shown — rendering zero-valued aggregates violates operator-philosophy
 //     invariant #9 (false confidence is worse than no confidence).
-//   - Error envelopes are surfaced verbatim (kind + message) per invariant #9.
+//   - Error envelopes are surfaced verbatim (kind + message + substrate fields)
+//     per invariant #7 (errors carry the substrate) and invariant #9.
 //   - Loading state is shown immediately so the operator knows the fetch is in
 //     flight; no flash of empty content.
 //
@@ -63,13 +64,13 @@ export function renderServices(
 
   if (data.services.length === 0) {
     const empty = el("div", { className: "state-empty" });
-    empty.appendChild(el("p", {}, "No services available."));
+    empty.appendChild(
+      el("p", {}, "No service specs registered in this newtron network.")
+    );
     const note = el("p", { className: "note" });
     note.innerHTML =
-      "Service specs are registered in newtron. See the " +
-      '<a href="https://github.com/aldrin-isaac/newtron" ' +
-      'rel="noreferrer noopener">newtron documentation</a> ' +
-      "for how service specs are defined and loaded.";
+      '<a href="/docs/operator-philosophy.md#2-manual-mode-parity">' +
+      "Manual-mode parity: how to inspect newtron’s service registry directly.</a>";
     empty.appendChild(note);
     root.appendChild(empty);
     return;
@@ -95,43 +96,147 @@ export function renderServices(
 
   const note = el("p", { className: "pending-note" });
   note.innerHTML =
-    "Service health and instance counts pending &mdash; " +
-    "see <a href=\"/docs/adr/0001-scope-justification-vs-newtrun.md\">" +
+    "Service health and instance counts pending — " +
+    'see <a href="/docs/adr/0001-scope-justification-vs-newtrun.md">' +
     "ADR-0001</a>. " +
     "newtron substrate does not yet expose per-service aggregates.";
   root.appendChild(note);
 }
 
 /**
- * renderError renders the structured error envelope into root.
- * The kind and message fields are surfaced verbatim per invariant #9;
- * no translation, no "something went wrong" substitution.
+ * renderError renders the error state into root, branching on the failure type
+ * to surface the exact substrate fields the operator needs per invariant #7
+ * (errors carry the substrate) and invariant #9 (confidence and limits are
+ * explicit).
+ *
+ * Three cases:
+ *
+ * 1. ApiError with kind "newtron_unavailable" — newtcon-server reached the
+ *    network but newtron-server was not reachable from there. Surfaces
+ *    underlying_error and next_action_hint.rationale from the error details,
+ *    which carry the substrate cause (connection_refused, http_5xx, etc.).
+ *
+ * 2. ApiError with another kind — a structured error from newtcon-server
+ *    that is not an availability problem. Surfaces kind + message, plus the
+ *    full HTTP status and details body in a <details> block for inspection.
+ *
+ * 3. Plain Error — fetch() rejected before any HTTP response arrived. This is
+ *    a browser → newtcon-server failure, distinct from a newtcon-server →
+ *    newtron-server failure. The operator needs to distinguish the two hops.
  */
 export function renderError(root: HTMLElement, err: unknown): void {
   root.textContent = "";
 
   const box = el("div", { className: "state-error" });
 
-  if (err instanceof ApiError) {
-    const kind = el("p", { className: "error-kind" });
-    kind.appendChild(el("strong", {}, "Error "));
-    kind.appendChild(document.createTextNode(err.kind));
-    box.appendChild(kind);
-    box.appendChild(el("p", { className: "error-message" }, err.message));
-    const hint = el("p", { className: "error-hint" });
-    hint.innerHTML =
-      "Check <a href=\"/api/health\">/api/health</a> for newtron-server " +
-      "reachability status, or see " +
-      "<a href=\"/docs/operator-philosophy.md#9-confidence-and-limits-are-explicit\">" +
-      "operator-philosophy.md §9</a>.";
-    box.appendChild(hint);
+  if (err instanceof ApiError && err.kind === "newtron_unavailable") {
+    renderNewtronUnavailableError(box, err);
+  } else if (err instanceof ApiError) {
+    renderOtherApiError(box, err);
   } else {
-    const msg = err instanceof Error ? err.message : String(err);
-    box.appendChild(el("p", { className: "error-kind" }, "network error"));
-    box.appendChild(el("p", { className: "error-message" }, msg));
+    renderNetworkError(box, err);
   }
 
   root.appendChild(box);
+}
+
+/**
+ * renderNewtronUnavailableError renders the 503 newtron_unavailable case.
+ * Surfaces underlying_error and next_action_hint.rationale from details —
+ * these are the substrate fields that explain which hop failed and why.
+ */
+function renderNewtronUnavailableError(
+  box: HTMLElement,
+  err: ApiError
+): void {
+  const kind = el("p", { className: "error-kind" });
+  kind.appendChild(el("strong", {}, "newtron_unavailable"));
+  box.appendChild(kind);
+  box.appendChild(
+    el("p", { className: "error-message" }, "newtron-server is unreachable.")
+  );
+
+  const underlyingError =
+    typeof err.details["underlying_error"] === "string"
+      ? err.details["underlying_error"]
+      : null;
+  const rationale =
+    typeof err.details["next_action_hint"] === "object" &&
+    err.details["next_action_hint"] !== null &&
+    typeof (err.details["next_action_hint"] as Record<string, unknown>)[
+      "rationale"
+    ] === "string"
+      ? (
+          (err.details["next_action_hint"] as Record<string, unknown>)[
+            "rationale"
+          ] as string
+        )
+      : null;
+
+  if (underlyingError !== null) {
+    const substrate = el("p", { className: "error-substrate" });
+    substrate.appendChild(
+      document.createTextNode("Underlying cause: ")
+    );
+    substrate.appendChild(el("code", {}, underlyingError));
+    box.appendChild(substrate);
+  }
+
+  if (rationale !== null) {
+    box.appendChild(
+      el("p", { className: "error-rationale" }, rationale)
+    );
+  }
+
+  const hint = el("p", { className: "error-hint" });
+  hint.innerHTML =
+    'Check <a href="/api/health">/api/health</a> for newtron-server reachability.';
+  box.appendChild(hint);
+}
+
+/**
+ * renderOtherApiError renders non-503 ApiError cases (validation_failure,
+ * internal, precondition_failure, drift_refusal). Surfaces kind + message
+ * plus a <details> block with HTTP status and the full details object.
+ */
+function renderOtherApiError(box: HTMLElement, err: ApiError): void {
+  const kind = el("p", { className: "error-kind" });
+  kind.appendChild(el("strong", {}, "Error "));
+  kind.appendChild(document.createTextNode(err.kind));
+  box.appendChild(kind);
+  box.appendChild(el("p", { className: "error-message" }, err.message));
+
+  const details = el("details", { className: "error-details" });
+  const summary = el("summary", {}, "HTTP " + String(err.status) + " — details");
+  details.appendChild(summary);
+  const pre = el("pre", { className: "error-details-body" });
+  try {
+    pre.textContent = JSON.stringify(err.details, null, 2);
+  } catch {
+    pre.textContent = "(details not serialisable)";
+  }
+  details.appendChild(pre);
+  box.appendChild(details);
+}
+
+/**
+ * renderNetworkError renders the case where fetch() rejected before any HTTP
+ * response was received. The operator sees "unreachable from this browser" to
+ * distinguish this from the newtcon-server → newtron-server hop failing.
+ */
+function renderNetworkError(box: HTMLElement, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  box.appendChild(
+    el("p", { className: "error-kind" }, "network error")
+  );
+  box.appendChild(
+    el(
+      "p",
+      { className: "error-message" },
+      "newtcon-server is unreachable from this browser."
+    )
+  );
+  box.appendChild(el("p", { className: "error-raw" }, msg));
 }
 
 // ---- Mount ---------------------------------------------------------------

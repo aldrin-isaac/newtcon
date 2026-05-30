@@ -202,6 +202,28 @@ tbody td {
   margin-bottom: 0.75rem;
 }
 
+.error-substrate {
+  font-size: 0.8125rem;
+  color: #1a1a1a;
+  margin-bottom: 0.4rem;
+}
+
+.error-substrate code {
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  font-size: 0.8125rem;
+  background: #fee2e2;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+.error-rationale {
+  font-size: 0.8125rem;
+  color: #5a6478;
+  margin-bottom: 0.4rem;
+}
+
 .error-hint {
   font-size: 0.8125rem;
   color: #5a6478;
@@ -209,6 +231,41 @@ tbody td {
 
 .error-hint a {
   color: #4a90d9;
+}
+
+.error-details {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.error-details summary {
+  cursor: pointer;
+  color: #5a6478;
+  user-select: none;
+}
+
+.error-details-body {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #fff5f5;
+  border: 1px solid #fca5a5;
+  border-radius: 3px;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: #1a1a1a;
+}
+
+.error-raw {
+  font-size: 0.8125rem;
+  color: #6b7280;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  margin-top: 0.4rem;
 }
 
 .pending-note {

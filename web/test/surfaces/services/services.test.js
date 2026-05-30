@@ -5,13 +5,14 @@
 // The module under test is imported from dist/ (compiled output of src/).
 // DOM globals are provided by test/lib/dom-stub.js.
 //
-// Tests cover per acceptance criterion 7 of newtcon#105:
+// Tests cover per acceptance criteria 7 + D2 round-2 of newtcon#105:
 //   - renderLoading: shows loading text immediately.
 //   - renderServices (non-empty): renders name + type only; does not render
 //     instance_count, health, or last_modified (invariant #9).
-//   - renderServices (empty): renders empty-state message.
-//   - renderError (ApiError): surfaces kind and message verbatim.
-//   - renderError (plain Error): surfaces message, no ApiError fields.
+//   - renderServices (empty): spec-correct message + manual-mode parity link.
+//   - renderError (newtron_unavailable): surfaces underlying_error + rationale.
+//   - renderError (other ApiError): surfaces kind + message + <details>.
+//   - renderError (plain Error / network failure): "unreachable from this browser".
 
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -32,26 +33,6 @@ import { ApiError } from "../../../dist/api/newtcon/services.js";
 
 // ---- helpers -------------------------------------------------------------
 
-/** Collect all text content recursively from a StubElement tree. */
-function collectText(el) {
-  let text = el._text ?? "";
-  for (const child of el.children ?? []) {
-    if (child && typeof child._collectText === "function") {
-      text += child._collectText();
-    } else if (child && child._data !== undefined) {
-      text += child._data;
-    }
-  }
-  return text;
-}
-
-/** Find the first child with a matching className (shallow). */
-function findByClass(el, className) {
-  return el.children.find(
-    (c) => c.className === className || (c.className && c.className.includes(className))
-  );
-}
-
 /** Recursively find a child with a matching className. */
 function findByClassDeep(el, className) {
   if (!el || !Array.isArray(el.children)) return null;
@@ -64,7 +45,7 @@ function findByClassDeep(el, className) {
   return null;
 }
 
-/** Collect all tagName occurrences (case-insensitive). */
+/** Collect all tagName occurrences (case-insensitive, recursive). */
 function findAllByTag(el, tag) {
   const results = [];
   if (!el || !Array.isArray(el.children)) return results;
@@ -75,6 +56,20 @@ function findAllByTag(el, tag) {
     results.push(...findAllByTag(child, tag));
   }
   return results;
+}
+
+/** Recursively collect all text from an element tree. */
+function collectAllText(el) {
+  if (!el) return "";
+  let text = el._text ?? "";
+  for (const child of el.children ?? []) {
+    if (child && typeof child._collectText === "function") {
+      text += child._collectText();
+    } else if (child && child._data !== undefined) {
+      text += child._data;
+    }
+  }
+  return text;
 }
 
 // ---- tests ---------------------------------------------------------------
@@ -157,12 +152,9 @@ describe("renderServices() — non-empty list", () => {
 
   test("does NOT render instance_count, health, or last_modified", () => {
     renderServices(root, twoServices);
-    // Collect all text recursively — none should mention instance counts or
-    // health numeric values.
+    // All td elements must be svc-name or svc-type — no other column present.
     const allCells = findAllByTag(root, "td");
     for (const td of allCells) {
-      // There should be no "0" standing alone as instance count display.
-      // Cells should only be svc-name or svc-type.
       assert.ok(
         td.className === "svc-name" || td.className === "svc-type",
         `unexpected td class: "${td.className}"`
@@ -194,9 +186,31 @@ describe("renderServices() — empty list", () => {
     const tables = findAllByTag(root, "table");
     assert.equal(tables.length, 0);
   });
+
+  test("renders spec-correct empty-state message", () => {
+    renderServices(root, { services: [] });
+    const empty = findByClassDeep(root, "state-empty");
+    assert.ok(empty !== null);
+    const text = empty._collectText();
+    assert.ok(
+      text.includes("No service specs registered in this newtron network."),
+      `empty-state text should include spec message; got: "${text}"`
+    );
+  });
+
+  test("renders manual-mode parity link in empty state", () => {
+    renderServices(root, { services: [] });
+    const note = findByClassDeep(root, "note");
+    assert.ok(note !== null, "note element with manual-mode link should be present");
+    // The innerHTML of the note includes the manual-mode parity anchor href.
+    assert.ok(
+      note.innerHTML && note.innerHTML.includes("manual-mode-parity"),
+      `note innerHTML should contain manual-mode-parity link; got: "${note.innerHTML}"`
+    );
+  });
 });
 
-describe("renderError() — ApiError", () => {
+describe("renderError() — newtron_unavailable (503)", () => {
   let root;
   beforeEach(() => {
     root = makeRoot();
@@ -207,15 +221,14 @@ describe("renderError() — ApiError", () => {
       error: {
         kind: "newtron_unavailable",
         message: "newtron-server unreachable",
-        details: {},
+        details: { underlying_error: "connection_refused" },
       },
     });
     renderError(root, apiErr);
-    const box = findByClassDeep(root, "state-error");
-    assert.ok(box !== null, "state-error element should be present");
+    assert.ok(findByClassDeep(root, "state-error") !== null);
   });
 
-  test("surfaces error kind verbatim", () => {
+  test("surfaces kind newtron_unavailable verbatim", () => {
     const apiErr = new ApiError(503, {
       error: {
         kind: "newtron_unavailable",
@@ -226,7 +239,6 @@ describe("renderError() — ApiError", () => {
     renderError(root, apiErr);
     const kindEl = findByClassDeep(root, "error-kind");
     assert.ok(kindEl !== null, "error-kind element should be present");
-    // The text should contain the kind value.
     const text = kindEl._collectText();
     assert.ok(
       text.includes("newtron_unavailable"),
@@ -234,50 +246,162 @@ describe("renderError() — ApiError", () => {
     );
   });
 
-  test("surfaces error message verbatim", () => {
+  test("surfaces underlying_error from details", () => {
     const apiErr = new ApiError(503, {
       error: {
         kind: "newtron_unavailable",
-        message: "newtron-server unreachable during listing services",
+        message: "newtron-server unreachable",
+        details: { underlying_error: "connection_refused" },
+      },
+    });
+    renderError(root, apiErr);
+    const substrate = findByClassDeep(root, "error-substrate");
+    assert.ok(substrate !== null, "error-substrate element should be present");
+    const text = substrate._collectText();
+    assert.ok(
+      text.includes("connection_refused"),
+      `error-substrate should include underlying_error; got: "${text}"`
+    );
+  });
+
+  test("surfaces next_action_hint.rationale from details", () => {
+    const apiErr = new ApiError(503, {
+      error: {
+        kind: "newtron_unavailable",
+        message: "newtron-server unreachable",
+        details: {
+          underlying_error: "connection_refused",
+          next_action_hint: {
+            rationale: "check /api/health to see current newtron-server reachability status",
+          },
+        },
+      },
+    });
+    renderError(root, apiErr);
+    const rationale = findByClassDeep(root, "error-rationale");
+    assert.ok(rationale !== null, "error-rationale element should be present");
+    const text = rationale._collectText();
+    assert.ok(
+      text.includes("check /api/health"),
+      `error-rationale should include rationale text; got: "${text}"`
+    );
+  });
+
+  test("renders error-hint with /api/health link", () => {
+    const apiErr = new ApiError(503, {
+      error: {
+        kind: "newtron_unavailable",
+        message: "newtron-server unreachable",
         details: {},
       },
     });
     renderError(root, apiErr);
+    const hint = findByClassDeep(root, "error-hint");
+    assert.ok(hint !== null, "error-hint element should be present");
+  });
+});
+
+describe("renderError() — other ApiError (non-503)", () => {
+  let root;
+  beforeEach(() => {
+    root = makeRoot();
+  });
+
+  test("renders state-error container", () => {
+    const apiErr = new ApiError(500, {
+      error: {
+        kind: "internal",
+        message: "unexpected error",
+        details: { correlation_id: "abc123" },
+      },
+    });
+    renderError(root, apiErr);
+    assert.ok(findByClassDeep(root, "state-error") !== null);
+  });
+
+  test("surfaces kind and message verbatim", () => {
+    const apiErr = new ApiError(500, {
+      error: {
+        kind: "internal",
+        message: "unexpected error occurred",
+        details: {},
+      },
+    });
+    renderError(root, apiErr);
+    const kindEl = findByClassDeep(root, "error-kind");
+    assert.ok(kindEl !== null);
+    const kindText = kindEl._collectText();
+    assert.ok(kindText.includes("internal"), `kind text: "${kindText}"`);
+
     const msgEl = findByClassDeep(root, "error-message");
-    assert.ok(msgEl !== null, "error-message element should be present");
-    const text = msgEl._collectText();
+    assert.ok(msgEl !== null);
+    const msgText = msgEl._collectText();
     assert.ok(
-      text.includes("newtron-server unreachable"),
-      `error-message text should include message; got: "${text}"`
+      msgText.includes("unexpected error occurred"),
+      `message text: "${msgText}"`
+    );
+  });
+
+  test("renders error-details element with HTTP status", () => {
+    const apiErr = new ApiError(422, {
+      error: {
+        kind: "validation_failure",
+        message: "field x required",
+        details: { field: "x" },
+      },
+    });
+    renderError(root, apiErr);
+    const details = findByClassDeep(root, "error-details");
+    assert.ok(details !== null, "error-details element should be present");
+    // The summary should contain the HTTP status code.
+    const summaries = findAllByTag(details, "summary");
+    assert.ok(summaries.length > 0, "details element should have a summary");
+    const summaryText = summaries[0]._collectText();
+    assert.ok(
+      summaryText.includes("422"),
+      `summary should include HTTP status; got: "${summaryText}"`
     );
   });
 });
 
-describe("renderError() — plain Error (network failure)", () => {
+describe("renderError() — plain Error (network / browser failure)", () => {
   let root;
   beforeEach(() => {
     root = makeRoot();
   });
 
   test("renders state-error container for plain Error", () => {
-    renderError(root, new Error("network error reaching newtcon-server: ECONNREFUSED"));
-    const box = findByClassDeep(root, "state-error");
-    assert.ok(box !== null);
+    renderError(root, new Error("Failed to fetch"));
+    assert.ok(findByClassDeep(root, "state-error") !== null);
   });
 
-  test("surfaces error message for plain Error", () => {
-    renderError(root, new Error("network error reaching newtcon-server: ECONNREFUSED"));
-    const msgEl = findByClassDeep(root, "error-message");
-    assert.ok(msgEl !== null);
-    const text = msgEl._collectText();
-    assert.ok(text.includes("ECONNREFUSED"), `message text: "${text}"`);
-  });
-
-  test("kind element shows 'network error' for plain Error", () => {
-    renderError(root, new Error("timeout"));
+  test("renders 'network error' kind for plain Error", () => {
+    renderError(root, new Error("Failed to fetch"));
     const kindEl = findByClassDeep(root, "error-kind");
     assert.ok(kindEl !== null);
     const text = kindEl._collectText();
     assert.ok(text.includes("network error"), `kind text: "${text}"`);
+  });
+
+  test("renders 'unreachable from this browser' message for plain Error", () => {
+    renderError(root, new Error("Failed to fetch"));
+    const msgEl = findByClassDeep(root, "error-message");
+    assert.ok(msgEl !== null);
+    const text = msgEl._collectText();
+    assert.ok(
+      text.includes("unreachable from this browser"),
+      `message should distinguish browser→newtcon hop; got: "${text}"`
+    );
+  });
+
+  test("renders raw error message in error-raw for plain Error", () => {
+    renderError(root, new Error("net::ERR_CONNECTION_REFUSED"));
+    const rawEl = findByClassDeep(root, "error-raw");
+    assert.ok(rawEl !== null, "error-raw element should be present");
+    const text = rawEl._collectText();
+    assert.ok(
+      text.includes("ERR_CONNECTION_REFUSED"),
+      `error-raw should include raw message; got: "${text}"`
+    );
   });
 });

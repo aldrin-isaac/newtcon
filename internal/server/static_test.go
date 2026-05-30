@@ -126,6 +126,129 @@ func TestRegisterStaticAssets_NonExistentDirSkips(t *testing.T) {
 	}
 }
 
+// TestRegisterDocsAssets_ServesDocFile verifies that after registering a valid
+// docs-dir, GET /docs/operator-philosophy.md returns the file content and 200.
+func TestRegisterDocsAssets_ServesDocFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	content := "# Operator Philosophy\n\nContent here."
+	if err := os.WriteFile(filepath.Join(dir, "operator-philosophy.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("setup: write operator-philosophy.md: %v", err)
+	}
+
+	mux := server.NewMux()
+	server.RegisterDocsAssets(mux, dir, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/docs/operator-philosophy.md", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Operator Philosophy") {
+		t.Fatalf("response body does not contain expected content; got: %q", rec.Body.String())
+	}
+}
+
+// TestRegisterDocsAssets_ServesRootFiles verifies that CLAUDE.md and
+// API_CONTRACT.md are reachable at /CLAUDE.md and /API_CONTRACT.md when
+// a rootDir containing those files is provided.
+func TestRegisterDocsAssets_ServesRootFiles(t *testing.T) {
+	t.Parallel()
+
+	docsDir := t.TempDir()
+	rootDir := t.TempDir()
+
+	// docs/ needs at least one file so the directory is valid.
+	if err := os.WriteFile(filepath.Join(docsDir, "README.md"), []byte("docs"), 0o644); err != nil {
+		t.Fatalf("setup: write README.md: %v", err)
+	}
+	claudeContent := "# CLAUDE.md newtcon instructions"
+	apiContent := "# API_CONTRACT.md newtcon contract"
+	if err := os.WriteFile(filepath.Join(rootDir, "CLAUDE.md"), []byte(claudeContent), 0o644); err != nil {
+		t.Fatalf("setup: write CLAUDE.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootDir, "API_CONTRACT.md"), []byte(apiContent), 0o644); err != nil {
+		t.Fatalf("setup: write API_CONTRACT.md: %v", err)
+	}
+
+	mux := server.NewMux()
+	server.RegisterDocsAssets(mux, docsDir, rootDir)
+
+	for _, tc := range []struct {
+		path    string
+		want    string
+	}{
+		{"/CLAUDE.md", "CLAUDE.md newtcon"},
+		{"/API_CONTRACT.md", "API_CONTRACT.md newtcon"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d (body: %s)", tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s: response does not contain %q; got: %q", tc.path, tc.want, rec.Body.String())
+		}
+	}
+}
+
+// TestRegisterDocsAssets_EmptyDirSkips verifies that an empty --docs-dir
+// disables docs serving without error.
+func TestRegisterDocsAssets_EmptyDirSkips(t *testing.T) {
+	t.Parallel()
+
+	mux := server.NewMux()
+	server.RegisterDocsAssets(mux, "", "") // no-op — empty dir
+
+	req := httptest.NewRequest(http.MethodGet, "/docs/anything", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// No handler — mux default 404 response (method not allowed or not found).
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected non-200 when docs dir not registered, got 200")
+	}
+}
+
+// TestRegisterDocsAssets_Missing404ReturnsJSONEnvelope verifies that a request
+// for a path that does not exist under docs-dir returns HTTP 404 with the
+// JSON error envelope, not the plaintext "404 page not found".
+func TestRegisterDocsAssets_Missing404ReturnsJSONEnvelope(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("docs"), 0o644); err != nil {
+		t.Fatalf("setup: write README.md: %v", err)
+	}
+
+	mux := server.NewMux()
+	server.RegisterDocsAssets(mux, dir, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/docs/does-not-exist.md", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected application/json Content-Type, got %q", ct)
+	}
+	var env types.ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("response is not valid ErrorEnvelope: %v", err)
+	}
+	if env.Error.Kind != types.KindInternal {
+		t.Fatalf("expected kind %q, got %q", types.KindInternal, env.Error.Kind)
+	}
+}
+
 // TestRegisterStaticAssets_Unknown404ReturnsJSONEnvelope verifies that a
 // request for a path that does not exist under web-dir returns HTTP 404 with
 // the API_CONTRACT.md §Error Schema JSON envelope — NOT the plaintext

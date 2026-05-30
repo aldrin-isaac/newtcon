@@ -105,3 +105,46 @@ handlers; everything else falls through to `http.FileServer` over `--web-dir`.
 
 When `--web-dir` is empty or the directory does not exist, `newtcon-server`
 logs a warning and skips static serving. All `/api/*` handlers remain active.
+
+Two additional flags control operator documentation serving (F2, newtcon#105):
+
+- `--docs-dir` (default: `docs`) — directory served at `/docs/`. When run
+  from the repo root, `docs/operator-philosophy.md`, `docs/adr/*.md`, and
+  other reference documents resolve as local links in the browser.
+- `--docs-root-dir` (default: `.`) — repository root; `CLAUDE.md` and
+  `API_CONTRACT.md` are served from here at `/CLAUDE.md` and
+  `/API_CONTRACT.md` respectively.
+
+Substrate-vocabulary link strategy (newtcon#105): **Option (b) — local serving.**
+All operator-facing pages link to `/docs/...`, `/CLAUDE.md`, and
+`/API_CONTRACT.md` as local paths that `newtcon-server` resolves from the
+filesystem. This is more substrate-honest than GitHub-hosted links: the operator
+reads the documentation that shipped with the running binary, not a potentially
+diverged remote branch. When started with the default flags from the repo root,
+all substrate links resolve correctly without network access.
+
+## Running the services-listing page (newtcon#105)
+
+After building and starting the server from the repo root:
+
+```
+go build -o bin/newtcon-server ./cmd/newtcon-server
+cd web && npm run build && cd ..
+bin/newtcon-server --web-dir web/dist --newtron-url http://127.0.0.1:9090
+```
+
+Open `http://localhost:8080/` — the root redirects to
+`/surfaces/services/` which shows the services-listing page.
+
+### Verifying acceptance criteria
+
+| Criterion | Verification |
+|-----------|-------------|
+| Loading state | Open devtools Network tab; throttle to Slow 3G; reload. "Loading…" appears before the fetch completes. |
+| Success render | With newtron running: the table shows service name and type. No instance_count / health column present. |
+| Empty state | With an empty newtron network: "No service specs registered in this newtron network." + manual-mode parity link. |
+| newtron_unavailable error | Start without newtron (`--newtron-url` pointing at nothing): page shows kind `newtron_unavailable`, `underlying_error`, and `next_action_hint.rationale`. |
+| Other API error | Not triggerable at services listing in normal operation; covered by unit tests. |
+| Network error | Stop `newtcon-server` while the page is open; refresh: "newtcon-server is unreachable from this browser." |
+| Substrate links | Click "the substrate" in the page subtitle → `/docs/operator-philosophy.md` loads. Click footer links → each resolves locally. |
+| No zero-valued fields | Inspect rendered HTML; no instance_count / health values are present. |

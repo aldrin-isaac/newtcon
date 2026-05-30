@@ -37,6 +37,8 @@ func main() {
 	newtronURL := flag.String("newtron-url", "", "newtron-server base URL (e.g., http://127.0.0.1:9090)")
 	newtronTimeout := flag.Duration("newtron-timeout", 10*time.Second, "per-request timeout for newtron-server calls")
 	webDir := flag.String("web-dir", "web/dist", "directory of compiled frontend static assets to serve at /; empty or non-existent disables static serving")
+	docsDir := flag.String("docs-dir", "docs", "directory of operator documentation to serve at /docs/; empty or non-existent disables docs serving")
+	docsRootDir := flag.String("docs-root-dir", ".", "repository root directory; CLAUDE.md and API_CONTRACT.md are served from here at /CLAUDE.md and /API_CONTRACT.md")
 	flag.Parse()
 
 	nc := newtronc.New(*newtronURL, newtronc.WithTimeout(*newtronTimeout))
@@ -63,6 +65,11 @@ func main() {
 	// webDir is empty or does not exist; the /api/* handlers remain active.
 	server.RegisterStaticAssets(mux, *webDir)
 
+	// Docs serving mounts the operator documentation at /docs/ (and CLAUDE.md,
+	// API_CONTRACT.md at their root paths). Registration order does not affect
+	// routing correctness; the more-specific "/docs/" wins over "/" regardless.
+	server.RegisterDocsAssets(mux, *docsDir, *docsRootDir)
+
 	handler := server.ApplyMiddleware(mux)
 
 	srv := &http.Server{
@@ -71,8 +78,8 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("newtcon-server listening on %s (newtron-url=%q newtron-timeout=%s web-dir=%q)",
-		*addr, *newtronURL, *newtronTimeout, *webDir)
+	log.Printf("newtcon-server listening on %s (newtron-url=%q newtron-timeout=%s web-dir=%q docs-dir=%q)",
+		*addr, *newtronURL, *newtronTimeout, *webDir, *docsDir)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Printf("server exited: %v", err)
 		os.Exit(1)

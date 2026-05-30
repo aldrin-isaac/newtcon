@@ -88,7 +88,10 @@ export class ApiError extends Error {
 export async function fetchServices(): Promise<ServiceListResponse> {
   let response: Response;
   try {
-    response = await fetch("/api/services");
+    // cache: "no-store" — no client-side caching per newtcon#105 criterion.
+    // The services list reflects live newtron state; a stale cached copy
+    // would silently hide additions or removals (invariant #9).
+    response = await fetch("/api/services", { cache: "no-store" });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error("network error reaching newtcon-server: " + msg);
