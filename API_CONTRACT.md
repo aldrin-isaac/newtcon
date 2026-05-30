@@ -26,6 +26,59 @@ Protocol).
 
 This file documents only the **newtcon-server ↔ frontend** contract.
 
+## Vocabulary
+
+This contract uses **the substrate** as a shorthand for the canonical
+typed data that newtron and newtrun expose over HTTP — CONFIG_DB
+entries, intent records, ChangeSets, projection snapshots, verify
+assertions, observation snapshots, and per-write operation records.
+The canonical definition lives at
+[`docs/operator-philosophy.md`](docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document)
+§Vocabulary; this contract inherits that definition by reference per
+editing-guidelines §43. Compound adjectives that appear throughout
+the contract — `substrate-grounded`, `substrate-faithful`,
+`substrate-level`, `substrate-mechanics`, `substrate-evolution` — are
+ordinary English adjectives derived from the canonical term: they
+mean "grounded in the canonical typed data," "faithful to the
+canonical typed data," "at the canonical-typed-data level," etc.
+
+**Schema identifiers are not prose.** The contract embeds a small
+family of schema-identifier tokens that look like the project term
+but are stable wire-shape interfaces, governed by editing-guidelines
+§42's anti-rule ("renaming function names or API symbols to match
+thesis vocabulary — symbols are stable interfaces, not prose") and
+ai-instructions §13's same-concept-same-name discipline:
+
+- **JSON keys** matching the pattern `"substrate": {...}` — 85
+  occurrences, all under `rationale_ref` objects, carrying a path-and-
+  anchor into substrate docs. Stable since the §Error Schema's
+  `rationale_ref` shape was first defined.
+- **Validation-stage enum literals** `substrate_precondition` and
+  `substrate_schema` — bounded values of the `validation_stage`
+  discriminator in `validation_failure.details`, mirroring newtron's
+  `DESIGN_PRINCIPLES_NEWTRON.md` §13 "two kinds of refusal."
+- **Locator-kind enum literal** `substrate_field` — bounded value of
+  the `locator.kind` discriminator, naming a CONFIG_DB-address-typed
+  rejection locator (network / node / table / key / field).
+- **Report-template id** `substrate_write_failure` — one of four
+  bounded `template_id` values on the Report Bug surface.
+- **Locator-kind discriminator field names** `substrate_kind`,
+  `substrate_kinds_touched`, `substrate_warning`, `substrate_before`,
+  `substrate_after`, `substrate_produced_when_applied` — field names
+  on Observation History and Operations response shapes carrying
+  per-write substrate metadata.
+- **URL anchors** like
+  `#3-the-substrate-is-the-teaching-surface` — fragment identifiers
+  resolving against operator-philosophy.md headings.
+
+These schema identifiers are NOT occurrences of the canonical project
+term being bridged here; they are wire-shape identifiers per
+`DESIGN_PRINCIPLES_NEWTRON.md` §46 ("Wire Shape Mirrors Substrate").
+A reader who Ctrl-F's `substrate` in this contract should expect to
+find both kinds — bridged prose and schema identifiers — and treat
+them with their respective disciplines: the prose is read against the
+canonical bridge; the identifiers are stable interfaces.
+
 ## Versioning
 
 The API is unversioned until v1. Path prefix is `/api/` (e.g., `/api/services`).
@@ -39,8 +92,8 @@ applies (see [`CLAUDE.md`](CLAUDE.md) §Greenfield).
   no surviving newtcon-server endpoint streams Server-Sent Events
   — SSE substrate for state-changing operator workflows lives on
   newtrun-server's `GET /api/runs/{suite}/events` per newtron#22, not
-  on newtcon-server. See §Streaming substrate-operation events (the
-  rebalance stub) for the historical surface and the upstream pointer.
+  on newtcon-server. See §Streaming per-write events (the rebalance
+  stub) for the historical surface and the upstream pointer.
 - Timestamps are RFC 3339 UTC strings.
 - Resource identifiers are domain names (e.g., service name, node name,
   interface name) — never opaque internal IDs.
@@ -945,8 +998,8 @@ upstream-substrate position newtron-server was, only one level up.
 
 ### `PerWrite`
 
-The per-substrate-operation entry type. Per ADR-0001, the canonical
-substrate for `PerWrite` lives **upstream** in newtrun-server's
+The per-write entry type. Per ADR-0001, the canonical substrate for
+`PerWrite` lives **upstream** in newtrun-server's
 `EventStepProgress` payload (per newtron#24's `StepProgress`
 callback), which embeds the verbatim `sonic.DeviceOp` substrate per
 `DESIGN_PRINCIPLES_NEWTRON.md` §46 ("Wire Shape Mirrors Substrate").
@@ -977,7 +1030,7 @@ lives in newtrun-server's contract (newtron repo); this section
 documents the shape because surviving newtcon-server surfaces
 reference it.
 
-## Streaming substrate-operation events
+## Streaming per-write events
 
 **Moved per ADR-0001 rebalance ([`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md)).**
 The state-changing endpoints this surface used to wrap — Composer
@@ -1819,15 +1872,15 @@ in their own environment (ssh access, redis-cli on the device, etc.).
 
 ### How this surface differs from per-operation `cli_command` annotations
 
-Every substrate-operation event in the per-write substrate
+Every per-write event in the per-write substrate
 (`per_write[*].cli_command` in the §Shared substrate shapes
 "PerWrite" carried on §Operations responses, on §Observation History
 change records, and on §Report Bug body sections; surfaced live on
 newtrun-server's `EventStepProgress` SSE per ADR-0001) already
 carries the literal `ssh <device>` + `redis-cli` / `redis-del` /
-`redis-hgetall` command that reproduces THAT substrate-operation by
-hand. That per-substrate-op annotation is the "this is the
-device-level command equivalent to THIS specific write" teaching,
+`redis-hgetall` command that reproduces THAT per-write operation by
+hand. That per-write annotation is the "this is the device-level
+command equivalent to THIS specific write" teaching,
 surfaced inline at the moment the operation executes.
 
 The Manual-Mode Parity teaching surface is one level up. It is the
@@ -6197,7 +6250,7 @@ construction; the contract guarantees the substrate is present.
 |---------|--------------|---------------------|
 | Browser-frontend state-changing operator workflows (Composer apply, Inbox action, Workbench commit — delivered over newtrun-server per ADR-0001) | Execute substrate operations. Stream `EventStepProgress` events from newtrun-server carrying `PerWrite` entries (per §Shared substrate shapes "PerWrite"; the upstream wire substrate is documented in newtrun-server's contract). | Author bug reports. The operator sees the failure; nothing automates the diagnostic-to-report-body translation. |
 | `GET /api/operations/{operation_id}` | Inspect a single operation's pipeline trace, verify assertion, terminal state (captured by newtcon-server observing newtrun-server's run state per §Operations capture-path). | Synthesize a bug report from that trace. The data is available to read; the operator must compose the report by hand. |
-| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source`. The upstream substrate is `deferred_indefinitely` per [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) (re-evaluation trigger documented at §Streaming substrate-operation events "`source`" stub which points at newtrun-server's `EventStepProgress` substrate); until re-evaluation, `PerWrite.source` is `null` and operators classify the call-site manually. |
+| `GET /api/intents/{intent_id}` (Provenance) | Inspect an intent record's substrate, DAG context, linked ChangeSets. | Carry call-site provenance for the failing write — that is the role of `PerWrite.source`. The upstream substrate is `deferred_indefinitely` per [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) (re-evaluation trigger documented at §Streaming per-write events "`source`" stub which points at newtrun-server's `EventStepProgress` substrate); until re-evaluation, `PerWrite.source` is `null` and operators classify the call-site manually. |
 | **`POST /api/report-bug/preview` / `POST /api/report-bug`** (this surface) | Collect the substrate + operation context + recent-history context + (when available) call-site, route to the correct repository, render a structured Markdown body, return for operator review, and (on confirmation) deliver the body to a configured integration target. | Auto-file the report without operator review. The operator confirms the rendered body before any external system is touched, per `CLAUDE.md` §Preview Before Commit, Always. |
 
 The surface is read-mostly with respect to upstream substrate (it
@@ -6244,7 +6297,7 @@ operator needs. It does **not**:
   auto-classification — the body shape is identical, and the
   routing question is asked of the operator rather than inferred.
   The re-evaluation trigger for the upstream substrate is
-  documented canonically at §Streaming substrate-operation events
+  documented canonically at §Streaming per-write events
   "`source`". If the trigger fires and call-site provenance ships
   later, the field becomes auto-populated; the operator may
   still override.
@@ -6280,7 +6333,7 @@ coined.
   `source`. The Report Bug body embeds these verbatim from
   newtcon-server's operations store (which observes them from
   newtrun-server's `EventStepProgress` substrate per ADR-0001);
-  the report is substrate-canonical by construction.
+  the report is substrate-grounded by construction.
 - Operation trace — defined in §Endpoints — Operations.
   Carries the pipeline (`Intent → Replay → Render → Deliver`),
   verify-stage assertion, terminal outcome. Embedded by reference
@@ -6796,9 +6849,8 @@ Field rules:
   - `call_site_provenance` — the `PerWrite.source` field was
     populated (a future verbose-mode surface lands after the
     [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12)
-    re-evaluation trigger fires, per §Streaming
-    substrate-operation events "`source`"), and the
-    classification follows from the call-site.
+    re-evaluation trigger fires, per §Streaming per-write events
+    "`source`"), and the classification follows from the call-site.
   - `operator_override` — operator supplied
     `target_repository_hint.kind` ∈ `{newtron, newtcon, other}`
     explicitly.
@@ -6823,7 +6875,7 @@ Field rules:
   violation.
 - **`body_sections[*].substrate`** for the `failed_write` section
   embeds the full `PerWrite` shape verbatim (per §Streaming
-  substrate-operation events "PerWrite shape"). The bug report
+  per-write events "PerWrite shape"). The bug report
   body MUST carry the full PerWrite — not a summarized form —
   per operator-philosophy invariant #7 ("errors carry the
   substrate") and `DESIGN_PRINCIPLES_NEWTRON.md` §14.
@@ -6881,7 +6933,7 @@ Field rules:
     defined canonically at
     §Shared substrate shapes "`manual_equivalent.newtron_http`";
     the consumption site for this specific substrate is
-    §Streaming substrate-operation events "`source`" (now the
+    §Streaming per-write events "`source`" (now the
     moved-stub pointing at newtrun-server's `EventStepProgress`
     substrate per ADR-0001). The body is still useful — the
     automation team can find the call-site by other means (grep
