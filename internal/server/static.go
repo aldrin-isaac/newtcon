@@ -1,6 +1,14 @@
-// Package server — this file implements RegisterStaticAssets, which mounts a
-// wrapped http.FileServer at the catch-all "/" pattern for the compiled
-// frontend assets produced by `cd web && npm run build`.
+// Package server — this file implements RegisterStaticAssets and
+// RegisterDocsAssets, which mount wrapped http.FileServers for the compiled
+// frontend assets and the operator docs directory respectively.
+//
+// RegisterStaticAssets mounts at the catch-all "/" pattern.
+// RegisterDocsAssets mounts at "/docs/" so that operator-philosophy.md,
+// API_CONTRACT.md, CLAUDE.md, and ADRs are reachable at local paths — the
+// operator-local teaching surface per CLAUDE.md §Project Scope "Teaching
+// catalogs" and operator-philosophy invariant #2 (manual-mode parity). Local
+// serving is more substrate-honest than GitHub-hosted links; the operator
+// navigating to a doc link gets the version that shipped with this binary.
 //
 // Registration is intentionally deferred to after all /api/* routes are
 // registered in main.go. http.ServeMux routes more-specific patterns (those
@@ -143,4 +151,75 @@ func RegisterStaticAssets(mux *http.ServeMux, dir string) {
 	fs := &fileServerWithJSONNotFound{fs: http.FileServer(http.Dir(dir))}
 	mux.Handle("/", fs)
 	log.Printf("static assets: serving %q at /", dir)
+}
+
+// RegisterDocsAssets mounts a JSON-404-aware http.FileServer at "/docs/" on
+// mux, serving operator documentation from dir. Also mounts top-level
+// reference files (CLAUDE.md, API_CONTRACT.md) from rootDir if provided.
+//
+// Purpose: operator-philosophy invariant #2 (manual-mode parity) and CLAUDE.md
+// §Project Scope "Teaching catalogs" require that documentation links resolve
+// locally so the operator reads the exact version that shipped with this
+// binary, not a remote branch. Serving docs locally is more substrate-honest
+// than GitHub-hosted links: the content is co-versioned with the server.
+//
+// Routing: "/docs/" is more specific than "/" so it takes precedence over the
+// static file catch-all regardless of registration order. The explicit
+// "/CLAUDE.md" and "/API_CONTRACT.md" patterns are exact-match and win over
+// both "/docs/" and "/".
+//
+// Behaviour when dir is empty or does not exist:
+//   - Logs a warning at the "warn" level.
+//   - Does NOT register "/docs/".
+//   - Returns without error; other handlers remain fully operational.
+//
+// main.go calls this after RegisterStaticAssets (registration order does not
+// matter for routing correctness; the more-specific "/docs/" wins either way).
+func RegisterDocsAssets(mux *http.ServeMux, dir string, rootDir string) {
+	if dir == "" {
+		log.Printf("warn: --docs-dir is empty; docs serving disabled")
+		return
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		log.Printf("warn: --docs-dir %q does not exist or is not a directory; docs serving disabled", dir)
+		return
+	}
+
+	// Strip "/docs" prefix before passing to the file server so that
+	// GET /docs/operator-philosophy.md maps to dir/operator-philosophy.md.
+	stripped := http.StripPrefix("/docs", &fileServerWithJSONNotFound{
+		fs: http.FileServer(http.Dir(dir)),
+	})
+	mux.Handle("/docs/", stripped)
+	log.Printf("docs: serving %q at /docs/", dir)
+
+	// Serve top-level reference files (CLAUDE.md, API_CONTRACT.md) from the
+	// repo root if rootDir is provided. These are teaching-surface references
+	// linked from operator-facing pages. A missing rootDir is a soft failure:
+	// docs/ still works; only the root-level files are absent.
+	if rootDir == "" {
+		return
+	}
+	rootInfo, rootErr := os.Stat(rootDir)
+	if rootErr != nil || !rootInfo.IsDir() {
+		log.Printf("warn: docs root dir %q does not exist; CLAUDE.md / API_CONTRACT.md not served", rootDir)
+		return
+	}
+	registerRootFile(mux, rootDir, "CLAUDE.md")
+	registerRootFile(mux, rootDir, "API_CONTRACT.md")
+}
+
+// registerRootFile mounts a single file from rootDir at the exact path
+// "/"+name. This avoids the loop-variable-capture pitfall: each call creates
+// its own closure scope with its own copy of rootDir and name.
+//
+// http.FileServer(http.Dir(rootDir)) receives the full request path ("/CLAUDE.md")
+// and resolves it against rootDir — yielding rootDir+"/CLAUDE.md". No
+// StripPrefix needed; the file server's path translation does the right thing.
+func registerRootFile(mux *http.ServeMux, rootDir, name string) {
+	path := "/" + name
+	fs := &fileServerWithJSONNotFound{fs: http.FileServer(http.Dir(rootDir))}
+	mux.Handle(path, fs)
+	log.Printf("docs: serving %q at %s", name, path)
 }

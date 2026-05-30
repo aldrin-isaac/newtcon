@@ -1,0 +1,310 @@
+/*
+ * services.css — styling for the services-listing surface.
+ *
+ * F2 baseline: system font stack, restrained palette, deliberate whitespace.
+ * F3 (newtcon#106) will introduce the design-system seed (typography.css,
+ * color.css, spacing.css, motion.css) and refine these rules. This file
+ * intentionally avoids framework chrome and dark-theme defaults — the page
+ * should pass the aesthetic litmus test ("does the operator want to open this
+ * tool?") before F3 lands.
+ *
+ * Color intent: near-white background, near-black text, one quiet accent
+ * (desaturated blue) for links and type badges. Nothing demands attention;
+ * everything is legible.
+ */
+
+/* Reset — minimal, scoped to what this page needs. */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+/* System font stack: the operator's own OS typeface. No web font downloads. */
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 0.9375rem;   /* 15px at 16px base */
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #f9f9f8;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ---- Header ------------------------------------------------------------ */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.75rem 2rem;
+  border-bottom: 1px solid #e0e0dc;
+  background: #fff;
+}
+
+.site-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a5568;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.nav-link {
+  font-size: 0.875rem;
+  color: #4a5568;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  color: #1a1a1a;
+}
+
+.nav-link--active {
+  color: #1a1a1a;
+  font-weight: 500;
+  border-bottom: 2px solid #4a90d9;
+  padding-bottom: 2px;
+}
+
+/* ---- Main -------------------------------------------------------------- */
+
+#main {
+  flex: 1;
+  width: 100%;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 3rem;
+}
+
+.page-heading {
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 0.5rem;
+}
+
+.page-subtitle {
+  font-size: 0.875rem;
+  color: #5a6478;
+  max-width: 60ch;
+}
+
+.page-subtitle a {
+  color: #4a90d9;
+}
+
+/* ---- Services table ---------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+thead th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+  padding: 0 1rem 0.6rem 0;
+  border-bottom: 1px solid #e0e0dc;
+}
+
+tbody tr {
+  border-bottom: 1px solid #f0f0ec;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}
+
+tbody td {
+  padding: 0.75rem 1rem 0.75rem 0;
+  vertical-align: top;
+  color: #1a1a1a;
+}
+
+.svc-name {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.svc-type {
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  font-size: 0.8125rem;
+  color: #4a5568;
+  background: #f0f4f8;
+  border-radius: 3px;
+  padding: 0.15em 0.45em;
+  white-space: nowrap;
+}
+
+/* ---- States ------------------------------------------------------------ */
+
+.status-loading {
+  color: #6b7280;
+  font-size: 0.875rem;
+  padding: 1rem 0;
+}
+
+.state-empty {
+  padding: 2rem 0;
+  color: #4a5568;
+  font-size: 0.875rem;
+}
+
+.state-empty p + p {
+  margin-top: 0.5rem;
+}
+
+.state-error {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid #fca5a5;
+  border-left: 4px solid #ef4444;
+  border-radius: 4px;
+  background: #fff5f5;
+  max-width: 60ch;
+}
+
+.error-kind {
+  font-size: 0.8125rem;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  color: #7f1d1d;
+  margin-bottom: 0.4rem;
+}
+
+.error-message {
+  font-size: 0.875rem;
+  color: #1a1a1a;
+  margin-bottom: 0.75rem;
+}
+
+.error-substrate {
+  font-size: 0.8125rem;
+  color: #1a1a1a;
+  margin-bottom: 0.4rem;
+}
+
+.error-substrate code {
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  font-size: 0.8125rem;
+  background: #fee2e2;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+.error-rationale {
+  font-size: 0.8125rem;
+  color: #5a6478;
+  margin-bottom: 0.4rem;
+}
+
+.error-hint {
+  font-size: 0.8125rem;
+  color: #5a6478;
+}
+
+.error-hint a {
+  color: #4a90d9;
+}
+
+.error-details {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.error-details summary {
+  cursor: pointer;
+  color: #5a6478;
+  user-select: none;
+}
+
+.error-details-body {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #fff5f5;
+  border: 1px solid #fca5a5;
+  border-radius: 3px;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: #1a1a1a;
+}
+
+.error-raw {
+  font-size: 0.8125rem;
+  color: #6b7280;
+  font-family:
+    ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace;
+  margin-top: 0.4rem;
+}
+
+.pending-note {
+  margin-top: 1.25rem;
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.pending-note a {
+  color: #4a90d9;
+}
+
+.note {
+  color: #6b7280;
+  font-size: 0.8125rem;
+}
+
+.note a {
+  color: #4a90d9;
+}
+
+/* ---- Footer ------------------------------------------------------------ */
+
+.site-footer {
+  padding: 1rem 2rem;
+  border-top: 1px solid #e0e0dc;
+  background: #fff;
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.why-link {
+  color: #4a90d9;
+}
+
+a {
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}

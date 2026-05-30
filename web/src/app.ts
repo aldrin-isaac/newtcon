@@ -10,25 +10,35 @@
 // its mount() function. The router is ~10 lines of plain code — there
 // is no client-side routing framework.
 //
-// At the F1 scaffold stage the only surface is the loading placeholder
-// in index.html; this module is a stub that will be extended by F2
-// (newtcon#105) when the services-listing surface lands.
+// At F2 the router handles one surface: services-listing at /. A second
+// entry point (surfaces/services/index.html with its own inline <script>)
+// serves the services page directly; this module serves the root index.html
+// redirect strategy (see landing-page strategy in PR body).
 //
 // Import paths use .js extensions per the node16 moduleResolution rule
 // documented in web/README.md: tsc emits .js files; the browser loads
 // .js files; the import paths must match what the browser loads.
 
-// No imports yet — F2 populates web/src/api/newtcon/ and the first
-// surface module.
-
 /**
- * bootstrap is called once the module loads. At F1 scaffold stage it is a
- * no-op placeholder; F2 will replace the body with surface dispatch.
+ * bootstrap selects the active surface from window.location.pathname and
+ * mounts it. At F2 the only surface is services-listing, which is served
+ * at /surfaces/services/index.html. The root / redirects there via the
+ * meta-refresh in index.html; no client-side routing is needed for a
+ * single surface.
+ *
+ * When a second surface arrives (Provenance drill-down per F-next), this
+ * function will grow a path-dispatch table — still ~10 lines, still no
+ * framework. The ADR-0002 §Consequences note on routing applies at that
+ * point.
  */
 function bootstrap(): void {
-  // Intentionally empty at scaffold stage.
-  // F2 (newtcon#105) will add surface dispatch here once
-  // web/src/surfaces/ contains at least one surface module.
+  // Root: redirect to the services surface. The meta-refresh in index.html
+  // handles the initial load; this code path handles in-app navigation back
+  // to "/" if it ever arises (e.g., nav-link click).
+  if (window.location.pathname === "/" || window.location.pathname === "") {
+    window.location.replace("/surfaces/services/");
+  }
+  // Additional surface dispatch entries land here as surfaces are added.
 }
 
 bootstrap();
