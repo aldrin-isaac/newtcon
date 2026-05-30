@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/aldrin-isaac/newtcon/internal/server"
+	"github.com/aldrin-isaac/newtcon/internal/types"
 )
 
 // TestRegisterStaticAssets_ServesIndexHTML verifies that after registering a
@@ -121,5 +123,59 @@ func TestRegisterStaticAssets_NonExistentDirSkips(t *testing.T) {
 	// No handler matches "/" when static serving is skipped; the mux returns 404.
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 (no handler), got %d", rec.Code)
+	}
+}
+
+// TestRegisterStaticAssets_Unknown404ReturnsJSONEnvelope verifies that a
+// request for a path that does not exist under web-dir returns HTTP 404 with
+// the API_CONTRACT.md §Error Schema JSON envelope — NOT the plaintext
+// "404 page not found" response that http.FileServer emits by default.
+//
+// This test exercises acceptance criterion 5d of newtcon#104 and CLAUDE.md
+// §Operator-Honest Errors: errors must be returned as JSON in domain terms,
+// not as HTTP-status-approximation plain text.
+func TestRegisterStaticAssets_Unknown404ReturnsJSONEnvelope(t *testing.T) {
+	t.Parallel()
+
+	// The web-dir contains only index.html; any other path must produce a
+	// JSON 404 envelope.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>ok</html>"), 0o644); err != nil {
+		t.Fatalf("setup: write index.html: %v", err)
+	}
+
+	mux := server.NewMux()
+	server.RegisterStaticAssets(mux, dir)
+
+	req := httptest.NewRequest(http.MethodGet, "/does-not-exist", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// Status must be 404.
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	// Content-Type must be application/json, not text/plain.
+	ct := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+
+	// Body must parse as the ErrorEnvelope shape from API_CONTRACT.md §Error Schema.
+	var env types.ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("response body is not valid JSON ErrorEnvelope: %v (body: %s)", err, rec.Body.String())
+	}
+
+	// Kind must be "internal" — the only appropriate bounded kind for a missing
+	// static asset (no "not_found" kind exists in the contract).
+	if env.Error.Kind != types.KindInternal {
+		t.Fatalf("expected kind %q, got %q", types.KindInternal, env.Error.Kind)
+	}
+
+	// Message must reference the requested path.
+	if !strings.Contains(env.Error.Message, "/does-not-exist") {
+		t.Fatalf("expected message to contain request path; got %q", env.Error.Message)
 	}
 }
