@@ -1,0 +1,16 @@
+{
+  "name": "newtcon-web",
+  "version": "0.0.1",
+  "private": true,
+  "description": "newtcon browser frontend — vanilla HTML + TypeScript-as-typed-ES-modules",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json && node scripts/copy-static.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/**/*.test.js",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}
