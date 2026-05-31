@@ -1,23 +1,18 @@
 # newtcon
 
 Operator-facing web console for [newtron](../newtron). Single-page application
-plus HTTP server, designed for network operators who already work with
-newtron's typed data — CONFIG_DB entries, intent records, ChangeSets,
-projection snapshots, verify assertions — and want fast, structured leverage
-on intent-modeled network state. (The project term for that typed data is
-**the substrate**; the canonical definition lives at
-[`docs/operator-philosophy.md`](docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document)
-§Vocabulary.)
+plus HTTP server, designed for network operators who work with newtron-managed
+networks and want fast, structured leverage on network state.
 
 newtcon is not a topology editor and not a status dashboard. The primary
-surfaces are:
+pages are:
 
 - **Service Composer** — multi-target service apply/refresh/remove with live
-  ChangeSet preview.
+  preview of the changes that will be made to each device.
 - **Operator Inbox** — drift, convergence stragglers, partial operations, and
   reconcile-due signals rendered as actionable work cards.
-- **Change Workbench** — git-style staging for batched intents with dry-run
-  preview and atomic commit.
+- **Change Workbench** — staged batches of changes with dry-run preview and
+  atomic commit.
 
 ## Status
 

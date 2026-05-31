@@ -1,8 +1,8 @@
 /*
- * services.css — styling for the services-listing surface.
+ * services.css — styling for the services-listing page.
  *
  * Imports the design-system seed (typography, color, spacing, motion) and
- * writes surface-specific rules in terms of those tokens only. No raw hex
+ * writes page-specific rules in terms of those tokens only. No raw hex
  * values, no raw pixel sizes outside the token scale.
  *
  * F3 (newtcon#106): design-system seed applied. The baseline F2 rules are
@@ -241,14 +241,14 @@ tbody td {
   line-height: var(--leading-prose);
 }
 
-.error-substrate {
+.error-cause {
   font-size: var(--text-sm);
   color: var(--color-text-primary);
   margin-bottom: var(--space-2);
   line-height: var(--leading-prose);
 }
 
-.error-substrate code {
+.error-cause code {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-elevated));
@@ -356,21 +356,22 @@ tbody td {
 }
 
 /*
- * Why-mode links: discoverable but secondary. Small text (--text-sm, same as
- * footer baseline), restrained color (--color-accent), generous visual
- * separation from the main content (provided by the footer's border-top +
- * own padding). The links should not pull the operator's eye during normal
- * use; they should be easy to find when sought.
+ * Footer note: a single-line operator-context sentence. Same text hierarchy
+ * as the footer baseline (--text-sm, --color-text-secondary). No links —
+ * the footer delivers operator context inline rather than via cross-links to
+ * contributor docs.
  */
 
-.why-link,
+.footer-note {
+  color: var(--color-text-secondary);
+}
+
 .site-footer a {
   color: var(--color-accent);
   text-decoration: none;
   transition: color var(--duration-fast) var(--ease-standard);
 }
 
-.why-link:hover,
 .site-footer a:hover {
   text-decoration: underline;
 }

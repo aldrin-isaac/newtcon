@@ -1,5 +1,5 @@
-// test/surfaces/services/services.test.js — unit tests for the services-listing
-// surface rendering functions.
+// test/services/services.test.js — unit tests for the services-listing
+// page rendering functions.
 //
 // Tests run under Node.js's built-in node:test module (web/README.md §Test runner).
 // The module under test is imported from dist/ (compiled output of src/).
@@ -9,17 +9,17 @@
 //   - renderLoading: shows loading text immediately.
 //   - renderServices (non-empty): renders name + type only; does not render
 //     instance_count, health, or last_modified (invariant #9).
-//   - renderServices (empty): spec-correct message + manual-mode parity link.
+//   - renderServices (empty): operator-language message + manual-mode parity link.
 //   - renderError (newtron_unavailable): surfaces underlying_error + rationale.
-//   - renderError (other ApiError): surfaces kind + message + <details>.
+//   - renderError (other ApiError): surfaces translated kind label + message + <details>.
 //   - renderError (plain Error / network failure): "unreachable from this browser".
 
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { setupDOM, makeRoot } from "../../lib/dom-stub.js";
+import { setupDOM, makeRoot } from "../lib/dom-stub.js";
 
-// Apply DOM stubs before importing the surface module, which references
+// Apply DOM stubs before importing the page module, which references
 // browser globals at import time.
 setupDOM();
 
@@ -27,9 +27,9 @@ import {
   renderLoading,
   renderServices,
   renderError,
-} from "../../../dist/surfaces/services/services.js";
+} from "../../dist/services/services.js";
 
-import { ApiError } from "../../../dist/api/newtcon/services.js";
+import { ApiError } from "../../dist/api/newtcon/services.js";
 
 // ---- helpers -------------------------------------------------------------
 
@@ -187,14 +187,14 @@ describe("renderServices() — empty list", () => {
     assert.equal(tables.length, 0);
   });
 
-  test("renders spec-correct empty-state message", () => {
+  test("renders operator-language empty-state message", () => {
     renderServices(root, { services: [] });
     const empty = findByClassDeep(root, "state-empty");
     assert.ok(empty !== null);
     const text = empty._collectText();
     assert.ok(
-      text.includes("No service specs registered in this newtron network."),
-      `empty-state text should include spec message; got: "${text}"`
+      text.includes("No services configured in this network."),
+      `empty-state text should include operator message; got: "${text}"`
     );
   });
 
@@ -228,7 +228,7 @@ describe("renderError() — newtron_unavailable (503)", () => {
     assert.ok(findByClassDeep(root, "state-error") !== null);
   });
 
-  test("surfaces kind newtron_unavailable verbatim", () => {
+  test("renders 'newtron is unreachable' for newtron_unavailable kind", () => {
     const apiErr = new ApiError(503, {
       error: {
         kind: "newtron_unavailable",
@@ -241,8 +241,8 @@ describe("renderError() — newtron_unavailable (503)", () => {
     assert.ok(kindEl !== null, "error-kind element should be present");
     const text = kindEl._collectText();
     assert.ok(
-      text.includes("newtron_unavailable"),
-      `error-kind text should include kind; got: "${text}"`
+      text.includes("newtron is unreachable"),
+      `error-kind text should be operator-readable; got: "${text}"`
     );
   });
 
@@ -255,12 +255,12 @@ describe("renderError() — newtron_unavailable (503)", () => {
       },
     });
     renderError(root, apiErr);
-    const substrate = findByClassDeep(root, "error-substrate");
-    assert.ok(substrate !== null, "error-substrate element should be present");
+    const substrate = findByClassDeep(root, "error-cause");
+    assert.ok(substrate !== null, "error-cause element should be present");
     const text = substrate._collectText();
     assert.ok(
       text.includes("connection_refused"),
-      `error-substrate should include underlying_error; got: "${text}"`
+      `error-cause should include underlying_error; got: "${text}"`
     );
   });
 
@@ -319,7 +319,7 @@ describe("renderError() — other ApiError (non-503)", () => {
     assert.ok(findByClassDeep(root, "state-error") !== null);
   });
 
-  test("surfaces kind and message verbatim", () => {
+  test("renders translated kind label and message verbatim", () => {
     const apiErr = new ApiError(500, {
       error: {
         kind: "internal",
@@ -331,7 +331,10 @@ describe("renderError() — other ApiError (non-503)", () => {
     const kindEl = findByClassDeep(root, "error-kind");
     assert.ok(kindEl !== null);
     const kindText = kindEl._collectText();
-    assert.ok(kindText.includes("internal"), `kind text: "${kindText}"`);
+    assert.ok(
+      kindText.includes("internal error"),
+      `kind text should be translated to "internal error"; got: "${kindText}"`
+    );
 
     const msgEl = findByClassDeep(root, "error-message");
     assert.ok(msgEl !== null);

@@ -1,4 +1,4 @@
-// web/src/surfaces/services/services.ts — services-listing surface module.
+// web/src/services/services.ts — services-listing page module.
 //
 // This module owns the DOM for the services-listing page. It fetches
 // GET /api/services via the typed client, then renders the result into
@@ -9,8 +9,10 @@
 //     instance_count, health, and last_modified are zero-valued in v1 and must
 //     not be shown — rendering zero-valued aggregates violates operator-philosophy
 //     invariant #9 (false confidence is worse than no confidence).
-//   - Error envelopes are surfaced verbatim (kind + message + substrate fields)
-//     per invariant #7 (errors carry the substrate) and invariant #9.
+//   - Error kinds are wire-shape identifiers (schema symbols, per editing-guidelines
+//     §42); they stay in the wire contract unchanged. Operator-facing rendering
+//     translates them into plain language so the operator never reads raw
+//     snake_case kind labels.
 //   - Loading state is shown immediately so the operator knows the fetch is in
 //     flight; no flash of empty content.
 //
@@ -20,7 +22,7 @@ import {
   fetchServices,
   ApiError,
   type ServiceListResponse,
-} from "../../api/newtcon/services.js";
+} from "../api/newtcon/services.js";
 
 // ---- DOM helper ---------------------------------------------------------
 
@@ -65,7 +67,7 @@ export function renderServices(
   if (data.services.length === 0) {
     const empty = el("div", { className: "state-empty" });
     empty.appendChild(
-      el("p", {}, "No service specs registered in this newtron network.")
+      el("p", {}, "No services configured in this network.")
     );
     const note = el("p", { className: "note" });
     note.innerHTML =
@@ -96,29 +98,28 @@ export function renderServices(
 
   const note = el("p", { className: "pending-note" });
   note.innerHTML =
-    "Service health and instance counts pending — " +
+    "Service health and instance counts are not yet available — " +
     'see <a href="/docs/adr/0001-scope-justification-vs-newtrun.md">' +
-    "ADR-0001</a>. " +
-    "newtron substrate does not yet expose per-service aggregates.";
+    "ADR-0001</a>.";
   root.appendChild(note);
 }
 
 /**
  * renderError renders the error state into root, branching on the failure type
- * to surface the exact substrate fields the operator needs per invariant #7
- * (errors carry the substrate) and invariant #9 (confidence and limits are
- * explicit).
+ * so the operator sees a precise explanation per invariant #7 (errors carry
+ * detail) and invariant #9 (confidence and limits are explicit).
  *
  * Three cases:
  *
  * 1. ApiError with kind "newtron_unavailable" — newtcon-server reached the
- *    network but newtron-server was not reachable from there. Surfaces
+ *    network but newtron-server was not reachable from there. Renders the
  *    underlying_error and next_action_hint.rationale from the error details,
- *    which carry the substrate cause (connection_refused, http_5xx, etc.).
+ *    which carry the specific cause (connection_refused, http_5xx, etc.).
  *
  * 2. ApiError with another kind — a structured error from newtcon-server
- *    that is not an availability problem. Surfaces kind + message, plus the
- *    full HTTP status and details body in a <details> block for inspection.
+ *    that is not an availability problem. Renders a translated label plus
+ *    the error message, with HTTP status and the full details in a <details>
+ *    block for inspection.
  *
  * 3. Plain Error — fetch() rejected before any HTTP response arrived. This is
  *    a browser → newtcon-server failure, distinct from a newtcon-server →
@@ -142,16 +143,17 @@ export function renderError(root: HTMLElement, err: unknown): void {
 
 /**
  * renderNewtronUnavailableError renders the 503 newtron_unavailable case.
- * Surfaces underlying_error and next_action_hint.rationale from details —
- * these are the substrate fields that explain which hop failed and why.
+ * Shows "newtron is unreachable" in plain language and surfaces the
+ * underlying_error and next_action_hint.rationale fields from the error
+ * details, which carry the specific cause and next step.
  */
 function renderNewtronUnavailableError(
   box: HTMLElement,
   err: ApiError
 ): void {
-  const kind = el("p", { className: "error-kind" });
-  kind.appendChild(el("strong", {}, "newtron_unavailable"));
-  box.appendChild(kind);
+  box.appendChild(
+    el("p", { className: "error-kind" }, "newtron is unreachable")
+  );
   box.appendChild(
     el("p", { className: "error-message" }, "newtron-server is unreachable.")
   );
@@ -174,12 +176,12 @@ function renderNewtronUnavailableError(
       : null;
 
   if (underlyingError !== null) {
-    const substrate = el("p", { className: "error-substrate" });
-    substrate.appendChild(
+    const cause = el("p", { className: "error-cause" });
+    cause.appendChild(
       document.createTextNode("Underlying cause: ")
     );
-    substrate.appendChild(el("code", {}, underlyingError));
-    box.appendChild(substrate);
+    cause.appendChild(el("code", {}, underlyingError));
+    box.appendChild(cause);
   }
 
   if (rationale !== null) {
@@ -195,15 +197,30 @@ function renderNewtronUnavailableError(
 }
 
 /**
+ * translateErrorKind converts a wire-shape error kind identifier (schema
+ * symbol per editing-guidelines §42) into operator-readable text. The wire
+ * kind never appears in the UI; this function is the translation boundary.
+ */
+function translateErrorKind(kind: string): string {
+  switch (kind) {
+    case "validation_failure":   return "validation failed";
+    case "precondition_failure": return "precondition not met";
+    case "drift_refusal":        return "drift detected — refused to apply";
+    case "internal":             return "internal error";
+    default:                     return kind.replace(/_/g, " ");
+  }
+}
+
+/**
  * renderOtherApiError renders non-503 ApiError cases (validation_failure,
- * internal, precondition_failure, drift_refusal). Surfaces kind + message
- * plus a <details> block with HTTP status and the full details object.
+ * internal, precondition_failure, drift_refusal). Renders a translated error
+ * label plus the error message, with HTTP status and the full details in a
+ * <details> block for inspection.
  */
 function renderOtherApiError(box: HTMLElement, err: ApiError): void {
-  const kind = el("p", { className: "error-kind" });
-  kind.appendChild(el("strong", {}, "Error "));
-  kind.appendChild(document.createTextNode(err.kind));
-  box.appendChild(kind);
+  box.appendChild(
+    el("p", { className: "error-kind" }, translateErrorKind(err.kind))
+  );
   box.appendChild(el("p", { className: "error-message" }, err.message));
 
   const details = el("details", { className: "error-details" });
@@ -242,14 +259,14 @@ function renderNetworkError(box: HTMLElement, err: unknown): void {
 // ---- Mount ---------------------------------------------------------------
 
 /**
- * mount is the surface entry point. It selects #services-root, shows the
+ * mount is the page entry point. It selects #services-root, shows the
  * loading state immediately, fetches services, then renders the result or
- * error. Called by app.ts once the surface is active.
+ * error. Called by the inline script in services/index.html.
  */
 export async function mount(): Promise<void> {
   const root = document.getElementById("services-root");
   if (root === null) {
-    // Surface HTML not present — no-op so the module is safe to import in
+    // Page root not present — no-op so the module is safe to import in
     // tests that only test individual render functions.
     return;
   }
