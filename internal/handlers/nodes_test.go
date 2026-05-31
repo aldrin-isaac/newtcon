@@ -196,7 +196,7 @@ func TestNodeInterfaces_Success(t *testing.T) {
 // forwards to newtron's create-node and returns 201 with the data payload.
 func TestCreateTopologyDevice_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/network/default/topology/create-node" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/topology/create-node" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -262,7 +262,7 @@ func TestCreateTopologyDevice_ValidationError(t *testing.T) {
 // forwards to newtron's DELETE topology/node/{name} and returns 200.
 func TestDeleteTopologyDevice_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/network/default/topology/node/spine1" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/network/default/topology/node/spine1" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -288,7 +288,7 @@ func TestDeleteTopologyDevice_Success(t *testing.T) {
 // forwards to newtron's PUT topology/node/{name}.
 func TestUpdateTopologyDevice_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/network/default/topology/node/spine1" {
+		if r.Method != http.MethodPut || r.URL.Path != "/newtron/v1/network/default/topology/node/spine1" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -316,7 +316,7 @@ func TestUpdateTopologyDevice_Success(t *testing.T) {
 // forwards to newtron's create-link and returns 201.
 func TestCreateTopologyLink_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/network/default/topology/create-link" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/topology/create-link" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -345,7 +345,7 @@ func TestCreateTopologyLink_Success(t *testing.T) {
 // forwards to newtron's DELETE topology/link/{device}/{interface}.
 func TestDeleteTopologyLink_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/network/default/topology/link/spine1/Ethernet0" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/network/default/topology/link/spine1/Ethernet0" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -375,7 +375,7 @@ func TestDeleteTopologyLink_Success(t *testing.T) {
 // forwards to newtron's apply-service.
 func TestBindService_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		want := "/network/default/node/switch1/interface/Ethernet0/apply-service"
+		want := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/apply-service"
 		if r.Method != http.MethodPost || r.URL.Path != want {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -405,7 +405,7 @@ func TestBindService_Success(t *testing.T) {
 // newtron's remove-service (no body).
 func TestUnbindService_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		want := "/network/default/node/switch1/interface/Ethernet0/remove-service"
+		want := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/remove-service"
 		if r.Method != http.MethodPost || r.URL.Path != want {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -433,7 +433,7 @@ func TestUnbindService_Success(t *testing.T) {
 // to newtron's refresh-service (no body).
 func TestRefreshService_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		want := "/network/default/node/switch1/interface/Ethernet0/refresh-service"
+		want := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/refresh-service"
 		if r.Method != http.MethodPost || r.URL.Path != want {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}

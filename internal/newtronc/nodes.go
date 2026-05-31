@@ -381,14 +381,14 @@ func (c *Client) nodeDelete(ctx context.Context, path string) (json.RawMessage, 
 // where TopologyDevice is { "steps": [...], "ports": {...} }.
 // Substrate: handler.go line 50.
 func (c *Client) CreateTopologyDevice(ctx context.Context, network string, body any) (json.RawMessage, error) {
-	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-node", network), body)
+	return c.nodePostBody(ctx, fmt.Sprintf("/newtron/v1/network/%s/topology/create-node", network), body)
 }
 
 // DeleteTopologyDevice removes a device from the topology by name.
 // force=true cascade-deletes referring links (handler_network.go:413-429).
 // Substrate: handler.go line 51.
 func (c *Client) DeleteTopologyDevice(ctx context.Context, network, name string, force bool) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/topology/node/%s", network, name)
+	path := fmt.Sprintf("/newtron/v1/network/%s/topology/node/%s", network, name)
 	if force {
 		path += "?force=true"
 	}
@@ -399,7 +399,7 @@ func (c *Client) DeleteTopologyDevice(ctx context.Context, network, name string,
 // Body is a complete TopologyDevice (handler_network.go:435-455, spec.TopologyDevice).
 // Substrate: handler.go line 52.
 func (c *Client) UpdateTopologyDevice(ctx context.Context, network, name string, body any) (json.RawMessage, error) {
-	return c.nodePutBody(ctx, fmt.Sprintf("/network/%s/topology/node/%s", network, name), body)
+	return c.nodePutBody(ctx, fmt.Sprintf("/newtron/v1/network/%s/topology/node/%s", network, name), body)
 }
 
 // CreateTopologyLink adds a link between two interfaces.
@@ -410,7 +410,7 @@ func (c *Client) UpdateTopologyDevice(ctx context.Context, network, name string,
 //
 // Substrate: handler.go line 53.
 func (c *Client) CreateTopologyLink(ctx context.Context, network string, body any) (json.RawMessage, error) {
-	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-link", network), body)
+	return c.nodePostBody(ctx, fmt.Sprintf("/newtron/v1/network/%s/topology/create-link", network), body)
 }
 
 // DeleteTopologyLink removes the link containing the given endpoint.
@@ -418,7 +418,7 @@ func (c *Client) CreateTopologyLink(ctx context.Context, network string, body an
 // (handler_network.go:484-504). URL path: /topology/link/{device}/{interface}.
 // Substrate: handler.go line 54.
 func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/topology/link/%s/%s", network, device, iface)
+	path := fmt.Sprintf("/newtron/v1/network/%s/topology/link/%s/%s", network, device, iface)
 	return c.nodeDelete(ctx, path)
 }
 
@@ -435,7 +435,7 @@ func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface 
 // service is required; all others optional.
 // Substrate: handler.go line 174.
 func (c *Client) ApplyService(ctx context.Context, network, device, ifaceName string, body any) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/apply-service", network, device, ifaceName)
+	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/interface/%s/apply-service", network, device, ifaceName)
 	return c.nodePostBody(ctx, path, body)
 }
 
@@ -443,7 +443,7 @@ func (c *Client) ApplyService(ctx context.Context, network, device, ifaceName st
 // No request body required (handler_interface.go:50-69).
 // Substrate: handler.go line 175.
 func (c *Client) RemoveService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/remove-service", network, device, ifaceName)
+	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/interface/%s/remove-service", network, device, ifaceName)
 	return c.nodePost(ctx, path)
 }
 
@@ -451,7 +451,7 @@ func (c *Client) RemoveService(ctx context.Context, network, device, ifaceName s
 // No request body required (handler_interface.go:71-90).
 // Substrate: handler.go line 176.
 func (c *Client) RefreshService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/refresh-service", network, device, ifaceName)
+	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/interface/%s/refresh-service", network, device, ifaceName)
 	return c.nodePost(ctx, path)
 }
 
