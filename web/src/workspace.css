@@ -522,3 +522,49 @@ body {
   border-radius: 4px;
   font-size: var(--text-sm);
 }
+
+/* Drift badges + drift tab content (slice 4) */
+
+.topo-drift-badge circle {
+  fill: var(--color-danger);
+  stroke: var(--color-surface-elevated);
+  stroke-width: 1.5;
+}
+
+.topo-drift-badge text {
+  fill: var(--color-surface-elevated);
+  font-family: var(--font-system);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.topology-drift-summary {
+  margin-top: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.topology-drift-summary--present {
+  color: var(--color-danger);
+  font-weight: 500;
+}
+
+.drift-empty {
+  color: var(--color-text-secondary);
+  font-style: italic;
+  padding: var(--space-md) 0;
+}
+
+.drift-header {
+  color: var(--color-danger);
+  font-weight: 500;
+  padding-bottom: var(--space-xs);
+  margin-bottom: var(--space-sm);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.drift-detail {
+  font-size: var(--text-sm);
+}
