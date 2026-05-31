@@ -2087,7 +2087,7 @@ contract.
   ],
   "manual_modify_in_place_caution": {
     "kind": "newtron_owned_substrate_warning",
-    "message": "BGP_NEIGHBOR, INTERFACE, ACL, and ROUTE_MAP entries this service writes are newtron-owned substrate. A direct redis-cli HSET against any of these keys will land state newtron cannot reconstruct via Replay (the change has no corresponding NEWTRON_INTENT update). The next reconcile will treat your change as drift and either revert it or surface it on the Inbox drift card. If you intend to modify the service's substrate, the substrate-faithful path is to issue an apply-service or refresh-service through newtron — see manual_remove below for an example of invoking newtron on the device shell directly.",
+    "message": "BGP_NEIGHBOR, INTERFACE, ACL, and ROUTE_MAP entries this service writes are newtron-owned substrate. A direct redis-cli HSET against any of these keys will land state newtron cannot reconstruct via Replay (the change has no corresponding NEWTRON_INTENT update). The next reconcile will treat your change as drift and either revert it or surface it on the Inbox drift card. If you intend to modify the service's substrate, the substrate-faithful (intent-preserving) path is the browser-frontend Composer refresh / apply workflow (delivered over newtrun-server per ADR-0001) — see see_also below.",
     "rationale_ref": {
       "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
       "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
@@ -2095,18 +2095,9 @@ contract.
   },
   "manual_remove": [
     {
-      "tool": "ssh_vendor_cli",
-      "command": "ssh switch1 newtron switch1 interface Ethernet0 remove-service",
-      "rationale": "newtron's own CLI, invoked directly on the device (newtron's CLI binary is installed on the switch). This is the device-level equivalent of newtcon's Composer remove — it writes a tombstone intent and renders the reverse ChangeSet. Use this when newtcon is unreachable but newtron-on-the-device is available; the operator drives newtron from the device shell directly.",
-      "rationale_ref": {
-        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#9-symmetric-operations",
-        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
-      }
-    },
-    {
       "tool": "ssh_redis_cli",
       "command": "ssh switch1 'redis-cli -n 4 DEL BGP_NEIGHBOR|default|10.1.0.1 && redis-cli -n 4 DEL INTERFACE|Ethernet0|10.1.0.0/31 && redis-cli -n 4 DEL NEWTRON_INTENT|service|transit|Ethernet0'",
-      "rationale": "Substrate-only removal: HDEL the keys this service authored, including the NEWTRON_INTENT record so newtron's projection-on-next-replay no longer asserts the service. Use ONLY when neither newtcon nor newtron-on-the-device is available; this is the foul-weather floor. After running, run the inspect commands above to confirm the daemons have caught up.",
+      "rationale": "Substrate-only removal: DEL the keys this service authored, including the NEWTRON_INTENT record so newtron's projection-on-next-replay no longer asserts the service. This is the operator's-own-tools manual reverse of the service's apply-service. The intent-preserving (newtron-mediated) removal path is delivered by the browser-frontend Composer remove workflow (see see_also[] below); use this DEL sequence when the newtron-mediated path is unavailable. After running, run the inspect commands above to confirm the daemons have caught up.",
       "rationale_ref": {
         "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#7-device-io-transient-observation",
         "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#15-symmetric-operations--what-you-create-you-can-remove"
@@ -2128,6 +2119,12 @@ contract.
       "name": "Composer apply for service transit",
       "operator_workflow": "service-composer",
       "rationale": "The newtron-mediated path is delivered by the browser frontend over newtrun-server per ADR-0001: stage the service via Composer; the apply produces the NEWTRON_INTENT record and renders the BGP_NEIGHBOR / INTERFACE / etc. ChangeSet."
+    },
+    {
+      "kind": "browser_workflow",
+      "name": "Composer remove for service transit",
+      "operator_workflow": "service-composer",
+      "rationale": "The substrate-faithful (intent-preserving) reverse of apply, delivered by the browser frontend over newtrun-server per ADR-0001: remove via Composer writes a tombstone intent and renders the reverse ChangeSet, leaving NEWTRON_INTENT consistent with the substrate after teardown. Use this whenever newtron-server is reachable from your workstation; the manual_remove[] DEL sequence is the substrate-only floor for the case where it is not."
     },
     {
       "kind": "rehearsal_walkthrough",
@@ -2164,8 +2161,9 @@ Field rules:
   §Endpoints — Rehearsal §Field shapes — shared types). Tools are
   `ssh_redis_cli` or `ssh_vendor_cli` exclusively per the same
   binding as Rehearsal's `forward_cli`; the command never references
-  `newtron-server`, `newtcon`, or `newtcon-server` as the point of
-  execution. Substituting concrete values
+  `newtron`, `newtron-server`, `newtcon`, or `newtcon-server` as the
+  point of execution (Hard Guarantee #3 is the binding statement).
+  Substituting concrete values
   (`10.1.0.1`, `Ethernet0`) into the command for the requested
   service instance is the teach-content author's job; the consumer
   pastes verbatim, then adapts for their own peering addresses if
@@ -2187,13 +2185,16 @@ Field rules:
   tearing down the service substrate by hand. Per
   `DESIGN_PRINCIPLES_NEWTRON.md` §15 (symmetric operations), every
   service that can be applied can be removed; the teaching content
-  surfaces the manual symmetric reverse. Each `CliCommand` carries
-  the rationale that distinguishes the foul-weather floor
-  (substrate-only HDEL) from the substrate-faithful path
-  (`newtron <node> ... remove-service` invoked directly on the
-  device shell, which still produces a NEWTRON_INTENT tombstone and
-  a rendered reverse ChangeSet — newtron's manual lever on the
-  device, not newtcon's mediated path).
+  surfaces the manual symmetric reverse expressed as
+  `ssh_redis_cli` or `ssh_vendor_cli` commands (per Hard Guarantee
+  #3). The substrate-faithful path that preserves the intent record
+  (remove-service through newtron, producing a NEWTRON_INTENT
+  tombstone and a rendered reverse ChangeSet) is delivered by the
+  browser frontend over newtrun-server per
+  [`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md);
+  the teach response cross-links to it via `see_also[]` with
+  `kind: "browser_workflow"`, not via a `manual_remove[]` CLI entry
+  that invokes newtron from the device shell.
 - **`operator_environment_pointers`** is REQUIRED on every teach
   response. It names what the operator needs in their own
   environment to execute the commands: ssh access, the tools that
@@ -2325,7 +2326,7 @@ table is newtron-owned.
   ],
   "manual_modify_caution": {
     "kind": "newtron_owned_substrate_warning",
-    "message": "BGP_NEIGHBOR is a newtron-owned table when an apply-service intent claims the peer. A direct redis-cli HSET against this key bypasses newtron's intent path: no NEWTRON_INTENT update is produced, so Replay cannot reconstruct your change. The next reconcile will treat your change as drift and either revert it (delta reconcile against the intent's resolved asn) or surface it on the Inbox drift card. If you intend to change this peer's parameters, the substrate-faithful path is to issue refresh-service (newtron will re-resolve and re-render) — see manual_write_if_unavoidable below. If you must write directly (e.g., emergency mitigation when newtron is unavailable), expect drift on the next reconcile; the surface acknowledges this honestly.",
+    "message": "BGP_NEIGHBOR is a newtron-owned table when an apply-service intent claims the peer. A direct redis-cli HSET against this key bypasses newtron's intent path: no NEWTRON_INTENT update is produced, so Replay cannot reconstruct your change. The next reconcile will treat your change as drift and either revert it (delta reconcile against the intent's resolved asn) or surface it on the Inbox drift card. If you intend to change this peer's parameters, the substrate-faithful (intent-preserving) path is the browser-frontend Composer refresh workflow (delivered over newtrun-server per ADR-0001), which re-resolves the spec, updates NEWTRON_INTENT, and renders the new ChangeSet in lock-step — see see_also below. If you must write directly (e.g., emergency mitigation when newtron is unavailable), the manual_write_if_unavoidable[] block below is the substrate-only floor; expect drift on the next reconcile; the surface acknowledges this honestly.",
     "rationale_ref": {
       "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
       "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
@@ -2333,18 +2334,9 @@ table is newtron-owned.
   },
   "manual_write_if_unavoidable": [
     {
-      "tool": "ssh_vendor_cli",
-      "command": "ssh switch1 newtron switch1 interface Ethernet0 refresh-service --param asn=65003",
-      "rationale": "Substrate-faithful path: invoke newtron's refresh-service on the device shell; newtron re-resolves spec, updates the NEWTRON_INTENT resolved_params, and renders the new ChangeSet (one BGP_NEIGHBOR HSET, the field-level diff). The intent record stays in sync; the next reconcile is a no-op. Use this whenever newtron-on-the-device is reachable.",
-      "rationale_ref": {
-        "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#9-symmetric-operations",
-        "principle": "newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md#1-the-node--intent-and-reality-in-one-object"
-      }
-    },
-    {
       "tool": "ssh_redis_cli",
       "command": "ssh switch1 redis-cli -n 4 HSET 'BGP_NEIGHBOR|default|10.1.0.1' asn 65003",
-      "rationale": "Foul-weather direct write: HSET the field. The change lands; bgpd picks it up within seconds; the NEWTRON_INTENT record is now stale (resolved_params still says the old asn). On the next reconcile, newtron treats this as drift; you must follow up with refresh-service (above) once newtron is reachable, or accept the drift card the Inbox will surface. Use ONLY when newtron-on-the-device is unreachable.",
+      "rationale": "Foul-weather direct write: HSET the field. The change lands; bgpd picks it up within seconds; the NEWTRON_INTENT record is now stale (resolved_params still says the old asn). On the next reconcile, newtron treats this as drift; you must follow up with the browser-frontend Composer refresh workflow once newtron is reachable, or accept the drift card the Inbox will surface. Use this direct-write path only when the substrate-faithful (intent-preserving) path is unavailable; the substrate-faithful path that re-resolves the spec and updates NEWTRON_INTENT in lock-step is the Composer refresh workflow — see see_also below.",
       "rationale_ref": {
         "substrate": "newtron/docs/newtron/unified-pipeline-architecture.md#8-execute--write-path-with-dry-run-support",
         "principle": "docs/operator-philosophy.md#2-manual-mode-parity"
@@ -2372,6 +2364,12 @@ table is newtron-owned.
     }
   },
   "see_also": [
+    {
+      "kind": "browser_workflow",
+      "name": "Composer refresh for the service that owns this peer",
+      "operator_workflow": "service-composer",
+      "rationale": "The substrate-faithful (intent-preserving) path for changing a field on a newtron-owned BGP_NEIGHBOR entry: stage the parameter change via the Composer refresh workflow (delivered by the browser frontend over newtrun-server per ADR-0001); newtron re-resolves the spec, updates NEWTRON_INTENT in lock-step with the BGP_NEIGHBOR HSET, and the intent record stays in sync. Use this whenever newtron-server is reachable from your workstation; the manual_write_if_unavoidable[] HSET is the substrate-only floor for the case where it is not."
+    },
     {
       "kind": "newtcon_surface",
       "name": "Provenance — projection for this node",
@@ -2432,14 +2430,18 @@ Field rules:
   tables newtron neither owns nor reads (operator-side custom
   tables); even then, the rationale documents why no warning
   applies.
-- **`manual_write_if_unavoidable[]`** is the two-tier teaching: the
-  substrate-faithful path first (`newtron` on the device shell, when
-  newtron-on-the-device is available), then the foul-weather direct
-  HSET path. The ordering is intentional — operator-philosophy
-  invariant #9 ("confidence and limits are explicit") binds: the
-  surface teaches the right path first and the floor path second,
-  with explicit acknowledgment that the floor produces drift the
-  operator must reconcile later.
+- **`manual_write_if_unavoidable[]`** is the substrate-only
+  foul-weather direct-write path expressed in `ssh_redis_cli` or
+  `ssh_vendor_cli` commands (per Hard Guarantee #3). The teach is
+  honest that the direct write produces drift the operator must
+  reconcile later — operator-philosophy invariant #9 ("confidence and
+  limits are explicit") binds. The substrate-faithful path that
+  preserves the intent record (refresh-service through newtron) is
+  delivered by the browser frontend over newtrun-server per
+  [`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md);
+  the teach response cross-links to it via `see_also[]` with
+  `kind: "browser_workflow"`, not via a `manual_write_if_unavoidable[]`
+  CLI entry that invokes newtron from the device shell.
 - **`manual_delete_if_unavoidable[]`** is the symmetric counterpart
   for removal. Notably, the surface does NOT recommend a foul-
   weather direct DEL as the primary delete path — for newtron-owned
@@ -2776,11 +2778,10 @@ Field rules:
   failure-scenario walkthrough).
 - **`forward_cli[*]`** is a `CliCommand` (see §Endpoints — Rehearsal
   §Field shapes). Tools are `ssh_redis_cli` or `ssh_vendor_cli`
-  exclusively; commands never reference `newtron-server`, `newtcon`,
-  or `newtcon-server` as the point of execution. (Invoking
-  `newtron` as a command on the device shell is permitted where
-  newtron-on-the-device is the substrate-faithful path — see Hard
-  contract guarantees below.)
+  exclusively; commands never reference `newtron`, `newtron-server`,
+  `newtcon`, or `newtcon-server` as the point of execution — see
+  Hard contract guarantees below for the binding rule and its
+  parity with the Rehearsal surface.
 - **`reverse_cli[]`** is REQUIRED for mutating steps. Read-only steps
   (inspect, confirm) populate an empty `reverse_cli[]` with a
   `reverse_cli_rationale` of "Read-only step; no reverse needed."
@@ -2916,19 +2917,31 @@ Every endpoint in this section MUST satisfy:
    query newtron's live state. No `as_of`, no `intent_count`, no
    `projection_rebuilt_at` on this surface. The catalog is versioned
    by `content_version`.
-3. **CLI commands target the operator's own tools, never newtcon.**
-   Every `CliCommand` in `manual_inspect[]`, `manual_remove[]`,
-   `manual_write_if_unavoidable[]`, `manual_delete_if_unavoidable[]`,
-   and `steps[*].forward_cli[]` / `steps[*].reverse_cli[]` uses
-   `ssh_redis_cli` or `ssh_vendor_cli` exclusively. The `command`
-   string MUST NOT reference `newtron-server`, `newtcon`,
-   `newtcon-server`, or any newtcon HTTP endpoint as the point of
-   execution. The `command` MAY invoke `newtron` as a command name
-   on the device shell when newtron-on-the-device is the
-   substrate-faithful path (e.g., `ssh switch1 newtron switch1
-   interface Ethernet0 refresh-service`); this is newtron's own
-   manual lever, not a newtcon-mediated path. The operator's own ssh
-   session is the execution venue; newtcon is the teacher.
+3. **CLI commands target the operator's own tools, never newtron or
+   newtcon.** Every `CliCommand` in `manual_inspect[]`,
+   `manual_remove[]`, `manual_write_if_unavoidable[]`,
+   `manual_delete_if_unavoidable[]`, and `steps[*].forward_cli[]` /
+   `steps[*].reverse_cli[]` uses `ssh_redis_cli` or `ssh_vendor_cli`
+   exclusively. The `command` string MUST NOT reference `newtron`,
+   `newtron-server`, `newtcon`, `newtcon-server`, or any newtron or
+   newtcon HTTP endpoint as the point of execution. This rule is
+   strict, with no carve-out for `newtron`-on-the-device: per
+   [`docs/operator-philosophy.md`](docs/operator-philosophy.md)
+   invariant #2, manual-mode parity exists for the failure mode in
+   which newtron is itself unavailable, and the `newtron` binary on
+   the device is an HTTP client of newtron-server — its availability
+   is correlated with newtron-server's, so it cannot serve as the
+   operator's foul-weather floor. The substrate-faithful path that
+   uses newtron's intent layer is delivered by the browser frontend
+   over newtrun-server per
+   [`docs/adr/0001-scope-justification-vs-newtrun.md`](docs/adr/0001-scope-justification-vs-newtrun.md);
+   the teach surface cross-links to it via `see_also[]` with
+   `kind: "browser_workflow"`. The operator's own ssh session is the
+   execution venue; newtcon is the teacher. This guarantee is the
+   uniform rule across both teaching surfaces; the Rehearsal
+   surface's
+   [§Hard contract guarantees](#hard-contract-guarantees-binding-1)
+   guarantee #3 is the parallel binding.
 4. **Operator-environment pointers on every teach response.**
    `operator_environment_pointers` is REQUIRED. The reframed
    invariant #2 demands the operator's manual capability live in
@@ -4823,7 +4836,11 @@ Every endpoint in this section MUST satisfy:
    includes `newtron`, `newtron-server`, `newtcon`, or `newtcon-server`
    commands is a contract violation. (Pointers to newtron-mediated
    paths live in `see_also[]`, separate from the
-   operator's-own-tools sequence.)
+   operator's-own-tools sequence.) This rule is the uniform binding
+   across both teaching surfaces; the Manual-Mode Parity surface's
+   [§Hard contract guarantees](#hard-contract-guarantees-binding)
+   guarantee #3 is the parallel binding, with the same strict
+   no-`newtron`-on-device discipline.
 4. **Every walkthrough names a lab-device practice ground.**
    `lab_device_guidance` is REQUIRED. The reframed invariant #6
    demands real-tool rehearsal on operator-owned hardware; a
