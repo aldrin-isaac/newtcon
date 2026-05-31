@@ -20,6 +20,32 @@ export type SpecKind =
   | "zones"
   | "platforms";
 
+export async function fetchSpecDetail(kind: SpecKind, name: string): Promise<unknown> {
+  const url = `/api/${kind}/${encodeURIComponent(name)}`;
+  const response = await fetch(url, { cache: "no-store" });
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!response.ok) {
+    if (contentType.includes("application/json")) {
+      const body = (await response.json()) as {
+        error?: { kind: string; message: string; details?: Record<string, unknown> };
+      };
+      if (body.error) {
+        throw new ApiError(response.status, {
+          error: {
+            kind: body.error.kind,
+            message: body.error.message,
+            details: body.error.details ?? {},
+          },
+        });
+      }
+    }
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export async function fetchSpecList(kind: SpecKind): Promise<string[]> {
   const url = kind === "services" ? "/api/services" : `/api/${kind}`;
   const response = await fetch(url, { cache: "no-store" });

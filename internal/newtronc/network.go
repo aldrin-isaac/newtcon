@@ -92,3 +92,45 @@ func (c *Client) ListZones(ctx context.Context, network string) ([]string, error
 func (c *Client) ListPlatforms(ctx context.Context, network string) ([]string, error) {
 	return c.listNames(ctx, network, "platform")
 }
+
+// ShowSpec returns the full newtron payload for a single spec instance.
+// Returns the decoded "data" field as RawMessage — callers forward it
+// verbatim to keep the substrate honest (no field stripping, no rename).
+func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json.RawMessage, error) {
+	url := fmt.Sprintf("%s/network/%s/%s/%s", c.baseURL, network, kind, name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	default:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	}
+
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &UnavailableError{Cause: apiResp.Error}
+	}
+	return apiResp.Data, nil
+}
