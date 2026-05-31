@@ -1,5 +1,24 @@
 # newtcon Project — Claude Code Instructions
 
+> **BINDING DIRECTIVE: read `docs/DIRECTIVE.md` FIRST.**
+>
+> `docs/DIRECTIVE.md` is the current binding direction for newtcon
+> (operator workflow loop, slice plan, team posture, vocabulary
+> discipline). Sections in *this* file that conflict with the
+> directive are superseded — see the directive's "What's archived /
+> superseded" and "What's still binding" sections.
+>
+> Still binding from this file: the newtron API Consumption Rule
+> (sole HTTP client via `internal/newtronc/`); the build convention
+> (`go build -o bin/newtcon-server ./cmd/newtcon-server`); allowed
+> commands; the file ownership map.
+>
+> Superseded by `docs/DIRECTIVE.md`: §Project Scope (8-surface
+> framing — replaced by 6-step workflow loop); §Operator Philosophy
+> summary (derivative — see `docs/operator-philosophy.md` directly);
+> §Reference Documents bloat; §Agent Team Required Reading
+> (replaced by team-posture table in directive).
+
 newtcon is the operator-facing web console for newtron. This file is the
 binding ruleset for every agent that touches this repo.
 

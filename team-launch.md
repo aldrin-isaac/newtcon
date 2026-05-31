@@ -1,5 +1,14 @@
 # Team Launch — newtcon Agent Team
 
+> **SUPERSEDED — see `docs/DIRECTIVE.md`.**
+>
+> The completion criteria, escalation triggers, and team-launch
+> sequencing in this file reflect an earlier project posture (8
+> operator surfaces, full agent team active). Per the 2026-05-30
+> recalibration the current direction is the 6-step operator
+> workflow loop with most roles dormant. This file is kept for
+> history only.
+
 This document tells a Claude Code session running in
 `/home/aldrin/src/newtcon` how to launch the newtcon agent team and
 operate it **autonomously** toward project completion.

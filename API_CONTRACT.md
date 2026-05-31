@@ -1,5 +1,17 @@
 # newtcon HTTP API Contract
 
+> **SUPERSEDED for UI work — see `docs/DIRECTIVE.md`.**
+>
+> The 8-surface contract documented below (Service Composer / Inbox
+> / Workbench / Provenance / Rehearsal / Manual-Mode Parity /
+> Observation History / Report Bug) is superseded by the 6-step
+> operator workflow loop in `docs/DIRECTIVE.md`. Per the
+> 2026-05-30 recalibration, the binding interface for current UI
+> work is newtron's actual HTTP API as defined in
+> `../newtron/pkg/newtron/api/handler.go` `buildMux()`. Use this
+> file as historical reference for shapes that may inform future
+> work; do not treat its surfaces as the design target.
+
 This file defines the binding HTTP API contract between the newtcon server and
 its frontend (or any other consumer). Endpoints not defined here do not exist.
 Endpoints defined here have the response shapes documented here.

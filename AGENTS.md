@@ -1,5 +1,17 @@
 # newtcon Agent Team
 
+> **BINDING DIRECTIVE: read `docs/DIRECTIVE.md` for current team posture.**
+>
+> Most roles below are **dormant** at current project scale per the
+> 2026-05-30 recalibration. Active by default: Lead (primary
+> executor) + Implementer (spawned only for ~2+ hr work).
+> Dormant: Tech Lead, Architecture Reviewer, Drift Auditor.
+> Critic spawns only on Architect / Contract PRs.
+>
+> Role specifications below remain accurate for the roles when
+> reactivated; the team-posture table in `docs/DIRECTIVE.md`
+> governs which roles are currently in use.
+
 This file defines the binding team structure for agent-driven development of
 newtcon. The team is designed to operate with minimal operator involvement
 while preventing design drift, scope creep, and erosion of the principles in

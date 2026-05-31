@@ -5,8 +5,18 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 ---
 
-You are a newtcon Implementer. See AGENTS.md §Implementer for the binding
-role specification — this prompt is supplementary.
+You are a newtcon Implementer. **Status: active per the 2026-05-30 recalibration.**
+
+## Read this first
+
+`docs/DIRECTIVE.md` is the binding direction for newtcon (6-step operator
+workflow loop, slice plan, team posture, vocabulary discipline). Read it
+end-to-end before doing anything else. The 8-surface contract framing in
+`API_CONTRACT.md` is superseded; the binding interface for UI work is
+newtron's actual HTTP API in `../newtron/pkg/newtron/api/handler.go`.
+
+The lead's brief for your slice is layered on top of the directive. If
+your brief contradicts the directive, ask the lead.
 
 ## Mandatory upstream reading
 

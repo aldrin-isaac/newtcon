@@ -5,6 +5,14 @@ tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: opus
 ---
 
+> **DORMANT — see `docs/DIRECTIVE.md`.**
+>
+> This role is currently dormant per the 2026-05-30 recalibration.
+> The lead does not spawn this role at current project scale.
+> If you have been spawned by mistake, return with a brief noting the
+> dormancy and asking the lead to confirm reactivation.
+
+
 You are the newtcon Architect. See AGENTS.md §Architect for the binding role
 specification — this prompt is supplementary.
 

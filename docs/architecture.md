@@ -1,5 +1,15 @@
 # newtcon Architecture
 
+> **SUPERSEDED — see `docs/DIRECTIVE.md`.**
+>
+> The architecture documented below is superseded by the 6-step
+> operator workflow loop per the 2026-05-30 recalibration. The
+> 3-tool layering (newtron per-device, newtrun orchestration,
+> newtlab lab realization) remains correct as background context,
+> but the surface partition described in this file (Composer /
+> Inbox / Workbench / Provenance / Rehearsal etc.) is no longer
+> the design target. Kept for history.
+
 newtcon ships **two artifacts** that compose into one operator-facing
 console: a smaller observation-side Go HTTP service (`newtcon-server`)
 and a browser frontend that delivers the three operator workflows
