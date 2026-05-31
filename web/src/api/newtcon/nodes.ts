@@ -141,3 +141,18 @@ export async function fetchNodeConfigDBEntry(
     `/api/nodes/${encodeURIComponent(device)}/configdb/${encodeURIComponent(table)}/${encodeURIComponent(key)}`
   );
 }
+
+// GET /api/nodes/{device}/drift.
+export async function fetchNodeDrift(device: string): Promise<unknown> {
+  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/drift`);
+}
+
+// GET /api/nodes/{device}/projection.
+export async function fetchNodeProjection(device: string): Promise<unknown> {
+  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/projection`);
+}
+
+// GET /api/nodes/{device}/intent-tree.
+export async function fetchNodeIntentTree(device: string): Promise<unknown> {
+  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/intent-tree`);
+}

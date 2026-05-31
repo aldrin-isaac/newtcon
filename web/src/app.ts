@@ -20,6 +20,9 @@ import {
   fetchNodeConfigDB,
   fetchNodeConfigDBTable,
   fetchNodeConfigDBEntry,
+  fetchNodeDrift,
+  fetchNodeProjection,
+  fetchNodeIntentTree,
 } from "./api/newtcon/nodes.js";
 
 // ---- DOM helper -------------------------------------------------------------
@@ -238,7 +241,7 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => void): SVGSVGElement {
+function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => void, driftByDevice?: Map<string, number>): SVGSVGElement {
   const nodes: TopoNode[] = Array.isArray(data.nodes) ? data.nodes : [];
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
 
@@ -319,6 +322,27 @@ function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => vo
       }
     });
 
+    // Drift badge: small dot in the top-right when the device has drift.
+    const driftCount = driftByDevice?.get(node.name) ?? 0;
+    if (driftCount > 0) {
+      const badge = svgEl("g", { "class": "topo-drift-badge" });
+      const cx = pos.cx + NODE_W / 2 - 8;
+      const cy = pos.cy - NODE_H / 2 + 8;
+      badge.appendChild(svgEl("circle", { cx: String(cx), cy: String(cy), r: "7" }));
+      const count = svgEl("text", {
+        x: String(cx),
+        y: String(cy),
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+      });
+      count.textContent = String(driftCount);
+      badge.appendChild(count);
+      const title = svgEl("title");
+      title.textContent = `${driftCount} drift item${driftCount === 1 ? "" : "s"}`;
+      badge.appendChild(title);
+      g.appendChild(badge);
+    }
+
     svg.appendChild(g);
   }
 
@@ -353,6 +377,9 @@ const NODE_TABS = [
   { id: "lags",      label: "LAGs" },
   { id: "neighbors", label: "Neighbors" },
   { id: "configdb",  label: "Config DB" },
+  { id: "drift",     label: "Drift" },
+  { id: "projection", label: "Projection" },
+  { id: "intent-tree", label: "Intent Tree" },
 ] as const;
 
 type NodeTabId = typeof NODE_TABS[number]["id"];
@@ -467,6 +494,28 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
 }
 
 // renderConfigDBTab renders the CONFIG_DB sub-tab with 3-level navigation.
+// renderDriftTab renders the drift list. Newtron returns either an empty
+// array (no drift) or an array of drift items per table/key.
+function renderDriftTab(container: HTMLElement, data: unknown): void {
+  container.textContent = "";
+  const items = Array.isArray(data) ? data : [];
+  if (items.length === 0) {
+    container.appendChild(
+      el("p", { className: "drift-empty" }, "No drift detected. Device matches its intent."),
+    );
+    return;
+  }
+  const heading = el(
+    "p",
+    { className: "drift-header" },
+    `${items.length} drift item${items.length === 1 ? "" : "s"} — device does not match intent.`,
+  );
+  container.appendChild(heading);
+  const body = renderValue(data);
+  if (body instanceof HTMLElement) body.classList.add("drift-detail");
+  container.appendChild(body);
+}
+
 function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unknown): void {
   container.textContent = "";
 
@@ -708,6 +757,24 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
         .catch((err) => renderErrorInto(container, err));
       break;
 
+    case "drift":
+      fetchNodeDrift(device)
+        .then((data) => renderDriftTab(container, data))
+        .catch((err) => renderErrorInto(container, err));
+      break;
+
+    case "projection":
+      fetchNodeProjection(device)
+        .then((data) => renderValueInto(container, data))
+        .catch((err) => renderErrorInto(container, err));
+      break;
+
+    case "intent-tree":
+      fetchNodeIntentTree(device)
+        .then((data) => renderValueInto(container, data))
+        .catch((err) => renderErrorInto(container, err));
+      break;
+
     default: {
       // Exhaustiveness check — TypeScript will catch missing cases at compile time.
       const _never: never = id;
@@ -727,10 +794,35 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const data = await fetchTopology();
     root.textContent = "";
     const topoData = (data ?? {}) as TopologyData;
+
+    // Fetch drift for each device in parallel; render badges where present.
+    const deviceNames = Array.isArray(topoData.nodes)
+      ? topoData.nodes.map((n) => n.name).filter((n) => typeof n === "string")
+      : [];
+    const driftByDevice = new Map<string, number>();
+    const driftResults = await Promise.allSettled(
+      deviceNames.map((name) => fetchNodeDrift(name))
+    );
+    driftResults.forEach((r, i) => {
+      if (r.status === "fulfilled" && Array.isArray(r.value)) {
+        driftByDevice.set(deviceNames[i], r.value.length);
+      }
+    });
+
     const svg = renderTopologySVG(topoData, (deviceName) => {
       openNodeDrawer(deviceName);
-    });
+    }, driftByDevice);
     root.appendChild(svg);
+
+    const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
+    const summary = el(
+      "p",
+      { className: totalDrift > 0 ? "topology-drift-summary topology-drift-summary--present" : "topology-drift-summary" },
+      totalDrift > 0
+        ? `${totalDrift} drift item${totalDrift === 1 ? "" : "s"} across ${driftByDevice.size} device${driftByDevice.size === 1 ? "" : "s"} — click a device to inspect.`
+        : "No drift detected on any device.",
+    );
+    root.appendChild(summary);
   } catch (err) {
     root.textContent = "";
     if (err instanceof ApiError && err.kind === "newtron_unavailable") {
