@@ -54,6 +54,41 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 	register("/api/profiles", c.ListProfiles)
 	register("/api/zones", c.ListZones)
 	register("/api/platforms", c.ListPlatforms)
+
+	// Per-spec detail endpoints. URL pattern: /api/{kind}/{name}.
+	// {kind} is the same plural form used in the list endpoints; {name}
+	// is the spec instance name. Returns the full newtron payload verbatim.
+	for _, kind := range []struct{ url, newtronKind string }{
+		{"services", "service"},
+		{"ipvpns", "ipvpn"},
+		{"macvpns", "macvpn"},
+		{"qos-policies", "qos-policy"},
+		{"filters", "filter"},
+		{"prefix-lists", "prefix-list"},
+		{"route-policies", "route-policy"},
+		{"profiles", "profile"},
+		{"zones", "zone"},
+		{"platforms", "platform"},
+	} {
+		k := kind // capture for closure
+		mux.Handle("GET /api/"+k.url+"/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			name := r.PathValue("name")
+			payload, err := c.ShowSpec(ctx, c.Network(ctx), k.newtronKind, name)
+			if err != nil {
+				if _, ok := err.(*newtronc.NotFoundError); ok {
+					types.WriteError(w, http.StatusNotFound, types.KindInternal,
+						k.newtronKind+" not found: "+name, map[string]any{"correlation_id": cid(ctx)})
+					return
+				}
+				writeNetworkListUnavailable(w, cid(ctx), err, "/api/"+k.url+"/"+name)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload)
+		}))
+	}
 }
 
 func writeNetworkListUnavailable(w http.ResponseWriter, correlationID string, err error, path string) {

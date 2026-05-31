@@ -1,7 +1,7 @@
 // app.ts — newtcon workspace entry. Fetches every spec type in parallel and
 // renders a panel per kind.
 
-import { fetchSpecList, type SpecKind } from "./api/newtcon/network.js";
+import { fetchSpecList, fetchSpecDetail, type SpecKind } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
 
 interface Panel {
@@ -49,7 +49,19 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
       container.appendChild(el("p", { className: "panel-empty" }, "none defined"));
     } else {
       const list = el("ul", { className: "panel-list" });
-      for (const name of items) list.appendChild(el("li", {}, name));
+      for (const name of items) {
+        const item = el("li", { className: "panel-list-item", tabIndex: 0 }, name);
+        item.dataset.kind = panel.kind;
+        item.dataset.name = name;
+        item.addEventListener("click", () => openDetail(panel.kind, panel.title, name));
+        item.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openDetail(panel.kind, panel.title, name);
+          }
+        });
+        list.appendChild(item);
+      }
       container.appendChild(list);
     }
     return container;
@@ -70,6 +82,79 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
     container.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
   }
   return container;
+}
+
+// ---- Detail drawer -------------------------------------------------------
+
+function renderValue(value: unknown): HTMLElement | Text {
+  if (value === null || value === undefined) {
+    return el("span", { className: "detail-null" }, "—");
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return el("span", { className: "detail-null" }, "(empty)");
+    const list = el("ol", { className: "detail-array" });
+    for (const item of value) {
+      const li = el("li");
+      li.appendChild(renderValue(item));
+      list.appendChild(li);
+    }
+    return list;
+  }
+  if (typeof value === "object") {
+    const dl = el("dl", { className: "detail-object" });
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      dl.appendChild(el("dt", {}, k));
+      const dd = el("dd");
+      dd.appendChild(renderValue(v));
+      dl.appendChild(dd);
+    }
+    return dl;
+  }
+  if (typeof value === "boolean") {
+    return el("span", { className: "detail-bool" }, value ? "true" : "false");
+  }
+  return document.createTextNode(String(value));
+}
+
+async function openDetail(kind: SpecKind, kindTitle: string, name: string): Promise<void> {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+  content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
+  content.appendChild(el("h2", { className: "drawer-name" }, name));
+  const loading = el("p", { className: "status-loading" }, "Loading…");
+  content.appendChild(loading);
+
+  try {
+    const detail = await fetchSpecDetail(kind, name);
+    content.removeChild(loading);
+    const body = renderValue(detail);
+    if (body instanceof HTMLElement) {
+      body.classList.add("drawer-detail");
+    }
+    content.appendChild(body);
+  } catch (err) {
+    content.removeChild(loading);
+    if (err instanceof ApiError && err.status === 404) {
+      content.appendChild(el("p", { className: "panel-error" }, `${kindTitle} not found`));
+    } else if (err instanceof ApiError) {
+      content.appendChild(el("p", { className: "panel-error" }, err.message));
+    } else {
+      content.appendChild(el("p", { className: "panel-error" }, "request failed"));
+      content.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
+    }
+  }
+}
+
+function closeDetail(): void {
+  const drawer = document.getElementById("detail-drawer");
+  if (!drawer) return;
+  drawer.setAttribute("aria-hidden", "true");
+  drawer.classList.remove("open");
 }
 
 async function mount(): Promise<void> {
@@ -95,6 +180,11 @@ async function mount(): Promise<void> {
   root.textContent = "";
   PANELS.forEach((panel, i) => {
     root.appendChild(renderPanel(panel, results[i]));
+  });
+
+  document.getElementById("drawer-close")?.addEventListener("click", closeDetail);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDetail();
   });
 }
 
