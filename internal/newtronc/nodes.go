@@ -14,6 +14,7 @@
 package newtronc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -211,6 +212,246 @@ func (c *Client) NodeReconcile(ctx context.Context, network, device string, dryR
 	if len(q) > 0 {
 		path += "?" + strings.Join(q, "&")
 	}
+	return c.nodePost(ctx, path)
+}
+
+// ============================================================================
+// Topology write operations
+// ============================================================================
+
+// nodePostBody is the shared helper for POST requests with a JSON body. It
+// follows the same error mapping as networkPost in network.go.
+//
+// Newtron topology write endpoints:
+//
+//	handler.go line 50: POST /network/{netID}/topology/create-node
+//	handler.go line 51: DELETE /network/{netID}/topology/node/{name}
+//	handler.go line 52: PUT /network/{netID}/topology/node/{name}
+//	handler.go line 53: POST /network/{netID}/topology/create-link
+//	handler.go line 54: DELETE /network/{netID}/topology/link/{device}/{interface}
+func (c *Client) nodePostBody(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
+	}
+	url := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
+	case resp.StatusCode == http.StatusBadRequest:
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusConflict:
+		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	default:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	}
+
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	}
+	return apiResp.Data, nil
+}
+
+// nodePutBody sends a PUT request with a JSON body to the given path.
+// Used for topology device updates (handler.go line 52).
+func (c *Client) nodePutBody(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
+	}
+	url := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusBadRequest:
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusConflict:
+		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	default:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	}
+
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	}
+	return apiResp.Data, nil
+}
+
+// nodeDelete sends a DELETE request to path and returns the data field.
+// 200/201 accepted; 400 → ValidationError; 404 → NotFoundError; 409 → ConflictError.
+func (c *Client) nodeDelete(ctx context.Context, path string) (json.RawMessage, error) {
+	url := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusBadRequest:
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusConflict:
+		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	default:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	}
+
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	}
+	return apiResp.Data, nil
+}
+
+// CreateTopologyDevice adds a device to the topology.
+//
+// Newtron body shape (handler_network.go:389-405, types.go:109-112):
+//
+//	{ "name": string, "device": TopologyDevice }
+//
+// where TopologyDevice is { "steps": [...], "ports": {...} }.
+// Substrate: handler.go line 50.
+func (c *Client) CreateTopologyDevice(ctx context.Context, network string, body any) (json.RawMessage, error) {
+	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-node", network), body)
+}
+
+// DeleteTopologyDevice removes a device from the topology by name.
+// force=true cascade-deletes referring links (handler_network.go:413-429).
+// Substrate: handler.go line 51.
+func (c *Client) DeleteTopologyDevice(ctx context.Context, network, name string, force bool) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/topology/node/%s", network, name)
+	if force {
+		path += "?force=true"
+	}
+	return c.nodeDelete(ctx, path)
+}
+
+// UpdateTopologyDevice replaces the device entry at name with the given body.
+// Body is a complete TopologyDevice (handler_network.go:435-455, spec.TopologyDevice).
+// Substrate: handler.go line 52.
+func (c *Client) UpdateTopologyDevice(ctx context.Context, network, name string, body any) (json.RawMessage, error) {
+	return c.nodePutBody(ctx, fmt.Sprintf("/network/%s/topology/node/%s", network, name), body)
+}
+
+// CreateTopologyLink adds a link between two interfaces.
+//
+// Newtron body shape (handler_network.go:460-478, spec.TopologyLink):
+//
+//	{ "a": "device:interface", "z": "device:interface" }
+//
+// Substrate: handler.go line 53.
+func (c *Client) CreateTopologyLink(ctx context.Context, network string, body any) (json.RawMessage, error) {
+	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-link", network), body)
+}
+
+// DeleteTopologyLink removes the link containing the given endpoint.
+// Endpoint is "device:interface" — one endpoint uniquely identifies the link
+// (handler_network.go:484-504). URL path: /topology/link/{device}/{interface}.
+// Substrate: handler.go line 54.
+func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/topology/link/%s/%s", network, device, iface)
+	return c.nodeDelete(ctx, path)
+}
+
+// ============================================================================
+// Interface service binding operations
+// ============================================================================
+
+// ApplyService binds a service to an interface (apply-service RPC).
+//
+// Newtron body shape (types.go:50-57, handler_interface.go:15-48):
+//
+//	{ "service": string, "ip_address"?: string, "vlan"?: int, "peer_as"?: int, "params"?: object }
+//
+// service is required; all others optional.
+// Substrate: handler.go line 174.
+func (c *Client) ApplyService(ctx context.Context, network, device, ifaceName string, body any) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/apply-service", network, device, ifaceName)
+	return c.nodePostBody(ctx, path, body)
+}
+
+// RemoveService unbinds any service from an interface (remove-service RPC).
+// No request body required (handler_interface.go:50-69).
+// Substrate: handler.go line 175.
+func (c *Client) RemoveService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/remove-service", network, device, ifaceName)
+	return c.nodePost(ctx, path)
+}
+
+// RefreshService re-applies the bound service on an interface (refresh-service RPC).
+// No request body required (handler_interface.go:71-90).
+// Substrate: handler.go line 176.
+func (c *Client) RefreshService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/refresh-service", network, device, ifaceName)
 	return c.nodePost(ctx, path)
 }
 

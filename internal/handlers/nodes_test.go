@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -184,5 +185,310 @@ func TestNodeInterfaces_Success(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+// ============================================================================
+// Topology write handlers
+// ============================================================================
+
+// TestCreateTopologyDevice_Success verifies that POST /api/topology/nodes
+// forwards to newtron's create-node and returns 201 with the data payload.
+func TestCreateTopologyDevice_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/network/default/topology/create-node" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, `{"data":{"steps":[],"ports":{}},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{"name": "spine1", "device": map[string]any{}})
+	req := httptest.NewRequest(http.MethodPost, "/api/topology/nodes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateTopologyDevice_ValidationError verifies that a 400 from newtron
+// returns a validation_failure envelope.
+func TestCreateTopologyDevice_ValidationError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"data":null,"error":"name required"}`, http.StatusBadRequest)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{})
+	req := httptest.NewRequest(http.MethodPost, "/api/topology/nodes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decoding error envelope: %v", err)
+	}
+	errBlock, _ := env["error"].(map[string]any)
+	if errBlock == nil {
+		t.Fatal("missing error block")
+	}
+	if kind, _ := errBlock["kind"].(string); kind != "validation_failure" {
+		t.Errorf("error.kind: want validation_failure, got %q", kind)
+	}
+}
+
+// TestDeleteTopologyDevice_Success verifies that DELETE /api/topology/nodes/{name}
+// forwards to newtron's DELETE topology/node/{name} and returns 200.
+func TestDeleteTopologyDevice_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/network/default/topology/node/spine1" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"deleted":"spine1"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/topology/nodes/spine1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUpdateTopologyDevice_Success verifies that PUT /api/topology/nodes/{name}
+// forwards to newtron's PUT topology/node/{name}.
+func TestUpdateTopologyDevice_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/network/default/topology/node/spine1" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"steps":[],"ports":{}},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{"steps": []any{}})
+	req := httptest.NewRequest(http.MethodPut, "/api/topology/nodes/spine1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateTopologyLink_Success verifies that POST /api/topology/links
+// forwards to newtron's create-link and returns 201.
+func TestCreateTopologyLink_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/network/default/topology/create-link" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintln(w, `{"data":{"a":"spine1:Ethernet0","z":"leaf1:Ethernet0"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]string{"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"})
+	req := httptest.NewRequest(http.MethodPost, "/api/topology/links", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDeleteTopologyLink_Success verifies that DELETE /api/topology/links/{device}/{interface}
+// forwards to newtron's DELETE topology/link/{device}/{interface}.
+func TestDeleteTopologyLink_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/network/default/topology/link/spine1/Ethernet0" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"deleted":"spine1:Ethernet0"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/topology/links/spine1/Ethernet0", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ============================================================================
+// Interface binding handlers
+// ============================================================================
+
+// TestBindService_Success verifies that POST /api/nodes/{device}/interfaces/{name}/bind-service
+// forwards to newtron's apply-service.
+func TestBindService_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := "/network/default/node/switch1/interface/Ethernet0/apply-service"
+		if r.Method != http.MethodPost || r.URL.Path != want {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"status":"ok"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{"service": "transit", "vlan": 100})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUnbindService_Success verifies that POST .../unbind-service forwards to
+// newtron's remove-service (no body).
+func TestUnbindService_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := "/network/default/node/switch1/interface/Ethernet0/remove-service"
+		if r.Method != http.MethodPost || r.URL.Path != want {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"status":"ok"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/nodes/switch1/interfaces/Ethernet0/unbind-service", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRefreshService_Success verifies that POST .../refresh-service forwards
+// to newtron's refresh-service (no body).
+func TestRefreshService_Success(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := "/network/default/node/switch1/interface/Ethernet0/refresh-service"
+		if r.Method != http.MethodPost || r.URL.Path != want {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"status":"ok"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/nodes/switch1/interfaces/Ethernet0/refresh-service", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestBindService_Unavailable verifies that a newtron_unavailable error is
+// returned when newtron is unreachable for bind-service.
+func TestBindService_Unavailable(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{"service": "transit"})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	var env map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decoding error envelope: %v", err)
+	}
+	errBlock, _ := env["error"].(map[string]any)
+	if errBlock == nil {
+		t.Fatal("missing error block")
+	}
+	if kind, _ := errBlock["kind"].(string); kind != "newtron_unavailable" {
+		t.Errorf("error.kind: want newtron_unavailable, got %q", kind)
 	}
 }

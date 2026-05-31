@@ -925,3 +925,93 @@ body {
 .subrule-delete-btn:hover {
   color: var(--color-danger);
 }
+
+/* ============================================================================
+   Topology editor
+   ============================================================================ */
+
+.topology-toolbar {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-base);
+  flex-wrap: wrap;
+}
+
+.topology-toolbar-btn {
+  background: var(--color-surface);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  color: var(--color-accent);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--duration-base), color var(--duration-base);
+}
+
+.topology-toolbar-btn:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+}
+
+/* Delete × on node hover */
+.topo-node-delete {
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.topo-node:hover .topo-node-delete,
+.topo-node:focus .topo-node-delete {
+  opacity: 1;
+}
+
+.topo-node-delete-bg {
+  fill: var(--color-danger, #dc2626);
+  opacity: 0.85;
+}
+
+.topo-node-delete-x {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  pointer-events: none;
+}
+
+/* ============================================================================
+   Interface service binding actions
+   ============================================================================ */
+
+.iface-actions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.iface-action-btn {
+  background: var(--color-surface);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  color: var(--color-accent);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--duration-base);
+}
+
+.iface-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+}
+
+.iface-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.iface-action-btn--danger {
+  color: var(--color-danger, #dc2626);
+  border-color: color-mix(in srgb, var(--color-danger, #dc2626) 40%, transparent);
+}
+
+.iface-action-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger, #dc2626) 8%, var(--color-surface));
+}

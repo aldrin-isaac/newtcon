@@ -1,14 +1,16 @@
-// Node-inspector and topology proxy handlers. Each handler fetches one
-// newtron endpoint verbatim and returns the decoded "data" field as JSON.
-// URL pattern: /api/topology, /api/nodes/{device}/...
+// Node-inspector, topology proxy, and topology-editor handlers. Each handler
+// fetches or mutates one newtron endpoint and returns the decoded "data" field
+// as JSON. URL pattern: /api/topology, /api/topology/nodes, /api/topology/links,
+// /api/nodes/{device}/...
 //
-// All reads are proxied through internal/newtronc/nodes.go; no newtron
-// package is imported here (CLAUDE.md §newtron API Consumption Rule).
+// All reads and writes are proxied through internal/newtronc/nodes.go; no
+// newtron package is imported here (CLAUDE.md §newtron API Consumption Rule).
 package handlers
 
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -22,26 +24,41 @@ type NodesDeps struct {
 	CorrelationID func(ctx context.Context) string
 }
 
-// RegisterNodesRoutes registers the topology and per-device read endpoints.
+// RegisterNodesRoutes registers the topology, topology-editor, per-device read,
+// and interface binding endpoints.
 //
-// Endpoint list:
+// Read endpoints:
 //
-//	GET /api/topology                                 — full topology
-//	GET /api/nodes/{device}/info                      — device overview
-//	GET /api/nodes/{device}/health                    — health check
-//	GET /api/nodes/{device}/interfaces                — interface list
-//	GET /api/nodes/{device}/interfaces/{name}         — interface detail
-//	GET /api/nodes/{device}/interfaces/{name}/binding — bound service
-//	GET /api/nodes/{device}/vlans                     — VLANs
-//	GET /api/nodes/{device}/vrfs                      — VRFs
-//	GET /api/nodes/{device}/acls                      — ACLs
-//	GET /api/nodes/{device}/lags                      — LAGs
-//	GET /api/nodes/{device}/neighbors                 — neighbors
-//	GET /api/nodes/{device}/bgp/status                — BGP status
-//	GET /api/nodes/{device}/evpn/status               — EVPN status
-//	GET /api/nodes/{device}/configdb                  — full CONFIG_DB snapshot
-//	GET /api/nodes/{device}/configdb/{table}          — table keys
-//	GET /api/nodes/{device}/configdb/{table}/{key}    — entry value
+//	GET  /api/topology                                        — full topology
+//	GET  /api/nodes/{device}/info                             — device overview
+//	GET  /api/nodes/{device}/health                           — health check
+//	GET  /api/nodes/{device}/interfaces                       — interface list
+//	GET  /api/nodes/{device}/interfaces/{name}                — interface detail
+//	GET  /api/nodes/{device}/interfaces/{name}/binding        — bound service
+//	GET  /api/nodes/{device}/vlans                            — VLANs
+//	GET  /api/nodes/{device}/vrfs                             — VRFs
+//	GET  /api/nodes/{device}/acls                             — ACLs
+//	GET  /api/nodes/{device}/lags                             — LAGs
+//	GET  /api/nodes/{device}/neighbors                        — neighbors
+//	GET  /api/nodes/{device}/bgp/status                       — BGP status
+//	GET  /api/nodes/{device}/evpn/status                      — EVPN status
+//	GET  /api/nodes/{device}/configdb                         — full CONFIG_DB snapshot
+//	GET  /api/nodes/{device}/configdb/{table}                 — table keys
+//	GET  /api/nodes/{device}/configdb/{table}/{key}           — entry value
+//
+// Topology write endpoints (operator-domain names):
+//
+//	POST   /api/topology/nodes                                — add device
+//	PUT    /api/topology/nodes/{name}                         — update device
+//	DELETE /api/topology/nodes/{name}                         — remove device
+//	POST   /api/topology/links                                — add link
+//	DELETE /api/topology/links/{device}/{interface}           — remove link
+//
+// Interface binding endpoints:
+//
+//	POST /api/nodes/{device}/interfaces/{name}/bind-service   — bind service
+//	POST /api/nodes/{device}/interfaces/{name}/unbind-service — unbind service
+//	POST /api/nodes/{device}/interfaces/{name}/refresh-service — refresh service
 func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 	cid := deps.CorrelationID
 	if cid == nil {
@@ -244,6 +261,152 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 			return c.NodeReconcile(ctx, c.Network(ctx), device, dryRun, mode)
 		}, "/api/nodes/"+device+"/reconcile")
 	}))
+
+	// ============================================================================
+	// Topology write endpoints
+	// ============================================================================
+
+	// proxyNodeWrite is the shared helper for write (POST/PUT/DELETE) routes that
+	// forward to newtron and return the data field, mapping errors to the standard
+	// newtcon envelope.
+	proxyNodeWrite := func(
+		w http.ResponseWriter,
+		r *http.Request,
+		statusOnSuccess int,
+		writeFn func(ctx context.Context) (json.RawMessage, error),
+		endpoint string,
+	) {
+		ctx := r.Context()
+		payload, err := writeFn(ctx)
+		if err != nil {
+			writeNodeWriteError(w, cid(ctx), err, endpoint)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusOnSuccess)
+		_, _ = w.Write(payload)
+	}
+
+	// readBody decodes a JSON request body into the provided pointer.
+	// Returns false and writes the error envelope when the body is invalid.
+	readBody := func(w http.ResponseWriter, r *http.Request, v any) bool {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"reading request body: "+err.Error(), nil)
+			return false
+		}
+		if err := json.Unmarshal(body, v); err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"invalid JSON: "+err.Error(), nil)
+			return false
+		}
+		return true
+	}
+
+	// POST /api/topology/nodes — add a device to the topology.
+	// Forwards body {name, device} to newtron's create-node verb.
+	// Newtron handler: handler_network.go lines 384-406.
+	mux.Handle("POST /api/topology/nodes", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body any
+		if !readBody(w, r, &body) {
+			return
+		}
+		proxyNodeWrite(w, r, http.StatusCreated, func(ctx context.Context) (json.RawMessage, error) {
+			return c.CreateTopologyDevice(ctx, c.Network(ctx), body)
+		}, "POST /api/topology/nodes")
+	}))
+
+	// PUT /api/topology/nodes/{name} — update a device entry (full replacement).
+	// Forwards body (TopologyDevice) to newtron's PUT topology/node/{name} verb.
+	// Newtron handler: handler_network.go lines 435-455.
+	mux.Handle("PUT /api/topology/nodes/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		var body any
+		if !readBody(w, r, &body) {
+			return
+		}
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.UpdateTopologyDevice(ctx, c.Network(ctx), name, body)
+		}, "PUT /api/topology/nodes/"+name)
+	}))
+
+	// DELETE /api/topology/nodes/{name} — remove a device from the topology.
+	// Query param ?force=true cascade-deletes referring links.
+	// Newtron handler: handler_network.go lines 413-429.
+	mux.Handle("DELETE /api/topology/nodes/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		force := r.URL.Query().Get("force") == "true"
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.DeleteTopologyDevice(ctx, c.Network(ctx), name, force)
+		}, "DELETE /api/topology/nodes/"+name)
+	}))
+
+	// POST /api/topology/links — add a link between two interfaces.
+	// Forwards body {a, z} to newtron's create-link verb.
+	// Newtron handler: handler_network.go lines 460-478.
+	mux.Handle("POST /api/topology/links", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body any
+		if !readBody(w, r, &body) {
+			return
+		}
+		proxyNodeWrite(w, r, http.StatusCreated, func(ctx context.Context) (json.RawMessage, error) {
+			return c.CreateTopologyLink(ctx, c.Network(ctx), body)
+		}, "POST /api/topology/links")
+	}))
+
+	// DELETE /api/topology/links/{device}/{interface} — remove the link that
+	// includes the given endpoint. Newtron resolves the full link from a single
+	// endpoint (handler_network.go lines 484-504).
+	mux.Handle("DELETE /api/topology/links/{device}/{interface}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		iface := normalizeIfaceName(r.PathValue("interface"))
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.DeleteTopologyLink(ctx, c.Network(ctx), device, iface)
+		}, "DELETE /api/topology/links/"+device+"/"+iface)
+	}))
+
+	// ============================================================================
+	// Interface binding endpoints
+	// ============================================================================
+
+	// POST /api/nodes/{device}/interfaces/{name}/bind-service
+	// Forwards body to newtron's apply-service RPC.
+	// Newtron handler: handler_interface.go lines 15-48.
+	// Body: { service: string, ip_address?: string, vlan?: int, peer_as?: int, params?: object }
+	mux.Handle("POST /api/nodes/{device}/interfaces/{name}/bind-service", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		name := normalizeIfaceName(r.PathValue("name"))
+		var body any
+		if !readBody(w, r, &body) {
+			return
+		}
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.ApplyService(ctx, c.Network(ctx), device, name, body)
+		}, "POST /api/nodes/"+device+"/interfaces/"+name+"/bind-service")
+	}))
+
+	// POST /api/nodes/{device}/interfaces/{name}/unbind-service
+	// Calls newtron's remove-service RPC (no body required).
+	// Newtron handler: handler_interface.go lines 50-69.
+	mux.Handle("POST /api/nodes/{device}/interfaces/{name}/unbind-service", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		name := normalizeIfaceName(r.PathValue("name"))
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.RemoveService(ctx, c.Network(ctx), device, name)
+		}, "POST /api/nodes/"+device+"/interfaces/"+name+"/unbind-service")
+	}))
+
+	// POST /api/nodes/{device}/interfaces/{name}/refresh-service
+	// Calls newtron's refresh-service RPC (no body required).
+	// Newtron handler: handler_interface.go lines 71-90.
+	mux.Handle("POST /api/nodes/{device}/interfaces/{name}/refresh-service", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		name := normalizeIfaceName(r.PathValue("name"))
+		proxyNodeWrite(w, r, http.StatusOK, func(ctx context.Context) (json.RawMessage, error) {
+			return c.RefreshService(ctx, c.Network(ctx), device, name)
+		}, "POST /api/nodes/"+device+"/interfaces/"+name+"/refresh-service")
+	}))
 }
 
 // normalizeIfaceName converts %2F sequences to "/" in interface names from
@@ -274,4 +437,26 @@ func writeNodeUnavailable(w http.ResponseWriter, correlationID string, err error
 			},
 		},
 	)
+}
+
+// writeNodeWriteError maps newtronc write errors to the standard newtcon error
+// envelope. Validation failures and conflicts surface operator-domain errors;
+// transport failures become newtron_unavailable.
+func writeNodeWriteError(w http.ResponseWriter, correlationID string, err error, endpoint string) {
+	switch e := err.(type) {
+	case *newtronc.ValidationError:
+		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+			"validation failed for "+endpoint+": "+e.Error(),
+			map[string]any{"correlation_id": correlationID})
+	case *newtronc.NotFoundError:
+		types.WriteError(w, http.StatusNotFound, types.KindInternal,
+			"not found: "+endpoint,
+			map[string]any{"correlation_id": correlationID})
+	case *newtronc.ConflictError:
+		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
+			"conflict for "+endpoint+": "+e.Error(),
+			map[string]any{"correlation_id": correlationID})
+	default:
+		writeNodeUnavailable(w, correlationID, err, endpoint)
+	}
 }
