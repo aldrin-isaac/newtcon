@@ -17,7 +17,28 @@
         What this network knows — services, policies, filters, profiles, and zones defined in newtron.
       </p>
     </header>
-    <main id="workspace-root" class="workspace">
+    <nav class="workspace-tabs" role="tablist" aria-label="Workspace views">
+      <button
+        class="workspace-tab workspace-tab--active"
+        role="tab"
+        id="tab-specs"
+        aria-controls="panel-specs"
+        aria-selected="true"
+        type="button"
+      >Specs</button>
+      <button
+        class="workspace-tab"
+        role="tab"
+        id="tab-topology"
+        aria-controls="panel-topology"
+        aria-selected="false"
+        type="button"
+      >Topology</button>
+    </nav>
+    <main id="panel-specs" class="workspace" role="tabpanel" aria-labelledby="tab-specs">
+      <p class="status-loading">Loading…</p>
+    </main>
+    <main id="panel-topology" class="workspace workspace--topology" role="tabpanel" aria-labelledby="tab-topology" hidden>
       <p class="status-loading">Loading…</p>
     </main>
     <aside id="detail-drawer" class="drawer" aria-hidden="true">

@@ -276,3 +276,249 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .workspace { animation: none; }
 }
+
+/* ---- Tab strip ------------------------------------------------------------ */
+
+.workspace-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--space-page, 2rem);
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
+}
+
+.workspace-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-sm, 0.5rem) var(--space-md, 1rem);
+  font-size: var(--text-sm);
+  font-family: var(--font-system, inherit);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-base) var(--ease-standard),
+              border-color var(--duration-base) var(--ease-standard);
+  margin-bottom: -1px;
+}
+
+.workspace-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.workspace-tab--active {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-accent);
+  font-weight: 500;
+}
+
+/* ---- Topology panel ------------------------------------------------------- */
+
+.workspace--topology {
+  grid-template-columns: 1fr;
+  padding-top: var(--space-md, 1rem);
+}
+
+/* SVG topology graph container */
+.topology-graph {
+  background: var(--color-surface-elevated);
+  border: 1px solid color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+  border-radius: 6px;
+  width: 100%;
+  min-height: 260px;
+  overflow: visible;
+}
+
+/* Node box inside SVG */
+.topo-node {
+  cursor: pointer;
+}
+
+.topo-node rect {
+  fill: var(--color-surface-elevated);
+  stroke: color-mix(in srgb, var(--color-text-secondary) 20%, transparent);
+  stroke-width: 1.5;
+  rx: 4;
+  transition: stroke var(--duration-base) var(--ease-standard);
+}
+
+.topo-node:hover rect,
+.topo-node:focus rect {
+  stroke: var(--color-accent);
+}
+
+.topo-node text {
+  fill: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  dominant-baseline: central;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+
+.topo-node .topo-node-type {
+  fill: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+/* Link line inside SVG */
+.topo-link {
+  stroke: color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* Error / empty state inside topology panel */
+.topology-error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  padding: var(--space-md, 1rem) 0;
+}
+
+.topology-empty {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-style: italic;
+  padding: var(--space-md, 1rem) 0;
+}
+
+/* ---- Node drawer sub-tabs ------------------------------------------------- */
+
+.node-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
+  margin-bottom: var(--space-md, 1rem);
+}
+
+.node-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-xs, 0.25rem) var(--space-sm, 0.5rem);
+  font-size: var(--text-sm);
+  font-family: var(--font-system, inherit);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-base) var(--ease-standard),
+              border-color var(--duration-base) var(--ease-standard);
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.node-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.node-tab--active {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-accent);
+  font-weight: 500;
+}
+
+/* Node tab content panel — each is shown/hidden via hidden attribute */
+.node-tab-panel {
+  animation: fade-in var(--duration-base) var(--ease-standard);
+}
+
+/* Interface list inside the node drawer */
+.iface-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.iface-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm, 0.5rem);
+  padding: var(--space-xs, 0.25rem) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 8%, transparent);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  transition: color var(--duration-base) var(--ease-standard);
+}
+
+.iface-item:last-child {
+  border-bottom: none;
+}
+
+.iface-item:hover,
+.iface-item:focus {
+  color: var(--color-accent);
+  outline: none;
+}
+
+.iface-name {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* Inline interface detail expansion */
+.iface-detail {
+  margin: var(--space-xs, 0.25rem) 0 var(--space-sm, 0.5rem) var(--space-md, 1rem);
+  padding: var(--space-sm, 0.5rem);
+  background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface));
+  border-radius: 4px;
+  border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  font-size: var(--text-sm);
+}
+
+/* CONFIG_DB three-level navigation */
+.configdb-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.configdb-table-item {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-xs, 0.25rem) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 8%, transparent);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: color var(--duration-base) var(--ease-standard);
+}
+
+.configdb-table-item:last-child {
+  border-bottom: none;
+}
+
+.configdb-table-item:hover,
+.configdb-table-item:focus {
+  color: var(--color-accent);
+  outline: none;
+}
+
+.configdb-keys {
+  list-style: none;
+  margin: var(--space-xs, 0.25rem) 0 0 var(--space-md, 1rem);
+  padding: 0;
+}
+
+.configdb-key-item {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 2px 0;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: color var(--duration-base) var(--ease-standard);
+}
+
+.configdb-key-item:hover,
+.configdb-key-item:focus {
+  color: var(--color-accent);
+  outline: none;
+}
+
+.configdb-entry {
+  margin: var(--space-xs, 0.25rem) 0 var(--space-sm, 0.5rem) var(--space-lg, 1.5rem);
+  padding: var(--space-sm, 0.5rem);
+  background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface));
+  border-radius: 4px;
+  font-size: var(--text-sm);
+}

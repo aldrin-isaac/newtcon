@@ -67,6 +67,12 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Topology and per-device read endpoints (slice 3).
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
 	// server.RegisterStaticAssets logs a warning and skips registration when
