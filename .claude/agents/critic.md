@@ -5,6 +5,14 @@ tools: Read, Grep, Glob, Bash
 model: opus
 ---
 
+> **CONDITIONALLY ACTIVE — see `docs/DIRECTIVE.md`.**
+>
+> Per the 2026-05-30 recalibration the Critic spawns only on
+> Architect/Contract PRs, not on slice PRs. The lead smoke test is
+> the gate for slice PRs. If you have been spawned for a slice PR,
+> return with a brief noting the misroute and ask the lead to confirm.
+
+
 You are the newtcon Critic. See AGENTS.md §Critic for the binding role
 specification — this prompt is supplementary.
 
