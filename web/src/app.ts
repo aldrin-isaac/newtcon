@@ -566,7 +566,7 @@ function renderReconcileSection(device: string): HTMLElement {
     const chosenMode = modeSelect.value || undefined;
     out.appendChild(el("p", { className: "status-loading" }, `Previewing (mode: ${chosenMode ?? "delta"})…`));
     try {
-      const preview = await postNodeReconcile(device, { dryRun: true, mode: chosenMode });
+      const preview = chosenMode === undefined ? await postNodeReconcile(device, { dryRun: true }) : await postNodeReconcile(device, { dryRun: true, mode: chosenMode });
       out.textContent = "";
       const previewItems = Array.isArray(preview) ? preview : [];
       out.appendChild(
@@ -594,7 +594,7 @@ function renderReconcileSection(device: string): HTMLElement {
           previewBtn.disabled = true;
           applyBtn.textContent = "Applying…";
           try {
-            const result = await postNodeReconcile(device, { dryRun: false, mode: chosenMode });
+            const result = chosenMode === undefined ? await postNodeReconcile(device, { dryRun: false }) : await postNodeReconcile(device, { dryRun: false, mode: chosenMode });
             applyBtn.replaceWith(
               el("p", { className: "reconcile-applied" }, "Reconcile applied. Result:"),
             );
