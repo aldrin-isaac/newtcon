@@ -23,6 +23,7 @@ import {
   fetchNodeDrift,
   fetchNodeProjection,
   fetchNodeIntentTree,
+  postNodeReconcile,
 } from "./api/newtcon/nodes.js";
 
 // ---- DOM helper -------------------------------------------------------------
@@ -494,9 +495,9 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
 }
 
 // renderConfigDBTab renders the CONFIG_DB sub-tab with 3-level navigation.
-// renderDriftTab renders the drift list. Newtron returns either an empty
-// array (no drift) or an array of drift items per table/key.
-function renderDriftTab(container: HTMLElement, data: unknown): void {
+// renderDriftTab renders the drift list + a Reconcile button. Newtron returns
+// either an empty array (no drift) or an array of drift items per table/key.
+function renderDriftTab(container: HTMLElement, data: unknown, device?: string): void {
   container.textContent = "";
   const items = Array.isArray(data) ? data : [];
   if (items.length === 0) {
@@ -514,6 +515,93 @@ function renderDriftTab(container: HTMLElement, data: unknown): void {
   const body = renderValue(data);
   if (body instanceof HTMLElement) body.classList.add("drift-detail");
   container.appendChild(body);
+
+  if (device) {
+    container.appendChild(renderReconcileSection(device));
+  }
+}
+
+// renderReconcileSection emits the "Reconcile" button + preview/apply flow.
+// Preview path: POST .../reconcile?dry_run=true → show ChangeSet structure.
+// Apply path: confirm + POST without dry_run → show result + auto-refresh drift.
+function renderReconcileSection(device: string): HTMLElement {
+  const section = el("section", { className: "reconcile-section" });
+  section.appendChild(el("h3", { className: "reconcile-heading" }, "Reconcile"));
+  section.appendChild(
+    el(
+      "p",
+      { className: "reconcile-help" },
+      "Preview the corrective intent newtron would push to restore this device to its intent. Apply executes the change atomically per-device.",
+    ),
+  );
+
+  const previewBtn = el("button", { type: "button", className: "reconcile-btn reconcile-btn--preview" }, "Preview reconcile");
+  const out = el("div", { className: "reconcile-output" });
+  section.appendChild(previewBtn);
+  section.appendChild(out);
+
+  previewBtn.addEventListener("click", async () => {
+    previewBtn.disabled = true;
+    out.textContent = "";
+    out.appendChild(el("p", { className: "status-loading" }, "Previewing…"));
+    try {
+      const preview = await postNodeReconcile(device, { dryRun: true });
+      out.textContent = "";
+      const previewItems = Array.isArray(preview) ? preview : [];
+      out.appendChild(
+        el(
+          "p",
+          { className: previewItems.length === 0 ? "reconcile-noop" : "reconcile-preview-header" },
+          previewItems.length === 0
+            ? "Preview returned no changes — nothing to reconcile."
+            : `Preview: ${previewItems.length} corrective change${previewItems.length === 1 ? "" : "s"}. Review before applying.`,
+        ),
+      );
+      const body = renderValue(preview);
+      if (body instanceof HTMLElement) body.classList.add("reconcile-preview-body");
+      out.appendChild(body);
+
+      if (previewItems.length > 0) {
+        const applyBtn = el("button", { type: "button", className: "reconcile-btn reconcile-btn--apply" }, "Apply reconcile (atomic per device)");
+        out.appendChild(applyBtn);
+        applyBtn.addEventListener("click", async () => {
+          const ok = window.confirm(
+            `Reconcile ${device}? This will write the corrective changes to the device's CONFIG_DB atomically. Verify the preview above first.`,
+          );
+          if (!ok) return;
+          applyBtn.disabled = true;
+          previewBtn.disabled = true;
+          applyBtn.textContent = "Applying…";
+          try {
+            const result = await postNodeReconcile(device, { dryRun: false });
+            applyBtn.replaceWith(
+              el("p", { className: "reconcile-applied" }, "Reconcile applied. Result:"),
+            );
+            const resBody = renderValue(result);
+            if (resBody instanceof HTMLElement) resBody.classList.add("reconcile-result-body");
+            out.appendChild(resBody);
+            // Re-fetch drift to refresh the upper drift list.
+            const fresh = await fetchNodeDrift(device);
+            out.appendChild(el("hr", { className: "reconcile-sep" }));
+            out.appendChild(el("p", { className: "reconcile-refresh-header" }, "Drift after reconcile:"));
+            const driftBody = renderValue(fresh);
+            if (driftBody instanceof HTMLElement) driftBody.classList.add("drift-detail");
+            out.appendChild(driftBody);
+          } catch (err) {
+            applyBtn.replaceWith(el("p", { className: "panel-error" }, "Apply failed"));
+            renderErrorInto(out, err);
+          }
+        });
+      }
+    } catch (err) {
+      out.textContent = "";
+      renderErrorInto(out, err);
+    } finally {
+      previewBtn.disabled = false;
+    }
+  });
+
+  return section;
 }
 
 function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unknown): void {
@@ -759,7 +847,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
 
     case "drift":
       fetchNodeDrift(device)
-        .then((data) => renderDriftTab(container, data))
+        .then((data) => renderDriftTab(container, data, device))
         .catch((err) => renderErrorInto(container, err));
       break;
 
