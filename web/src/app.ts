@@ -502,8 +502,18 @@ function renderDriftTab(container: HTMLElement, data: unknown, device?: string):
   const items = Array.isArray(data) ? data : [];
   if (items.length === 0) {
     container.appendChild(
-      el("p", { className: "drift-empty" }, "No drift detected. Device matches its intent."),
+      el("p", { className: "drift-empty" }, "No delta drift detected. Device matches its last-applied intent."),
     );
+    container.appendChild(
+      el(
+        "p",
+        { className: "drift-empty-help" },
+        "Use Reconcile (mode: topology) below to compare the device against the full topology spec from scratch.",
+      ),
+    );
+    if (device) {
+      container.appendChild(renderReconcileSection(device));
+    }
     return;
   }
   const heading = el(
@@ -535,17 +545,28 @@ function renderReconcileSection(device: string): HTMLElement {
     ),
   );
 
+  const controls = el("div", { className: "reconcile-controls" });
+  const modeLabel = el("label", { className: "reconcile-mode-label" }, "Mode: ");
+  const modeSelect = el("select", { className: "reconcile-mode-select" }) as HTMLSelectElement;
+  const optDelta = el("option", { value: "" }, "delta (changes since last apply)") as HTMLOptionElement;
+  const optTopology = el("option", { value: "topology" }, "topology (full reconcile to topology spec)") as HTMLOptionElement;
+  modeSelect.appendChild(optDelta);
+  modeSelect.appendChild(optTopology);
+  modeLabel.appendChild(modeSelect);
+  controls.appendChild(modeLabel);
   const previewBtn = el("button", { type: "button", className: "reconcile-btn reconcile-btn--preview" }, "Preview reconcile");
+  controls.appendChild(previewBtn);
+  section.appendChild(controls);
   const out = el("div", { className: "reconcile-output" });
-  section.appendChild(previewBtn);
   section.appendChild(out);
 
   previewBtn.addEventListener("click", async () => {
     previewBtn.disabled = true;
     out.textContent = "";
-    out.appendChild(el("p", { className: "status-loading" }, "Previewing…"));
+    const chosenMode = modeSelect.value || undefined;
+    out.appendChild(el("p", { className: "status-loading" }, `Previewing (mode: ${chosenMode ?? "delta"})…`));
     try {
-      const preview = await postNodeReconcile(device, { dryRun: true });
+      const preview = await postNodeReconcile(device, { dryRun: true, mode: chosenMode });
       out.textContent = "";
       const previewItems = Array.isArray(preview) ? preview : [];
       out.appendChild(
@@ -573,7 +594,7 @@ function renderReconcileSection(device: string): HTMLElement {
           previewBtn.disabled = true;
           applyBtn.textContent = "Applying…";
           try {
-            const result = await postNodeReconcile(device, { dryRun: false });
+            const result = await postNodeReconcile(device, { dryRun: false, mode: chosenMode });
             applyBtn.replaceWith(
               el("p", { className: "reconcile-applied" }, "Reconcile applied. Result:"),
             );
