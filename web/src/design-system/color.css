@@ -55,7 +55,7 @@
    * type badges, and inline code backgrounds. Desaturated so it reads as
    * "meaningful distinction" rather than "call to action" — the operator's
    * attention is on the substrate, not on the interactive chrome. */
-  --color-accent:           #4a7fa5;
+  --color-accent:           #3f6f93;
 
   /* Danger: a muted sienna-red for error containers only. Intentionally
    * de-alarmed: the operator must read the error, not freeze at red. The
