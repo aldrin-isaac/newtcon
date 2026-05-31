@@ -2,7 +2,18 @@
 //   Tab 1 (Specs)    — multi-panel spec view (unchanged from slice 2)
 //   Tab 2 (Topology) — SVG topology graph + node-inspector drawer
 
-import { fetchSpecList, fetchSpecDetail, type SpecKind } from "./api/newtcon/network.js";
+import {
+  fetchSpecList,
+  fetchSpecDetail,
+  createSpec,
+  deleteSpec,
+  addSubRule,
+  removeQoSQueue,
+  removeFilterRule,
+  removePrefixListEntry,
+  removeRoutePolicyRule,
+  type SpecKind,
+} from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
 import {
   fetchTopology,
@@ -41,7 +52,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-// ---- Specs tab (unchanged from slice 2) ------------------------------------
+// ---- Specs tab -------------------------------------------------------------
 
 interface Panel {
   kind: SpecKind;
@@ -61,7 +72,284 @@ const PANELS: Panel[] = [
   { kind: "platforms", title: "Platforms" },
 ];
 
-function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
+// ---- Form field definitions per spec type ----------------------------------
+// Each field definition describes one HTML input in the "Add" form drawer.
+
+interface FieldDef {
+  name: string;      // JSON field name sent to newtron
+  label: string;     // Operator-visible label (domain language)
+  type: "text" | "number" | "select";
+  required?: boolean;
+  options?: string[];   // for type "select"
+  placeholder?: string;
+}
+
+// specForms maps each SpecKind to the form fields needed to create that spec.
+// Field names and types are taken verbatim from the newtron request types in
+// pkg/newtron/types.go (CreateServiceRequest, CreateIPVPNRequest, etc.).
+const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
+  services: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. transit" },
+    {
+      name: "type", label: "Type", type: "select", required: true,
+      options: ["evpn-irb", "evpn-bridged", "evpn-routed", "irb", "bridged", "routed"],
+    },
+    { name: "ipvpn", label: "IP VPN", type: "text", placeholder: "IP VPN name (if applicable)" },
+    { name: "macvpn", label: "MAC VPN", type: "text", placeholder: "MAC VPN name (if applicable)" },
+    { name: "vrf_type", label: "VRF type", type: "text", placeholder: "e.g. L3" },
+    { name: "qos_policy", label: "QoS policy", type: "text", placeholder: "Policy name (optional)" },
+    { name: "ingress_filter", label: "Ingress filter", type: "text", placeholder: "Filter name (optional)" },
+    { name: "egress_filter", label: "Egress filter", type: "text", placeholder: "Filter name (optional)" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  ipvpns: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. corp-l3vpn" },
+    { name: "l3vni", label: "L3 VNI", type: "number", required: true, placeholder: "e.g. 10001" },
+    { name: "vrf", label: "VRF", type: "text", placeholder: "VRF name (optional)" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  macvpns: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. vlan100-vpn" },
+    { name: "vni", label: "VNI", type: "number", required: true, placeholder: "e.g. 100" },
+    { name: "vlan_id", label: "VLAN ID", type: "number", placeholder: "e.g. 100" },
+    { name: "anycast_ip", label: "Anycast IP", type: "text", placeholder: "e.g. 10.0.100.1/24" },
+    { name: "anycast_mac", label: "Anycast MAC", type: "text", placeholder: "e.g. 00:00:00:00:01:00" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  "qos-policies": [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. voip-qos" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  filters: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. ingress-acl" },
+    {
+      name: "type", label: "Type", type: "select", required: true,
+      options: ["ipv4", "ipv6", "l2", "acl"],
+    },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  "prefix-lists": [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. default-routes" },
+  ],
+  "route-policies": [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. import-policy" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+  profiles: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. spine-1" },
+    { name: "mgmt_ip", label: "Management IP", type: "text", required: true, placeholder: "e.g. 192.168.1.1" },
+    { name: "loopback_ip", label: "Loopback IP", type: "text", required: true, placeholder: "e.g. 10.0.0.1" },
+    { name: "zone", label: "Zone", type: "text", required: true, placeholder: "Zone name" },
+    { name: "platform", label: "Platform", type: "text", placeholder: "Platform name (optional)" },
+    { name: "underlay_asn", label: "Underlay ASN", type: "number", placeholder: "e.g. 65001" },
+    { name: "ssh_user", label: "SSH user", type: "text", placeholder: "e.g. admin" },
+  ],
+  zones: [
+    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. datacenter-a" },
+  ],
+};
+
+// subRuleForms defines the form fields for adding sub-rules to spec types
+// that support child entries.
+const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; fields: FieldDef[] }>> = {
+  "qos-policies": {
+    endpoint: "queues",
+    label: "Add queue",
+    fields: [
+      { name: "queue_id", label: "Queue ID", type: "number", required: true },
+      { name: "name", label: "Queue name", type: "text", required: true },
+      {
+        name: "type", label: "Scheduling type", type: "select", required: true,
+        options: ["strict", "wrr", "wfq", "dwrr"],
+      },
+      { name: "weight", label: "Weight", type: "number", placeholder: "0 = strict" },
+    ],
+  },
+  filters: {
+    endpoint: "rules",
+    label: "Add rule",
+    fields: [
+      { name: "seq", label: "Sequence", type: "number", required: true, placeholder: "e.g. 10" },
+      {
+        name: "action", label: "Action", type: "select", required: true,
+        options: ["permit", "deny"],
+      },
+      { name: "src_ip", label: "Source IP/prefix", type: "text", placeholder: "e.g. 10.0.0.0/8" },
+      { name: "dst_ip", label: "Destination IP/prefix", type: "text", placeholder: "e.g. 0.0.0.0/0" },
+      { name: "protocol", label: "Protocol", type: "text", placeholder: "e.g. tcp, udp" },
+      { name: "src_port", label: "Source port", type: "text", placeholder: "e.g. 80" },
+      { name: "dst_port", label: "Destination port", type: "text", placeholder: "e.g. 443" },
+    ],
+  },
+  "prefix-lists": {
+    endpoint: "entries",
+    label: "Add prefix",
+    fields: [
+      { name: "prefix", label: "Prefix (CIDR)", type: "text", required: true, placeholder: "e.g. 10.0.0.0/8" },
+    ],
+  },
+  "route-policies": {
+    endpoint: "rules",
+    label: "Add rule",
+    fields: [
+      { name: "seq", label: "Sequence", type: "number", required: true, placeholder: "e.g. 10" },
+      {
+        name: "action", label: "Action", type: "select", required: true,
+        options: ["permit", "deny"],
+      },
+      { name: "prefix_list", label: "Prefix list", type: "text", placeholder: "Match prefix list name" },
+      { name: "community", label: "Community", type: "text", placeholder: "BGP community string" },
+    ],
+  },
+};
+
+// translateErrorKind converts error kind identifiers to operator-readable language.
+function translateErrorKind(kind: string): string {
+  switch (kind) {
+    case "validation_failure": return "validation failed";
+    case "precondition_failure": return "precondition not met";
+    case "drift_refusal": return "drift detected — refused to apply";
+    case "newtron_unavailable": return "newtron unreachable";
+    default: return "error";
+  }
+}
+
+// ---- Form drawer (create spec) ---------------------------------------------
+
+// buildFormFields renders input elements for each field definition.
+function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues: () => Record<string, unknown> } {
+  const form = el("form", { className: "spec-form" });
+
+  form.addEventListener("submit", (e) => e.preventDefault());
+
+  for (const field of fields) {
+    const group = el("div", { className: "form-group" });
+    const label = el("label", { className: "form-label" }, field.label);
+    if (field.required) {
+      label.appendChild(el("span", { className: "form-required" }, " *"));
+    }
+    group.appendChild(label);
+
+    if (field.type === "select" && field.options) {
+      const select = el("select", { className: "form-control", id: "field-" + field.name }) as HTMLSelectElement;
+      if (!field.required) {
+        select.appendChild(el("option", { value: "" }, "— optional —") as HTMLOptionElement);
+      }
+      for (const opt of field.options) {
+        select.appendChild(el("option", { value: opt }, opt) as HTMLOptionElement);
+      }
+      label.setAttribute("for", "field-" + field.name);
+      group.appendChild(select);
+    } else {
+      const input = el("input", {
+        className: "form-control",
+        id: "field-" + field.name,
+        type: field.type === "number" ? "number" : "text",
+        placeholder: field.placeholder ?? "",
+      }) as HTMLInputElement;
+      if (field.required) input.required = true;
+      label.setAttribute("for", "field-" + field.name);
+      group.appendChild(input);
+    }
+
+    form.appendChild(group);
+  }
+
+  const getValues = (): Record<string, unknown> => {
+    const values: Record<string, unknown> = {};
+    for (const field of fields) {
+      const el2 = form.querySelector(`#field-${field.name}`) as HTMLInputElement | HTMLSelectElement | null;
+      if (!el2) continue;
+      const raw = el2.value.trim();
+      if (!raw && !field.required) continue;
+      if (field.type === "number") {
+        const n = Number(raw);
+        if (!isNaN(n)) values[field.name] = n;
+      } else {
+        if (raw) values[field.name] = raw;
+      }
+    }
+    return values;
+  };
+
+  return { form, getValues };
+}
+
+// openCreateDrawer opens the drawer for creating a new spec of the given kind.
+// onSuccess is called after a successful create to refresh the panel list.
+function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => void): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+
+  content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
+  content.appendChild(el("h2", { className: "drawer-name" }, "Add " + kindTitle.toLowerCase().replace(/s$/, "")));
+
+  const fields = specForms[kind];
+  if (!fields || fields.length === 0) {
+    content.appendChild(el("p", { className: "panel-error" }, "No form defined for this spec type."));
+    return;
+  }
+
+  const { form, getValues } = buildFormFields(fields);
+  content.appendChild(form);
+
+  const errorOut = el("div", { className: "form-error-out" });
+  content.appendChild(errorOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Create");
+  content.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", async () => {
+    errorOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Creating…";
+
+    try {
+      const values = getValues();
+      await createSpec(kind, values);
+      submitBtn.textContent = "Created";
+      const ok = el("p", { className: "form-success" }, "Created successfully.");
+      content.insertBefore(ok, submitBtn);
+      onSuccess();
+      // Close drawer after short delay.
+      setTimeout(() => {
+        drawer.setAttribute("aria-hidden", "true");
+        drawer.classList.remove("open");
+      }, 800);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Create";
+      if (err instanceof ApiError) {
+        const kindLabel = translateErrorKind(err.kind);
+        errorOut.appendChild(el("p", { className: "panel-error" }, kindLabel + ": " + err.message));
+      } else {
+        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      }
+    }
+  });
+}
+
+// refreshPanel re-fetches the spec list for a panel and replaces its DOM node.
+function refreshPanel(panel: Panel, container: HTMLElement): void {
+  fetchSpecList(panel.kind)
+    .then((names) => {
+      const fresh = buildPanel(panel, { status: "fulfilled", value: names });
+      container.replaceWith(fresh);
+    })
+    .catch((err) => {
+      const fresh = buildPanel(panel, { status: "rejected", reason: err });
+      container.replaceWith(fresh);
+    });
+}
+
+// buildPanel constructs the panel DOM for a spec type.
+// Separated from renderPanel so refreshPanel can rebuild after mutations.
+function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
   const container = el("section", { className: "panel" });
   const header = el("div", { className: "panel-header" });
   header.appendChild(el("h2", { className: "panel-title" }, panel.title));
@@ -69,6 +357,21 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
   if (result.status === "fulfilled") {
     const items = result.value;
     header.appendChild(el("span", { className: "panel-count" }, String(items.length)));
+
+    // "Add" button — only for spec types that have a form defined.
+    if (specForms[panel.kind]) {
+      const addBtn = el("button", {
+        type: "button",
+        className: "panel-add-btn",
+        title: "Add " + panel.title.toLowerCase().replace(/s$/, ""),
+      }, "+ Add");
+      addBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCreateDrawer(panel.kind, panel.title, () => refreshPanel(panel, container));
+      });
+      header.appendChild(addBtn);
+    }
+
     container.appendChild(header);
 
     if (items.length === 0) {
@@ -76,9 +379,8 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
     } else {
       const list = el("ul", { className: "panel-list" });
       for (const name of items) {
-        const item = el("li", { className: "panel-list-item", tabIndex: 0 }, name);
-        item.dataset.kind = panel.kind;
-        item.dataset.name = name;
+        const row = el("li", { className: "panel-list-row" });
+        const item = el("span", { className: "panel-list-item", tabIndex: 0 }, name);
         item.addEventListener("click", () => openDetail(panel.kind, panel.title, name));
         item.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -86,7 +388,36 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
             openDetail(panel.kind, panel.title, name);
           }
         });
-        list.appendChild(item);
+        row.appendChild(item);
+
+        // Delete affordance — × button shown on hover.
+        if (specForms[panel.kind]) {
+          const delBtn = el("button", {
+            type: "button",
+            className: "panel-delete-btn",
+            title: "Delete " + name,
+            ariaLabel: "Delete " + name,
+          }, "×");
+          delBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!window.confirm(`Delete ${panel.title.replace(/s$/, "").toLowerCase()} "${name}"? This cannot be undone.`)) return;
+            delBtn.disabled = true;
+            delBtn.textContent = "…";
+            deleteSpec(panel.kind, name)
+              .then(() => refreshPanel(panel, container))
+              .catch((err) => {
+                delBtn.disabled = false;
+                delBtn.textContent = "×";
+                const msg = err instanceof ApiError
+                  ? translateErrorKind(err.kind) + ": " + err.message
+                  : String(err);
+                alert("Delete failed: " + msg);
+              });
+          });
+          row.appendChild(delBtn);
+        }
+
+        list.appendChild(row);
       }
       container.appendChild(list);
     }
@@ -108,6 +439,10 @@ function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTML
     container.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
   }
   return container;
+}
+
+function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
+  return buildPanel(panel, result);
 }
 
 // ---- Shared recursive value renderer ----------------------------------------
@@ -144,6 +479,199 @@ export function renderValue(value: unknown): HTMLElement | Text {
 
 // ---- Detail drawer (spec) ---------------------------------------------------
 
+// renderSubRuleSection renders the "Add rule/entry/queue" section inside the
+// detail drawer for spec types that support child entries.
+function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLElement, subRuleConf: typeof subRuleForms[SpecKind]): void {
+  if (!subRuleConf) return;
+
+  const section = el("section", { className: "subrule-section" });
+  const heading = el("h3", { className: "subrule-heading" }, subRuleConf.label);
+  section.appendChild(heading);
+
+  const formArea = el("div", { className: "subrule-form-area" });
+  let formVisible = false;
+
+  const toggleBtn = el("button", { type: "button", className: "subrule-toggle-btn" }, "Show form");
+  toggleBtn.addEventListener("click", () => {
+    formVisible = !formVisible;
+    formArea.hidden = !formVisible;
+    toggleBtn.textContent = formVisible ? "Hide form" : "Show form";
+  });
+  section.appendChild(toggleBtn);
+
+  formArea.hidden = true;
+
+  const { form, getValues } = buildFormFields(subRuleConf.fields);
+  formArea.appendChild(form);
+
+  const errOut = el("div", { className: "form-error-out" });
+  formArea.appendChild(errOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, subRuleConf.label);
+  formArea.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", async () => {
+    errOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Saving…";
+    try {
+      const values = getValues();
+      // Inject the parent spec name into the request body for sub-rule verbs
+      // that require it (e.g. filter requires "filter": name, policy requires
+      // "policy": name, etc.).
+      const bodyWithParent = injectParentName(kind, specName, values);
+      await addSubRule(kind, specName, subRuleConf.endpoint, bodyWithParent);
+      submitBtn.textContent = subRuleConf.label;
+      submitBtn.disabled = false;
+      errOut.textContent = "";
+      // Re-open the detail to refresh the spec payload.
+      openDetail(kind, kindTitleFor(kind), specName);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = subRuleConf.label;
+      if (err instanceof ApiError) {
+        errOut.appendChild(el("p", { className: "panel-error" },
+          translateErrorKind(err.kind) + ": " + err.message));
+      } else {
+        errOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      }
+    }
+  });
+
+  section.appendChild(formArea);
+  content.appendChild(section);
+}
+
+// injectParentName adds the parent spec's name to the sub-rule request body
+// using newtron's expected field name per pkg/newtron/types.go.
+function injectParentName(kind: SpecKind, specName: string, values: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...values };
+  switch (kind) {
+    case "qos-policies": out["policy"] = specName; break;
+    case "filters":      out["filter"] = specName; break;
+    case "prefix-lists": out["prefix_list"] = specName; break;
+    case "route-policies": out["policy"] = specName; break;
+  }
+  return out;
+}
+
+// kindTitleFor maps a SpecKind back to a human title.
+function kindTitleFor(kind: SpecKind): string {
+  const panel = PANELS.find((p) => p.kind === kind);
+  return panel?.title ?? kind;
+}
+
+// renderSubRuleDeleteSection renders existing rules/entries/queues with
+// per-item delete affordances. Called after the detail renders.
+function renderSubRuleDeleteSection(kind: SpecKind, specName: string, detail: unknown, content: HTMLElement): void {
+  let items: unknown[] = [];
+  let itemField = "";
+  let removeKey = "";
+
+  switch (kind) {
+    case "qos-policies": {
+      const d = detail as { queues?: unknown[] };
+      items = d.queues ?? [];
+      itemField = "queue_id";
+      removeKey = "queue";
+      break;
+    }
+    case "filters": {
+      const d = detail as { rules?: unknown[] };
+      items = d.rules ?? [];
+      itemField = "seq";
+      removeKey = "rule";
+      break;
+    }
+    case "prefix-lists": {
+      const d = detail as { prefixes?: unknown[] };
+      items = d.prefixes ?? [];
+      itemField = "";
+      removeKey = "prefix";
+      break;
+    }
+    case "route-policies": {
+      const d = detail as { rules?: unknown[] };
+      items = d.rules ?? [];
+      itemField = "seq";
+      removeKey = "rule";
+      break;
+    }
+    default:
+      return;
+  }
+
+  if (items.length === 0) return;
+
+  const section = el("section", { className: "subrule-delete-section" });
+  section.appendChild(el("h3", { className: "subrule-heading" }, "Existing " + removeKey + "s"));
+
+  const list = el("ul", { className: "subrule-list" });
+
+  for (const item of items) {
+    const row = el("li", { className: "subrule-row" });
+
+    // Identify the item: for array-of-strings (prefix-lists) the item is the
+    // string itself; for objects use the itemField or show seq/queue_id.
+    let label: string;
+    let key: string | number;
+
+    if (typeof item === "string") {
+      label = item;
+      key = item;
+    } else {
+      const obj = item as Record<string, unknown>;
+      if (itemField && obj[itemField] !== undefined) {
+        key = obj[itemField] as string | number;
+        label = `${removeKey} ${key}`;
+        if (obj["name"]) label += ` (${obj["name"]})`;
+        if (obj["action"]) label += ` — ${obj["action"]}`;
+      } else {
+        label = JSON.stringify(item);
+        key = label;
+      }
+    }
+
+    row.appendChild(el("span", { className: "subrule-label" }, label));
+
+    const delBtn = el("button", { type: "button", className: "subrule-delete-btn", title: "Remove " + label }, "×");
+    delBtn.addEventListener("click", async () => {
+      if (!window.confirm(`Remove ${label} from ${specName}?`)) return;
+      delBtn.disabled = true;
+      try {
+        switch (kind) {
+          case "qos-policies":
+            await removeQoSQueue(specName, Number(key));
+            break;
+          case "filters":
+            await removeFilterRule(specName, Number(key));
+            break;
+          case "prefix-lists":
+            await removePrefixListEntry(specName, String(key));
+            break;
+          case "route-policies":
+            await removeRoutePolicyRule(specName, Number(key));
+            break;
+        }
+        // Re-open the detail to refresh.
+        openDetail(kind, kindTitleFor(kind), specName);
+      } catch (err) {
+        delBtn.disabled = false;
+        const msg = err instanceof ApiError
+          ? translateErrorKind(err.kind) + ": " + err.message
+          : String(err);
+        alert("Remove failed: " + msg);
+      }
+    });
+
+    row.appendChild(delBtn);
+    list.appendChild(row);
+  }
+
+  section.appendChild(list);
+  content.appendChild(section);
+}
+
 async function openDetail(kind: SpecKind, kindTitle: string, name: string): Promise<void> {
   const drawer = document.getElementById("detail-drawer");
   const content = document.getElementById("drawer-content");
@@ -165,6 +693,13 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
       body.classList.add("drawer-detail");
     }
     content.appendChild(body);
+
+    // Render existing sub-rule items with delete affordances.
+    const subRuleConf = subRuleForms[kind];
+    if (subRuleConf) {
+      renderSubRuleDeleteSection(kind, name, detail, content);
+      renderSubRuleSection(kind, name, content, subRuleConf);
+    }
   } catch (err) {
     content.removeChild(loading);
     if (err instanceof ApiError && err.status === 404) {
