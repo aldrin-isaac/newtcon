@@ -1,42 +1,101 @@
-// app.ts — newtcon browser frontend entry module.
-//
-// This module is the <script type="module"> entry point referenced by
-// web/src/index.html. It runs in the browser after the HTML shell has
-// rendered and is responsible for initialising the active page.
-//
-// Page routing is deliberate, not file-based. Each top-level page module
-// lives under web/src/services/ (and peer directories as pages are added);
-// this entry module selects the page from window.location.pathname and calls
-// its mount() function. The router is ~10 lines of plain code — there is no
-// client-side routing framework.
-//
-// At F2 the router handles one page: services-listing at /services/. A second
-// entry point (services/index.html with its own inline <script>) serves the
-// services page directly; this module serves the root index.html redirect
-// strategy (see landing-page strategy in PR body).
-//
-// Import paths use .js extensions per the node16 moduleResolution rule
-// documented in web/README.md: tsc emits .js files; the browser loads
-// .js files; the import paths must match what the browser loads.
+// app.ts — newtcon workspace entry. Fetches every spec type in parallel and
+// renders a panel per kind.
 
-/**
- * bootstrap selects the active page from window.location.pathname and mounts
- * it. At F2 the only page is services-listing, served at /services/index.html.
- * The root / redirects there via the meta-refresh in index.html; no
- * client-side routing is needed for a single page.
- *
- * When a second page arrives (Provenance drill-down per F-next), this
- * function will grow a path-dispatch table — still ~10 lines, still no
- * framework. The ADR-0002 §Consequences note on routing applies at that point.
- */
-function bootstrap(): void {
-  // Root: redirect to the services page. The meta-refresh in index.html
-  // handles the initial load; this code path handles in-app navigation back
-  // to "/" if it ever arises (e.g., nav-link click).
-  if (window.location.pathname === "/" || window.location.pathname === "") {
-    window.location.replace("/services/");
-  }
-  // Additional page dispatch entries land here as pages are added.
+import { fetchSpecList, type SpecKind } from "./api/newtcon/network.js";
+import { ApiError } from "./api/newtcon/services.js";
+
+interface Panel {
+  kind: SpecKind;
+  title: string;
 }
 
-bootstrap();
+const PANELS: Panel[] = [
+  { kind: "services", title: "Services" },
+  { kind: "ipvpns", title: "IP VPNs" },
+  { kind: "macvpns", title: "MAC VPNs" },
+  { kind: "qos-policies", title: "QoS policies" },
+  { kind: "filters", title: "Filters" },
+  { kind: "route-policies", title: "Route policies" },
+  { kind: "prefix-lists", title: "Prefix lists" },
+  { kind: "profiles", title: "Device profiles" },
+  { kind: "zones", title: "Zones" },
+  { kind: "platforms", title: "Platforms" },
+];
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attrs: Partial<HTMLElementTagNameMap[K]> = {},
+  ...children: (Node | string)[]
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  for (const child of children) {
+    node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
+  const container = el("section", { className: "panel" });
+  const header = el("div", { className: "panel-header" });
+  header.appendChild(el("h2", { className: "panel-title" }, panel.title));
+
+  if (result.status === "fulfilled") {
+    const items = result.value;
+    header.appendChild(el("span", { className: "panel-count" }, String(items.length)));
+    container.appendChild(header);
+
+    if (items.length === 0) {
+      container.appendChild(el("p", { className: "panel-empty" }, "none defined"));
+    } else {
+      const list = el("ul", { className: "panel-list" });
+      for (const name of items) list.appendChild(el("li", {}, name));
+      container.appendChild(list);
+    }
+    return container;
+  }
+
+  // rejected
+  container.appendChild(header);
+  const err = result.reason;
+  if (err instanceof ApiError && err.kind === "newtron_unavailable") {
+    container.appendChild(el("p", { className: "panel-error" }, "newtron is unreachable"));
+    const detailObj = err.details as { underlying_error_message?: string } | undefined;
+    const detail = detailObj?.underlying_error_message ?? err.message;
+    container.appendChild(el("p", { className: "panel-error-detail" }, detail));
+  } else if (err instanceof ApiError) {
+    container.appendChild(el("p", { className: "panel-error" }, err.message));
+  } else {
+    container.appendChild(el("p", { className: "panel-error" }, "request failed"));
+    container.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
+  }
+  return container;
+}
+
+async function mount(): Promise<void> {
+  const root = document.getElementById("workspace-root");
+  if (!root) return;
+
+  // Surface the configured newtron URL in the footer.
+  fetch("/api/health", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const target = document.getElementById("newtron-target");
+      const url = data?.newtron_url ?? data?.dependencies?.newtron?.url;
+      if (target && typeof url === "string" && url.length > 0) {
+        target.textContent = url;
+      }
+    })
+    .catch(() => {
+      /* footer just shows "—" */
+    });
+
+  const results = await Promise.allSettled(PANELS.map((p) => fetchSpecList(p.kind)));
+
+  root.textContent = "";
+  PANELS.forEach((panel, i) => {
+    root.appendChild(renderPanel(panel, results[i]));
+  });
+}
+
+mount();

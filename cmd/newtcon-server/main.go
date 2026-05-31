@@ -59,6 +59,14 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Network-level spec lists: every spec type the operator can author in
+	// newtron. Read-only list endpoints; detail endpoints land in subsequent
+	// slices.
+	handlers.RegisterNetworkRoutes(mux, handlers.NetworkDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
 	// server.RegisterStaticAssets logs a warning and skips registration when

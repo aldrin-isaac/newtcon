@@ -1,0 +1,161 @@
+/* Workspace layout for the multi-panel spec view at /. Consumes the
+   design-system tokens; defines page-specific structure only. */
+
+body {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-family: var(--font-system);
+  font-size: var(--text-base);
+  line-height: var(--leading-prose);
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-header {
+  padding: var(--space-lg) var(--space-page) var(--space-md);
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
+}
+
+.page-header h1 {
+  font-size: var(--text-xl);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.page-subtitle {
+  margin: var(--space-xs) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  max-width: var(--measure-prose);
+}
+
+.workspace {
+  flex: 1;
+  padding: var(--space-lg) var(--space-page);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-md);
+  max-width: var(--measure-page);
+  margin: 0 auto;
+  width: 100%;
+  animation: fade-in var(--duration-base) var(--ease-standard);
+}
+
+.panel {
+  background: var(--color-surface-elevated);
+  border: 1px solid color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+  border-radius: 6px;
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
+}
+
+.panel-title {
+  font-size: var(--text-base);
+  font-weight: 500;
+  margin: 0;
+}
+
+.panel-count {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-list li {
+  padding: var(--space-xs) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-secondary) 6%, transparent);
+}
+
+.panel-list li:last-child {
+  border-bottom: none;
+}
+
+.panel-empty {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-style: italic;
+  margin: 0;
+  padding: var(--space-xs) 0;
+}
+
+.panel-error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: var(--space-xs) 0;
+}
+
+.panel-error-detail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  margin-top: var(--space-xs);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-loading {
+  grid-column: 1 / -1;
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: var(--space-xl) 0;
+}
+
+.site-footer {
+  padding: var(--space-md) var(--space-page);
+  border-top: 1px solid color-mix(in srgb, var(--color-text-secondary) 12%, transparent);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.site-footer a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
+.site-footer code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--color-text-primary);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace { animation: none; }
+}
