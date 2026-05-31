@@ -340,7 +340,7 @@ function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => vo
 
 // ---- Node inspector drawer --------------------------------------------------
 
-// NODE_TABS defines the sub-tabs in operator-domain words (no pipeline/substrate
+// NODE_TABS defines the sub-tabs in operator-domain words (no internal jargon
 // vocabulary, per vocabulary discipline in the slice spec).
 const NODE_TABS = [
   { id: "overview",  label: "Overview" },
