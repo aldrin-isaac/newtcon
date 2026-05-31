@@ -183,3 +183,121 @@ export async function postNodeReconcile(
   }
   return response.json();
 }
+
+// ============================================================================
+// Write helpers (topology editor + interface binding)
+// ============================================================================
+
+// nodeWrite is the shared POST/PUT/DELETE helper for write operations.
+// Returns parsed response on 2xx; throws ApiError on structured error envelopes.
+async function nodeWrite(
+  url: string,
+  method: "POST" | "PUT" | "DELETE",
+  body?: unknown
+): Promise<unknown> {
+  const init: RequestInit = { method, cache: "no-store" };
+  if (body !== undefined) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (cause) {
+    throw new Error(`network error: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      let envelope: { error?: { kind: string; message: string; details?: Record<string, unknown> } };
+      try { envelope = (await response.json()) as typeof envelope; } catch { throw new Error(`HTTP ${response.status}`); }
+      if (envelope.error) {
+        throw new ApiError(response.status, {
+          error: { kind: envelope.error.kind, message: envelope.error.message, details: envelope.error.details ?? {} },
+        });
+      }
+    }
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+// ---- Topology editor --------------------------------------------------------
+
+// postTopologyDevice adds a device to the topology.
+// body: { name: string, device: { steps?: ..., ports?: ... } }
+// Forwards to POST /api/topology/nodes.
+export async function postTopologyDevice(body: Record<string, unknown>): Promise<unknown> {
+  return nodeWrite("/api/topology/nodes", "POST", body);
+}
+
+// putTopologyDevice replaces a device entry (full replacement).
+// body: TopologyDevice — { steps?: ..., ports?: ... }
+// Forwards to PUT /api/topology/nodes/{name}.
+export async function putTopologyDevice(name: string, body: Record<string, unknown>): Promise<unknown> {
+  return nodeWrite(`/api/topology/nodes/${encodeURIComponent(name)}`, "PUT", body);
+}
+
+// deleteTopologyDevice removes a device from the topology.
+// force=true cascade-deletes referring links.
+// Forwards to DELETE /api/topology/nodes/{name}.
+export async function deleteTopologyDevice(name: string, force = false): Promise<unknown> {
+  const qs = force ? "?force=true" : "";
+  return nodeWrite(`/api/topology/nodes/${encodeURIComponent(name)}${qs}`, "DELETE");
+}
+
+// postTopologyLink adds a link between two interfaces.
+// body: { a: "device:interface", z: "device:interface" }
+// Forwards to POST /api/topology/links.
+export async function postTopologyLink(body: { a: string; z: string }): Promise<unknown> {
+  return nodeWrite("/api/topology/links", "POST", body);
+}
+
+// deleteTopologyLink removes the link that includes the given endpoint.
+// Forwards to DELETE /api/topology/links/{device}/{interface}.
+export async function deleteTopologyLink(device: string, ifaceName: string): Promise<unknown> {
+  const encodedIface = ifaceName.replace(/\//g, "%2F");
+  return nodeWrite(
+    `/api/topology/links/${encodeURIComponent(device)}/${encodedIface}`,
+    "DELETE"
+  );
+}
+
+// ---- Interface service binding ----------------------------------------------
+
+// postBindService binds a service to an interface.
+// body: { service: string, ip_address?: string, vlan?: number, peer_as?: number, params?: object }
+// service is required; all others optional.
+// Forwards to POST /api/nodes/{device}/interfaces/{name}/bind-service.
+export async function postBindService(
+  device: string,
+  ifaceName: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
+  const encodedIface = ifaceName.replace(/\//g, "%2F");
+  return nodeWrite(
+    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/bind-service`,
+    "POST",
+    body
+  );
+}
+
+// postUnbindService removes the service binding from an interface (no body).
+// Forwards to POST /api/nodes/{device}/interfaces/{name}/unbind-service.
+export async function postUnbindService(device: string, ifaceName: string): Promise<unknown> {
+  const encodedIface = ifaceName.replace(/\//g, "%2F");
+  return nodeWrite(
+    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/unbind-service`,
+    "POST"
+  );
+}
+
+// postRefreshService re-applies the bound service on an interface (no body).
+// Forwards to POST /api/nodes/{device}/interfaces/{name}/refresh-service.
+export async function postRefreshService(device: string, ifaceName: string): Promise<unknown> {
+  const encodedIface = ifaceName.replace(/\//g, "%2F");
+  return nodeWrite(
+    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/refresh-service`,
+    "POST"
+  );
+}

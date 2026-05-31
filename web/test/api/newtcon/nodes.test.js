@@ -12,6 +12,13 @@ import {
   fetchTopology,
   fetchNodeInfo,
   fetchNodeConfigDBEntry,
+  postTopologyDevice,
+  deleteTopologyDevice,
+  postTopologyLink,
+  deleteTopologyLink,
+  postBindService,
+  postUnbindService,
+  postRefreshService,
 } from "../../../dist/api/newtcon/nodes.js";
 
 import { ApiError } from "../../../dist/api/newtcon/services.js";
@@ -165,5 +172,132 @@ describe("fetchNodeConfigDBEntry()", () => {
       globalThis.fetch._lastUrl(),
       "/api/nodes/sw/configdb/MY%20TABLE/key%2Fwith%2Fslash"
     );
+  });
+});
+
+// ---- postTopologyDevice ------------------------------------------------------
+
+describe("postTopologyDevice()", () => {
+  test("POSTs to /api/topology/nodes with JSON body", async () => {
+    stubFetch(mockResponse(201, JSON.stringify({ steps: [], ports: {} })));
+    const body = { name: "spine1", device: { steps: [], ports: {} } };
+    await postTopologyDevice(body);
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes");
+    assert.equal(globalThis.fetch._lastInit()?.method, "POST");
+    assert.equal(globalThis.fetch._lastInit()?.headers?.["Content-Type"], "application/json");
+  });
+
+  test("throws ApiError on 400 validation_failure", async () => {
+    const envelope = {
+      error: { kind: "validation_failure", message: "name required", details: {} },
+    };
+    stubFetch(mockResponse(400, JSON.stringify(envelope)));
+    await assert.rejects(
+      () => postTopologyDevice({}),
+      (err) => {
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.kind, "validation_failure");
+        return true;
+      }
+    );
+  });
+});
+
+// ---- deleteTopologyDevice ----------------------------------------------------
+
+describe("deleteTopologyDevice()", () => {
+  test("DELETEs /api/topology/nodes/{name}", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1" })));
+    await deleteTopologyDevice("spine1");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes/spine1");
+    assert.equal(globalThis.fetch._lastInit()?.method, "DELETE");
+  });
+
+  test("appends ?force=true when force=true", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1" })));
+    await deleteTopologyDevice("spine1", true);
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes/spine1?force=true");
+  });
+});
+
+// ---- postTopologyLink --------------------------------------------------------
+
+describe("postTopologyLink()", () => {
+  test("POSTs to /api/topology/links with {a,z} body", async () => {
+    stubFetch(mockResponse(201, JSON.stringify({ a: "spine1:Ethernet0", z: "leaf1:Ethernet0" })));
+    await postTopologyLink({ a: "spine1:Ethernet0", z: "leaf1:Ethernet0" });
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links");
+    assert.equal(globalThis.fetch._lastInit()?.method, "POST");
+    const sent = JSON.parse(globalThis.fetch._lastInit()?.body);
+    assert.equal(sent.a, "spine1:Ethernet0");
+    assert.equal(sent.z, "leaf1:Ethernet0");
+  });
+});
+
+// ---- deleteTopologyLink ------------------------------------------------------
+
+describe("deleteTopologyLink()", () => {
+  test("DELETEs /api/topology/links/{device}/{interface}", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1:Ethernet0" })));
+    await deleteTopologyLink("spine1", "Ethernet0");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links/spine1/Ethernet0");
+    assert.equal(globalThis.fetch._lastInit()?.method, "DELETE");
+  });
+
+  test("encodes slash in interface name as %2F", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ deleted: "sw:Eth0/1" })));
+    await deleteTopologyLink("sw", "Eth0/1");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links/sw/Eth0%2F1");
+  });
+});
+
+// ---- postBindService ---------------------------------------------------------
+
+describe("postBindService()", () => {
+  test("POSTs to the bind-service URL with body", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ status: "ok" })));
+    await postBindService("switch1", "Ethernet0", { service: "transit", vlan: 100 });
+    assert.equal(
+      globalThis.fetch._lastUrl(),
+      "/api/nodes/switch1/interfaces/Ethernet0/bind-service"
+    );
+    assert.equal(globalThis.fetch._lastInit()?.method, "POST");
+  });
+
+  test("encodes slash in interface name as %2F", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ status: "ok" })));
+    await postBindService("sw", "Eth0/1", { service: "transit" });
+    assert.equal(
+      globalThis.fetch._lastUrl(),
+      "/api/nodes/sw/interfaces/Eth0%2F1/bind-service"
+    );
+  });
+});
+
+// ---- postUnbindService -------------------------------------------------------
+
+describe("postUnbindService()", () => {
+  test("POSTs to the unbind-service URL (no body)", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ status: "ok" })));
+    await postUnbindService("switch1", "Ethernet0");
+    assert.equal(
+      globalThis.fetch._lastUrl(),
+      "/api/nodes/switch1/interfaces/Ethernet0/unbind-service"
+    );
+    assert.equal(globalThis.fetch._lastInit()?.method, "POST");
+  });
+});
+
+// ---- postRefreshService ------------------------------------------------------
+
+describe("postRefreshService()", () => {
+  test("POSTs to the refresh-service URL (no body)", async () => {
+    stubFetch(mockResponse(200, JSON.stringify({ status: "ok" })));
+    await postRefreshService("switch1", "Ethernet0");
+    assert.equal(
+      globalThis.fetch._lastUrl(),
+      "/api/nodes/switch1/interfaces/Ethernet0/refresh-service"
+    );
+    assert.equal(globalThis.fetch._lastInit()?.method, "POST");
   });
 });

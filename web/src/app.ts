@@ -35,6 +35,13 @@ import {
   fetchNodeProjection,
   fetchNodeIntentTree,
   postNodeReconcile,
+  postTopologyDevice,
+  deleteTopologyDevice,
+  postTopologyLink,
+  deleteTopologyLink,
+  postBindService,
+  postUnbindService,
+  postRefreshService,
 } from "./api/newtcon/nodes.js";
 
 // ---- DOM helper -------------------------------------------------------------
@@ -777,7 +784,12 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => void, driftByDevice?: Map<string, number>): SVGSVGElement {
+function renderTopologySVG(
+  data: TopologyData,
+  onNodeClick: (name: string) => void,
+  driftByDevice?: Map<string, number>,
+  onNodeDelete?: (name: string) => void
+): SVGSVGElement {
   const nodes: TopoNode[] = Array.isArray(data.nodes) ? data.nodes : [];
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
 
@@ -879,6 +891,39 @@ function renderTopologySVG(data: TopologyData, onNodeClick: (name: string) => vo
       g.appendChild(badge);
     }
 
+    // Delete button: × shown on node hover (top-left corner).
+    if (onNodeDelete) {
+      const delBtn = svgEl("g", { "class": "topo-node-delete", "aria-label": `Remove ${node.name}` });
+      const bx = pos.cx - NODE_W / 2;
+      const by = pos.cy - NODE_H / 2;
+      delBtn.appendChild(svgEl("rect", {
+        x: String(bx),
+        y: String(by),
+        width: "16",
+        height: "16",
+        rx: "3",
+        "class": "topo-node-delete-bg",
+      }));
+      const delText = svgEl("text", {
+        x: String(bx + 8),
+        y: String(by + 8),
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+        "class": "topo-node-delete-x",
+      });
+      delText.textContent = "×";
+      delBtn.appendChild(delText);
+      const delTitle = svgEl("title");
+      delTitle.textContent = `Remove ${node.name}`;
+      delBtn.appendChild(delTitle);
+      const capturedName = node.name;
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onNodeDelete(capturedName);
+      });
+      g.appendChild(delBtn);
+    }
+
     svg.appendChild(g);
   }
 
@@ -954,7 +999,79 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
   container.appendChild(body);
 }
 
-// renderInterfaceTab renders the interfaces sub-tab with click-to-expand detail.
+// openBindServiceDrawer opens a form drawer for binding a service to an interface.
+// serviceNames is pre-fetched to populate the service dropdown.
+function openBindServiceDrawer(
+  device: string,
+  ifaceName: string,
+  serviceNames: string[],
+  onSuccess: () => void
+): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+
+  content.appendChild(el("p", { className: "drawer-kind" }, "Interface"));
+  content.appendChild(el("h2", { className: "drawer-name" }, `Bind service — ${ifaceName}`));
+
+  const serviceField: FieldDef = serviceNames.length > 0
+    ? { name: "service", label: "Service", type: "select", required: true, options: serviceNames, placeholder: "service name" }
+    : { name: "service", label: "Service", type: "text", required: true, placeholder: "service name" };
+  const fields: FieldDef[] = [
+    serviceField,
+    { name: "vlan", label: "VLAN", type: "number", placeholder: "e.g. 100 (optional)" },
+    { name: "ip_address", label: "IP address", type: "text", placeholder: "e.g. 10.0.0.1/24 (optional)" },
+    { name: "peer_as", label: "Peer AS", type: "number", placeholder: "e.g. 65001 (optional)" },
+  ];
+
+  const { form, getValues } = buildFormFields(fields);
+  content.appendChild(form);
+
+  const errorOut = el("div", { className: "form-error-out" });
+  content.appendChild(errorOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Bind service");
+  content.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", async () => {
+    errorOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Binding…";
+    try {
+      const values = getValues();
+      if (!values["service"]) {
+        errorOut.appendChild(el("p", { className: "panel-error" }, "Service name is required."));
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Bind service";
+        return;
+      }
+      await postBindService(device, ifaceName, values);
+      submitBtn.textContent = "Bound";
+      content.insertBefore(el("p", { className: "form-success" }, "Service bound."), submitBtn);
+      onSuccess();
+      setTimeout(() => {
+        drawer.setAttribute("aria-hidden", "true");
+        drawer.classList.remove("open");
+      }, 800);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Bind service";
+      if (err instanceof ApiError) {
+        errorOut.appendChild(el("p", { className: "panel-error" },
+          translateErrorKind(err.kind) + ": " + err.message));
+      } else {
+        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      }
+    }
+  });
+}
+
+// renderInterfaceTab renders the interfaces sub-tab with click-to-expand detail
+// and service binding/unbind/refresh actions.
 function renderInterfaceTab(container: HTMLElement, device: string, data: unknown): void {
   container.textContent = "";
 
@@ -990,25 +1107,127 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
 
     let loaded = false;
 
+    // refreshIfaceDetail re-fetches and re-renders the detail panel.
+    const refreshIfaceDetail = (): void => {
+      loaded = false;
+      if (!detailContainer.hidden) {
+        renderLoadingInto(detailContainer);
+        loadIfaceDetail();
+      }
+    };
+
+    const loadIfaceDetail = (): void => {
+      if (loaded) return;
+      loaded = true;
+      renderLoadingInto(detailContainer);
+      Promise.all([
+        fetchNodeInterface(device, name),
+        fetchNodeInterfaceBinding(device, name),
+      ])
+        .then(([detail, binding]) => {
+          detailContainer.textContent = "";
+          detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Interface detail"));
+          detailContainer.appendChild(renderValue(detail));
+          detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Service binding"));
+          detailContainer.appendChild(renderValue(binding));
+
+          // Service binding actions.
+          const actionsRow = el("div", { className: "iface-actions" });
+          const bindingData = binding as Record<string, unknown> | null;
+          const hasBoundService = bindingData !== null &&
+            typeof bindingData === "object" &&
+            (bindingData["service"] != null);
+
+          if (!hasBoundService) {
+            // No service bound — show "Bind service" button.
+            const bindBtn = el("button", { type: "button", className: "iface-action-btn" }, "Bind service");
+            bindBtn.addEventListener("click", () => {
+              // Fetch service names for the dropdown, then open the drawer.
+              fetch("/api/services", { cache: "no-store" })
+                .then((r) => (r.ok ? r.json() : { services: [] }))
+                .then((d: unknown) => {
+                  const body = d as { services?: { name: string }[] };
+                  const names = Array.isArray(body.services)
+                    ? body.services.map((s) => s.name)
+                    : [];
+                  openBindServiceDrawer(device, name, names, refreshIfaceDetail);
+                })
+                .catch(() => openBindServiceDrawer(device, name, [], refreshIfaceDetail));
+            });
+            actionsRow.appendChild(bindBtn);
+          } else {
+            // Service is bound — show Refresh and Unbind.
+            const refreshBtn = el("button", { type: "button", className: "iface-action-btn" }, "Refresh");
+            refreshBtn.addEventListener("click", async () => {
+              refreshBtn.disabled = true;
+              refreshBtn.textContent = "Refreshing…";
+              try {
+                await postRefreshService(device, name);
+                refreshIfaceDetail();
+              } catch (err) {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = "Refresh";
+                const msg = err instanceof ApiError
+                  ? translateErrorKind(err.kind) + ": " + err.message
+                  : String(err);
+                alert("Refresh failed: " + msg);
+              }
+            });
+            actionsRow.appendChild(refreshBtn);
+
+            const unbindBtn = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Unbind service");
+            unbindBtn.addEventListener("click", async () => {
+              if (!window.confirm(`Unbind service from interface ${name}? This cannot be undone.`)) return;
+              unbindBtn.disabled = true;
+              unbindBtn.textContent = "Unbinding…";
+              try {
+                await postUnbindService(device, name);
+                refreshIfaceDetail();
+              } catch (err) {
+                unbindBtn.disabled = false;
+                unbindBtn.textContent = "Unbind service";
+                const msg = err instanceof ApiError
+                  ? translateErrorKind(err.kind) + ": " + err.message
+                  : String(err);
+                alert("Unbind failed: " + msg);
+              }
+            });
+            actionsRow.appendChild(unbindBtn);
+          }
+
+          // Link removal: offered when the interface may be a link endpoint.
+          // Newtron's DeleteTopologyLink resolves the link from a single endpoint;
+          // if the interface is not a link endpoint it returns 404, which is surfaced.
+          const removeLinkBtn = el("button", { type: "button", className: "iface-action-btn" }, "Remove link");
+          removeLinkBtn.title = "Remove the topology link that uses this interface as an endpoint";
+          removeLinkBtn.addEventListener("click", () => {
+            if (!window.confirm(`Remove the link on interface ${name}?`)) return;
+            removeLinkBtn.disabled = true;
+            removeLinkBtn.textContent = "Removing…";
+            deleteTopologyLink(device, name)
+              .then(() => {
+                removeLinkBtn.replaceWith(el("span", { className: "form-success" }, "Link removed."));
+              })
+              .catch((err) => {
+                removeLinkBtn.disabled = false;
+                removeLinkBtn.textContent = "Remove link";
+                const msg = err instanceof ApiError
+                  ? translateErrorKind(err.kind) + ": " + err.message
+                  : String(err);
+                alert("Remove link failed: " + msg);
+              });
+          });
+          actionsRow.appendChild(removeLinkBtn);
+
+          detailContainer.appendChild(actionsRow);
+        })
+        .catch((err) => renderErrorInto(detailContainer, err));
+    };
+
     const toggle = (): void => {
       if (detailContainer.hidden) {
         detailContainer.hidden = false;
-        if (!loaded) {
-          loaded = true;
-          renderLoadingInto(detailContainer);
-          Promise.all([
-            fetchNodeInterface(device, name),
-            fetchNodeInterfaceBinding(device, name),
-          ])
-            .then(([detail, binding]) => {
-              detailContainer.textContent = "";
-              detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Interface detail"));
-              detailContainer.appendChild(renderValue(detail));
-              detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Service binding"));
-              detailContainer.appendChild(renderValue(binding));
-            })
-            .catch((err) => renderErrorInto(detailContainer, err));
-        }
+        loadIfaceDetail();
       } else {
         detailContainer.hidden = true;
       }
@@ -1428,6 +1647,161 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
   }
 }
 
+// ---- Topology write forms ---------------------------------------------------
+
+// openAddDeviceDrawer opens the detail drawer with a form to add a device.
+// onSuccess is called after the device is added to refresh the topology.
+function openAddDeviceDrawer(onSuccess: () => void): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+
+  content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
+  content.appendChild(el("h2", { className: "drawer-name" }, "Add device"));
+
+  const fields: FieldDef[] = [
+    { name: "name", label: "Device name", type: "text", required: true, placeholder: "e.g. spine1" },
+  ];
+  const { form, getValues } = buildFormFields(fields);
+  content.appendChild(form);
+
+  const errorOut = el("div", { className: "form-error-out" });
+  content.appendChild(errorOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add device");
+  content.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", async () => {
+    errorOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Adding…";
+    try {
+      const values = getValues();
+      const name = values["name"] as string;
+      if (!name) {
+        errorOut.appendChild(el("p", { className: "panel-error" }, "Device name is required."));
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Add device";
+        return;
+      }
+      // Minimal device body — steps and ports may be added later via update.
+      await postTopologyDevice({ name, device: { steps: [], ports: {} } });
+      submitBtn.textContent = "Added";
+      content.insertBefore(el("p", { className: "form-success" }, "Device added."), submitBtn);
+      onSuccess();
+      setTimeout(() => {
+        drawer.setAttribute("aria-hidden", "true");
+        drawer.classList.remove("open");
+      }, 800);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Add device";
+      if (err instanceof ApiError) {
+        errorOut.appendChild(el("p", { className: "panel-error" },
+          translateErrorKind(err.kind) + ": " + err.message));
+      } else {
+        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      }
+    }
+  });
+}
+
+// openAddLinkDrawer opens the detail drawer with a form to add a link.
+// deviceNames populates the endpoint dropdowns.
+function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string, string[]>, onSuccess: () => void): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+
+  content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
+  content.appendChild(el("h2", { className: "drawer-name" }, "Add link"));
+
+  // Helper to build a "device:interface" endpoint picker row.
+  const buildEndpointPicker = (label: string, idPrefix: string): HTMLDivElement => {
+    const group = el("div", { className: "form-group" });
+    group.appendChild(el("label", { className: "form-label" }, label));
+
+    const devSelect = el("select", { className: "form-control", id: idPrefix + "-device" }) as HTMLSelectElement;
+    devSelect.appendChild(el("option", { value: "" }, "— select device —") as HTMLOptionElement);
+    for (const d of deviceNames) {
+      devSelect.appendChild(el("option", { value: d }, d) as HTMLOptionElement);
+    }
+    group.appendChild(devSelect);
+
+    const ifaceInput = el("input", {
+      className: "form-control",
+      id: idPrefix + "-iface",
+      type: "text",
+      placeholder: "interface name, e.g. Ethernet0",
+    }) as HTMLInputElement;
+
+    // Populate with known interfaces when device is selected.
+    devSelect.addEventListener("change", () => {
+      const ifaces = interfacesByDevice.get(devSelect.value) ?? [];
+      if (ifaces.length > 0 && ifaceInput.value === "") {
+        ifaceInput.placeholder = ifaces.join(", ");
+      }
+    });
+
+    group.appendChild(ifaceInput);
+    return group;
+  };
+
+  const aGroup = buildEndpointPicker("Endpoint A (device + interface)", "link-a");
+  const zGroup = buildEndpointPicker("Endpoint Z (device + interface)", "link-z");
+  content.appendChild(aGroup);
+  content.appendChild(zGroup);
+
+  const errorOut = el("div", { className: "form-error-out" });
+  content.appendChild(errorOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add link");
+  content.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", async () => {
+    errorOut.textContent = "";
+    const aDevice = (content.querySelector("#link-a-device") as HTMLSelectElement)?.value ?? "";
+    const aIface = (content.querySelector("#link-a-iface") as HTMLInputElement)?.value.trim() ?? "";
+    const zDevice = (content.querySelector("#link-z-device") as HTMLSelectElement)?.value ?? "";
+    const zIface = (content.querySelector("#link-z-iface") as HTMLInputElement)?.value.trim() ?? "";
+
+    if (!aDevice || !aIface || !zDevice || !zIface) {
+      errorOut.appendChild(el("p", { className: "panel-error" }, "Both endpoints (device and interface) are required."));
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Adding…";
+    try {
+      await postTopologyLink({ a: `${aDevice}:${aIface}`, z: `${zDevice}:${zIface}` });
+      submitBtn.textContent = "Added";
+      content.insertBefore(el("p", { className: "form-success" }, "Link added."), submitBtn);
+      onSuccess();
+      setTimeout(() => {
+        drawer.setAttribute("aria-hidden", "true");
+        drawer.classList.remove("open");
+      }, 800);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Add link";
+      if (err instanceof ApiError) {
+        errorOut.appendChild(el("p", { className: "panel-error" },
+          translateErrorKind(err.kind) + ": " + err.message));
+      } else {
+        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      }
+    }
+  });
+}
+
 // ---- Topology tab -----------------------------------------------------------
 
 async function mountTopologyTab(root: HTMLElement): Promise<void> {
@@ -1453,9 +1827,41 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       }
     });
 
-    const svg = renderTopologySVG(topoData, (deviceName) => {
-      openNodeDrawer(deviceName);
-    }, driftByDevice);
+    // Build toolbar with Add device and Add link buttons.
+    const toolbar = el("div", { className: "topology-toolbar" });
+
+    const addDeviceBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add device");
+    addDeviceBtn.addEventListener("click", () => {
+      openAddDeviceDrawer(() => mountTopologyTab(root));
+    });
+    toolbar.appendChild(addDeviceBtn);
+
+    const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
+    addLinkBtn.addEventListener("click", () => {
+      // Pass known device names; interface names pre-populated as empty (lazy).
+      openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
+    });
+    toolbar.appendChild(addLinkBtn);
+
+    root.appendChild(toolbar);
+
+    const svg = renderTopologySVG(
+      topoData,
+      (deviceName) => { openNodeDrawer(deviceName); },
+      driftByDevice,
+      (deviceName) => {
+        // Delete device callback from the SVG × button.
+        if (!window.confirm(`Remove device "${deviceName}" from the topology? This cannot be undone.`)) return;
+        deleteTopologyDevice(deviceName)
+          .then(() => mountTopologyTab(root))
+          .catch((err) => {
+            const msg = err instanceof ApiError
+              ? translateErrorKind(err.kind) + ": " + err.message
+              : String(err);
+            alert("Remove device failed: " + msg);
+          });
+      }
+    );
     root.appendChild(svg);
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
