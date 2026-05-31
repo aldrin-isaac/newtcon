@@ -79,7 +79,7 @@ func (c *Client) Network(ctx context.Context) string {
 //   - 404 (network not registered) → *NotFoundError
 //   - Other 4xx → *UnavailableError (unexpected from this endpoint)
 func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronService, error) {
-	url := fmt.Sprintf("%s/network/%s/service", c.baseURL, network)
+	url := fmt.Sprintf("%s/newtron/v1/network/%s/service", c.baseURL, network)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -144,7 +144,7 @@ func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronSer
 //   - 404 (service not found) → *NotFoundError
 //   - Other 4xx → *UnavailableError (unexpected from this endpoint in v1)
 func (c *Client) ShowService(ctx context.Context, network, name string) (*NewtronServiceDetail, error) {
-	url := fmt.Sprintf("%s/network/%s/service/%s", c.baseURL, network, name)
+	url := fmt.Sprintf("%s/newtron/v1/network/%s/service/%s", c.baseURL, network, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}

@@ -15,7 +15,7 @@ import (
 // GET /network/{netID}/topology envelope and returns the raw data field.
 func TestClient_Topology_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/network/default/topology" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network/default/topology" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -59,7 +59,7 @@ func TestClient_Topology_Unavailable(t *testing.T) {
 // and returns the decoded data field.
 func TestClient_NodeInfo_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/node/switch1/info" {
+		if r.URL.Path != "/newtron/v1/network/default/node/switch1/info" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -99,7 +99,7 @@ func TestClient_NodeInfo_NotFound(t *testing.T) {
 // the correct 3-segment URL.
 func TestClient_NodeConfigDBEntry_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/node/switch1/configdb/PORT/Ethernet0" {
+		if r.URL.Path != "/newtron/v1/network/default/node/switch1/configdb/PORT/Ethernet0" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")

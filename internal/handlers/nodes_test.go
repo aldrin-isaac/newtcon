@@ -16,7 +16,7 @@ import (
 // returns the raw data payload.
 func TestTopology_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/topology" {
+		if r.URL.Path != "/newtron/v1/network/default/topology" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -83,7 +83,7 @@ func TestTopology_Unavailable(t *testing.T) {
 // correct upstream path.
 func TestNodeInfo_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/node/switch1/info" {
+		if r.URL.Path != "/newtron/v1/network/default/node/switch1/info" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -140,7 +140,7 @@ func TestNodeInfo_NotFound(t *testing.T) {
 // endpoint correctly passes all path values to the client.
 func TestNodeConfigDBEntry_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/node/switch1/configdb/PORT/Ethernet0" {
+		if r.URL.Path != "/newtron/v1/network/default/node/switch1/configdb/PORT/Ethernet0" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -166,7 +166,7 @@ func TestNodeConfigDBEntry_Success(t *testing.T) {
 // proxies the correct upstream path.
 func TestNodeInterfaces_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/network/default/node/switch1/interface" {
+		if r.URL.Path != "/newtron/v1/network/default/node/switch1/interface" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
