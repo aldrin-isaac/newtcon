@@ -178,3 +178,19 @@ func (c *Client) NodeConfigDBTable(ctx context.Context, network, device, table s
 func (c *Client) NodeConfigDBEntry(ctx context.Context, network, device, table, key string) (json.RawMessage, error) {
 	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/configdb/%s/%s", network, device, table, key))
 }
+
+// NodeDrift calls GET /network/{netID}/node/{device}/intent/drift.
+// Returns the per-device drift report comparing intent vs CONFIG_DB reality.
+func (c *Client) NodeDrift(ctx context.Context, network, device string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/drift", network, device))
+}
+
+// NodeProjection calls GET /network/{netID}/node/{device}/intent/projection.
+func (c *Client) NodeProjection(ctx context.Context, network, device string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/projection", network, device))
+}
+
+// NodeIntentTree calls GET /network/{netID}/node/{device}/intent/tree.
+func (c *Client) NodeIntentTree(ctx context.Context, network, device string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/tree", network, device))
+}

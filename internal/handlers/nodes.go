@@ -208,6 +208,31 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 			return c.NodeConfigDBEntry(ctx, c.Network(ctx), device, table, key)
 		}, "/api/nodes/"+device+"/configdb/"+table+"/"+key)
 	}))
+
+	// Drift: comparison of intent vs CONFIG_DB reality. Newtron returns the
+	// per-table differences; rendering surfaces these to the operator.
+	mux.Handle("GET /api/nodes/{device}/drift", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeDrift(ctx, c.Network(ctx), device)
+		}, "/api/nodes/"+device+"/drift")
+	}))
+
+	// Intent projection: current logical state derived from intents.
+	mux.Handle("GET /api/nodes/{device}/projection", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeProjection(ctx, c.Network(ctx), device)
+		}, "/api/nodes/"+device+"/projection")
+	}))
+
+	// Intent tree: the structured intent record graph.
+	mux.Handle("GET /api/nodes/{device}/intent-tree", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeIntentTree(ctx, c.Network(ctx), device)
+		}, "/api/nodes/"+device+"/intent-tree")
+	}))
 }
 
 // normalizeIfaceName converts %2F sequences to "/" in interface names from
