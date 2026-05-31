@@ -3,37 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Immediate redirect to the services-listing page. -->
-    <!-- meta-refresh is the static-file-safe redirect; no JS required. -->
-    <meta http-equiv="refresh" content="0; url=/services/" />
     <title>newtcon</title>
-    <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body {
-        height: 100%;
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
-        background: #f9f9f8;
-        color: #1a1a1a;
-      }
-      main {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        gap: 0.5rem;
-        text-align: center;
-      }
-      p { font-size: 0.875rem; color: #6b7280; }
-      a { color: #4a90d9; }
-    </style>
+    <link rel="stylesheet" href="design-system/color.css" />
+    <link rel="stylesheet" href="design-system/typography.css" />
+    <link rel="stylesheet" href="design-system/spacing.css" />
+    <link rel="stylesheet" href="design-system/motion.css" />
+    <link rel="stylesheet" href="workspace.css" />
   </head>
   <body>
-    <main>
-      <p>Redirecting to <a href="/services/">services</a>&hellip;</p>
+    <header class="page-header">
+      <h1>newtcon</h1>
+      <p class="page-subtitle">
+        What this network knows — services, policies, filters, profiles, and zones defined in newtron.
+      </p>
+    </header>
+    <main id="workspace-root" class="workspace">
+      <p class="status-loading">Loading…</p>
     </main>
+    <footer class="site-footer">
+      <small>
+        Connected to newtron on <code id="newtron-target">—</code> &middot;
+        <a href="/api/health">health</a> &middot;
+        <a href="/CLAUDE.md">CLAUDE.md</a>
+      </small>
+    </footer>
     <script type="module" src="app.js"></script>
   </body>
 </html>
