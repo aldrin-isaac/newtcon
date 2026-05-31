@@ -233,6 +233,17 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 			return c.NodeIntentTree(ctx, c.Network(ctx), device)
 		}, "/api/nodes/"+device+"/intent-tree")
 	}))
+
+	// Reconcile: dry_run=true returns the drift preview; dry_run=false executes
+	// the corrective intent push. mode=topology drives full reconcile.
+	mux.Handle("POST /api/nodes/{device}/reconcile", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		dryRun := r.URL.Query().Get("dry_run") == "true"
+		mode := r.URL.Query().Get("mode")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeReconcile(ctx, c.Network(ctx), device, dryRun, mode)
+		}, "/api/nodes/"+device+"/reconcile")
+	}))
 }
 
 // normalizeIfaceName converts %2F sequences to "/" in interface names from

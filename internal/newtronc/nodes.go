@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // nodeGet is the shared helper for every node-level GET endpoint that proxies
@@ -193,4 +194,58 @@ func (c *Client) NodeProjection(ctx context.Context, network, device string) (js
 // NodeIntentTree calls GET /network/{netID}/node/{device}/intent/tree.
 func (c *Client) NodeIntentTree(ctx context.Context, network, device string) (json.RawMessage, error) {
 	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/tree", network, device))
+}
+
+// NodeReconcile calls POST /network/{netID}/node/{device}/intent/reconcile.
+// dryRun=true returns the drift as a preview; dryRun=false executes.
+// mode is one of "topology" or "" (defaults to delta).
+func (c *Client) NodeReconcile(ctx context.Context, network, device string, dryRun bool, mode string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/network/%s/node/%s/intent/reconcile", network, device)
+	q := []string{}
+	if dryRun {
+		q = append(q, "dry_run=true")
+	}
+	if mode != "" {
+		q = append(q, "mode="+mode)
+	}
+	if len(q) > 0 {
+		path += "?" + strings.Join(q, "&")
+	}
+	return c.nodePost(ctx, path)
+}
+
+// nodePost is a POST analog of nodeGet (no body).
+func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, error) {
+	url := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	default:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	}
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &UnavailableError{Cause: apiResp.Error}
+	}
+	return apiResp.Data, nil
 }

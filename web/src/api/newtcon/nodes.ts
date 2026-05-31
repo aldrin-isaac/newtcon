@@ -156,3 +156,30 @@ export async function fetchNodeProjection(device: string): Promise<unknown> {
 export async function fetchNodeIntentTree(device: string): Promise<unknown> {
   return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/intent-tree`);
 }
+
+// POST /api/nodes/{device}/reconcile?dry_run=...&mode=...
+export async function postNodeReconcile(
+  device: string,
+  opts: { dryRun: boolean; mode?: string } = { dryRun: true }
+): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (opts.dryRun) params.set("dry_run", "true");
+  if (opts.mode) params.set("mode", opts.mode);
+  const qs = params.toString();
+  const url = `/api/nodes/${encodeURIComponent(device)}/reconcile${qs ? "?" + qs : ""}`;
+  const response = await fetch(url, { method: "POST", cache: "no-store" });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok) {
+    if (contentType.includes("application/json")) {
+      const body = await response.json() as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
+      if (body.error) {
+        const { ApiError } = await import("./services.js");
+        throw new ApiError(response.status, {
+          error: { kind: body.error.kind, message: body.error.message, details: body.error.details ?? {} },
+        });
+      }
+    }
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
