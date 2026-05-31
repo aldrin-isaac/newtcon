@@ -23,7 +23,7 @@
  *                            Intentionally muted — the operator should
  *                            read the error, not flinch from it. Per
  *                            operator-philosophy invariant #7: errors
- *                            carry the substrate, they don't alarm.
+ *                            carry the error cause, they don't alarm.
  *
  * Extending this palette requires an Architecture-class PR (AGENTS.md
  * §Architect). Adding a seventh color for convenience is rejected on
@@ -33,7 +33,7 @@
 :root {
   /* Base page surface: very slightly warm off-white. Not pure #fff, which reads
    * as a blank document. Not gray, which reads as disabled. This is the calm
-   * background the substrate content rests on. */
+   * background the page content rests on. */
   --color-surface:          #f7f6f4;
 
   /* Elevated surface: pure white for header, footer, cards. The contrast with
@@ -54,7 +54,7 @@
   /* Accent: a single desaturated steel-blue for links, active nav indicators,
    * type badges, and inline code backgrounds. Desaturated so it reads as
    * "meaningful distinction" rather than "call to action" — the operator's
-   * attention is on the substrate, not on the interactive chrome. */
+   * attention is on the data, not on the interactive chrome. */
   --color-accent:           #3f6f93;
 
   /* Danger: a muted sienna-red for error containers only. Intentionally

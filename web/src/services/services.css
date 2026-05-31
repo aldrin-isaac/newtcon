@@ -214,8 +214,8 @@ tbody td {
  * Error state: restrained. The operator needs to read the error, not
  * react to a visual alarm. A quiet amber-left-border and a near-white
  * background tint signal "attention here" without shouting.
- * Per invariant #7: errors carry the substrate — the visual should not
- * compete with the substrate content.
+ * Per invariant #7: errors carry the cause data — the visual should not
+ * compete with the content.
  */
 
 .state-error {

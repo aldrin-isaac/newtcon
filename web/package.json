@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json && node scripts/copy-static.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/**/*.test.js",
+    "test": "node --test test/services/services.test.js test/api/newtcon/services.test.js test/api/newtcon/nodes.test.js",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {

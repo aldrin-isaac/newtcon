@@ -13,9 +13,9 @@
  *   --font-sans   domain vocabulary, navigation, prose. The operator's OS
  *                 typeface — familiar, legible, not imposing.
  *   --font-mono   identifiers, type badges, error codes, inline code. Signals
- *                 "this is a substrate value you can copy and use directly."
- *                 Per invariant #7: errors carry the substrate — mono renders
- *                 substrate values the operator might paste into a terminal.
+ *                 "this is a value you can copy and use directly."
+ *                 Per invariant #7: errors carry the cause data — mono renders
+ *                 values the operator might paste into a terminal.
  *   --font-ui     (currently same as --font-sans; split reserved for a future
  *                 ADR that may choose a display typeface for the wordmark or
  *                 headings. Kept separate so the split costs one variable
