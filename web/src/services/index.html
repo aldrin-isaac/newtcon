@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Services — newtcon</title>
-    <link rel="stylesheet" href="/surfaces/services/services.css" />
+    <link rel="stylesheet" href="/services/services.css" />
   </head>
   <body>
     <header class="site-header">
@@ -18,9 +18,7 @@
       <div class="page-heading">
         <h1>Services</h1>
         <p class="page-subtitle">
-          Service specs registered in newtron — the
-          <a href="/docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document">substrate</a>
-          the operator composes against.
+          Services configured in newtron — what this network can be composed against.
         </p>
       </div>
 
@@ -31,16 +29,12 @@
     </main>
 
     <footer class="site-footer">
-      <a href="/docs/operator-philosophy.md#vocabulary-what-the-substrate-means-in-this-document" class="why-link">What is a service spec?</a>
-      &ensp;&middot;&ensp;
-      <a href="/CLAUDE.md#service-first-not-device-first">Why service-first navigation?</a>
-      &ensp;&middot;&ensp;
-      <a href="/API_CONTRACT.md#endpoints--service-composer-first-surface">What this page reads from</a>
+      <span class="footer-note">Services are listed first because operators reason about networks in terms of services, not individual devices.</span>
     </footer>
 
-    <script type="module" src="/surfaces/services/services.js"></script>
+    <script type="module" src="/services/services.js"></script>
     <script type="module">
-      import { mount } from "/surfaces/services/services.js";
+      import { mount } from "/services/services.js";
       const root = document.getElementById("services-root");
       if (root) root.setAttribute("aria-busy", "true");
       mount().then(() => {
