@@ -1,57 +1,23 @@
-/*
- * motion.css — motion vocabulary for newtcon.
- *
- * Per docs/operator-philosophy.md §What aesthetic discipline demands:
- * "Motion carries information. Pipeline stages flow visibly; ChangeSet previews
- * materialize as targets are selected. Motion is never decorative."
- *
- * F3 uses minimal motion: a fade-in on content resolution (loading → content
- * or loading → error) and focus-ring transitions. The timing tokens are
- * defined here so future Composer/Workbench/Inbox surfaces reach for the same
- * vocabulary rather than inventing their own.
- *
- * Tokens:
- *
- *   --ease-standard   The easing curve for state transitions — a smooth
- *                     decelerate that reads as "intentional arrival." Used for
- *                     fade-in, drawer open, panel expand.
- *
- *   --ease-exit       A faster ease-in for things leaving the screen. Exits
- *                     should be quicker than entrances — the operator's
- *                     attention should not be held by something departing.
- *
- *   --duration-fast   80ms  focus rings, hover highlights — below the
- *                     threshold of perceptible animation but adds crispness.
- *
- *   --duration-base   160ms content fade-in (loading → resolved). Long enough
- *                     to feel intentional; short enough to not delay the
- *                     operator. The sweet spot for single-state transitions.
- *
- *   --duration-slow   300ms  (reserved) for panel slides, SSE event stream
- *                     animations in Composer/Inbox. Not used in F3.
- *
- * Reduced-motion:
- *
- *   All transitions respect prefers-reduced-motion. When the operator has
- *   requested reduced motion, all durations collapse to 0ms — the transition
- *   property is preserved so layout is unaffected, but no animation plays.
- *   Per operator-philosophy invariant #9 (confidence and limits are explicit):
- *   the operator's own accessibility settings are respected without a toggle.
- */
+/* Motion tokens. */
 
 :root {
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-exit:     cubic-bezier(0.4, 0, 1,   1);
+  --duration-instant: 80ms;
+  --duration-fast:    120ms;
+  --duration-base:    180ms;
+  --duration-slow:    240ms;
+  --duration-slower:  360ms;
 
-  --duration-fast: 80ms;
-  --duration-base: 160ms;
-  --duration-slow: 300ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --duration-fast: 0ms;
-    --duration-base: 0ms;
-    --duration-slow: 0ms;
+    --duration-instant: 0ms;
+    --duration-fast:    0ms;
+    --duration-base:    0ms;
+    --duration-slow:    0ms;
+    --duration-slower:  0ms;
   }
 }

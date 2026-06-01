@@ -1,65 +1,53 @@
-/*
- * color.css — semantic color palette for newtcon.
- *
- * Six named semantic colors. Each has one meaning; no color is decorative.
- * Per docs/operator-philosophy.md §What aesthetic discipline demands:
- * "Color is semantic, not decorative. A small palette. Each color has a
- * meaning the operator can name; no decorative use of color anywhere."
- *
- * Rules of use:
- *   --color-surface          page background. Everything sits on this.
- *   --color-surface-elevated header, footer, cards. Creates gentle depth
- *                            without shadow or border noise.
- *   --color-text-primary     all primary content: headings, table cells,
- *                            labels. Near-black, warm (not pure #000).
- *   --color-text-secondary   supporting text: subtitles, column headers,
- *                            status indicators, why-mode footer. Readable
- *                            but visually lighter than primary.
- *   --color-accent           links, active nav underline, type badges,
- *                            inline code backgrounds. One quiet blue.
- *                            Never used for decoration; always carries
- *                            interactivity or type-distinguishing meaning.
- *   --color-danger           error borders and error tint backgrounds.
- *                            Intentionally muted — the operator should
- *                            read the error, not flinch from it. Per
- *                            operator-philosophy invariant #7: errors
- *                            carry the error cause, they don't alarm.
- *
- * Extending this palette requires an Architecture-class PR (AGENTS.md
- * §Architect). Adding a seventh color for convenience is rejected on
- * principle — restraint is the discipline, not a default.
- */
+/* Color tokens for newtcon — semantic, restrained, operator-readable. */
 
 :root {
-  /* Base page surface: very slightly warm off-white. Not pure #fff, which reads
-   * as a blank document. Not gray, which reads as disabled. This is the calm
-   * background the page content rests on. */
-  --color-surface:          #f7f6f4;
+  --color-bg:                  #f5f5f0;
+  --color-surface:             #ffffff;
+  --color-surface-raised:      #ffffff;
+  --color-surface-sunken:      #ebebe6;
+  --color-surface-hover:       #f0efea;
+  --color-surface-pressed:     #e6e5e0;
 
-  /* Elevated surface: pure white for header, footer, cards. The contrast with
-   * --color-surface is gentle (~4-point luminance) — enough to create depth,
-   * not enough to compete with content. */
-  --color-surface-elevated: #ffffff;
+  --color-text-primary:        #1c1917;
+  --color-text-secondary:      #57534e;
+  --color-text-muted:          #8a857f;
+  --color-text-disabled:       #b8b3ac;
+  --color-text-on-accent:      #ffffff;
 
-  /* Primary text: near-black with a trace of warmth. Not pure #000 (too
-   * harsh on off-white backgrounds). Passes WCAG AA at any size on both
-   * surface colors. */
-  --color-text-primary:     #1c1917;
+  --color-border-subtle:       #e8e6df;
+  --color-border-default:      #d6d3cc;
+  --color-border-strong:       #b8b3ac;
 
-  /* Secondary text: a muted slate-gray for supporting information — column
-   * headers, subtitles, why-mode footer, status-loading indicators. Readable
-   * at the sizes used (0.8125rem–0.875rem) on both surface colors. */
-  --color-text-secondary:   #57534e;
+  --color-accent:              #3f6f93;
+  --color-accent-hover:        #335a78;
+  --color-accent-pressed:      #284862;
+  --color-accent-bg:           #eaf0f5;
+  --color-accent-bg-hover:     #d8e3ed;
+  --color-accent-border:       #b8cbdb;
 
-  /* Accent: a single desaturated steel-blue for links, active nav indicators,
-   * type badges, and inline code backgrounds. Desaturated so it reads as
-   * "meaningful distinction" rather than "call to action" — the operator's
-   * attention is on the data, not on the interactive chrome. */
-  --color-accent:           #3f6f93;
+  --color-success:             #2f7a4d;
+  --color-success-bg:          #e5f1ea;
+  --color-success-border:      #b8d4c2;
 
-  /* Danger: a muted sienna-red for error containers only. Intentionally
-   * de-alarmed: the operator must read the error, not freeze at red. The
-   * color signals "attention needed here" without reading as a system alert.
-   * Used for border and tinted background; never for solid fills or text. */
-  --color-danger:           #b45309;
+  --color-warning:             #a76b1e;
+  --color-warning-bg:          #faf0e0;
+  --color-warning-border:      #e8cfa8;
+
+  --color-danger:              #b03a2e;
+  --color-danger-bg:           #f7e5e3;
+  --color-danger-border:       #e3bab2;
+
+  --color-info:                #4a5b6a;
+  --color-info-bg:             #ecf0f3;
+  --color-info-border:         #c5cfd7;
+
+  --color-drift-clean:         var(--color-success);
+  --color-drift-present:       var(--color-warning);
+  --color-drift-error:         var(--color-danger);
+
+  --shadow-xs:    0 1px 2px 0 rgb(28 25 23 / 0.04);
+  --shadow-sm:    0 1px 2px 0 rgb(28 25 23 / 0.05), 0 1px 3px 0 rgb(28 25 23 / 0.06);
+  --shadow-md:    0 2px 4px -1px rgb(28 25 23 / 0.06), 0 4px 6px -2px rgb(28 25 23 / 0.04);
+  --shadow-lg:    0 10px 15px -3px rgb(28 25 23 / 0.08), 0 4px 6px -2px rgb(28 25 23 / 0.04);
+  --shadow-overlay: 0 20px 25px -5px rgb(28 25 23 / 0.10), 0 10px 10px -5px rgb(28 25 23 / 0.04);
 }
