@@ -762,6 +762,48 @@ interface TopologyData {
   [k: string]: unknown;
 }
 
+// ---- Topology shape adapter -------------------------------------------------
+
+// Newtron returns: { devices: { name1: { steps?, ... }, ... }, links: [{a: "dev:iface", z: "dev:iface"}], ... }
+// The renderer expects:    { nodes:   [{ name, type? }, ...],          links: [{local_device, local_interface, remote_device, remote_interface}, ...] }
+// Adapt before rendering so the renderer stays simple.
+function adaptTopology(raw: unknown): TopologyData {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  // If it's already in the renderer shape, pass through.
+  if (Array.isArray((r as { nodes?: unknown }).nodes)) return r as TopologyData;
+
+  const devices = (r.devices ?? {}) as Record<string, Record<string, unknown>>;
+  const nodes: TopoNode[] = Object.entries(devices).map(([name, def]) => {
+    // Infer node type from common patterns: host* prefix → "host"; presence of steps → "switch".
+    const lower = name.toLowerCase();
+    let type: string | undefined;
+    if (lower.startsWith("host")) type = "host";
+    else if (Array.isArray((def as { steps?: unknown }).steps)) type = "switch";
+    return type ? { name, type } : { name };
+  });
+
+  type RawLink = { a?: string; z?: string };
+  const rawLinks = Array.isArray(r.links) ? (r.links as RawLink[]) : [];
+  const links: TopoLink[] = rawLinks.map((lnk) => {
+    const split = (s?: string): { device?: string; iface?: string } => {
+      if (typeof s !== "string") return {};
+      const idx = s.indexOf(":");
+      if (idx < 0) return { device: s };
+      return { device: s.slice(0, idx), iface: s.slice(idx + 1) };
+    };
+    const a = split(lnk.a);
+    const z = split(lnk.z);
+    const out: TopoLink = {};
+    if (a.device) out.local_device = a.device;
+    if (a.iface) out.local_interface = a.iface;
+    if (z.device) out.remote_device = z.device;
+    if (z.iface) out.remote_interface = z.iface;
+    return out;
+  });
+
+  return { nodes, links };
+}
+
 // ---- Topology SVG renderer --------------------------------------------------
 
 const NODE_W = 120;
@@ -1824,7 +1866,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
   try {
     const data = await fetchTopology();
     root.textContent = "";
-    const topoData = (data ?? {}) as TopologyData;
+    const topoData = adaptTopology(data);
 
     // Fetch drift for each device in parallel; render badges where present.
     const deviceNames = Array.isArray(topoData.nodes)
@@ -2233,32 +2275,104 @@ function setupTabs(): void {
 
 // ---- Entry ------------------------------------------------------------------
 
+// Spec facets grouped into operator-domain categories. Replaces the flat
+// 10-panel grid with a focused-one-at-a-time layout (secondary sidebar nav).
+const SPEC_GROUPS: { id: string; label: string; kinds: SpecKind[] }[] = [
+  { id: "services",  label: "Services",  kinds: ["services", "ipvpns", "macvpns"] },
+  { id: "policies",  label: "Policies",  kinds: ["qos-policies", "filters", "route-policies", "prefix-lists"] },
+  { id: "inventory", label: "Inventory", kinds: ["profiles", "platforms", "zones"] },
+];
+
+let activeFacet: SpecKind = "services";
+
+async function mountSpecsView(root: HTMLElement): Promise<void> {
+  root.textContent = "";
+  const layout = el("div", { className: "specs-layout" });
+  const subnav = el("aside", { className: "specs-subnav" });
+  const main = el("div", { className: "specs-main" });
+  layout.append(subnav, main);
+  root.appendChild(layout);
+
+  // Fetch counts in parallel for the subnav badges.
+  const counts = new Map<SpecKind, number | "error">();
+  await Promise.all(
+    PANELS.map(async (p) => {
+      try {
+        const items = await fetchSpecList(p.kind);
+        counts.set(p.kind, items.length);
+      } catch {
+        counts.set(p.kind, "error");
+      }
+    }),
+  );
+
+  function renderSubnav(): void {
+    subnav.textContent = "";
+    for (const group of SPEC_GROUPS) {
+      const section = el("div", { className: "specs-subnav-section" });
+      section.appendChild(el("h3", { className: "specs-subnav-heading" }, group.label));
+      const groupList = el("div", { className: "specs-subnav-list" });
+      for (const kind of group.kinds) {
+        const panel = PANELS.find((p) => p.kind === kind);
+        if (!panel) continue;
+        const isActive = kind === activeFacet;
+        const btn = el(
+          "button",
+          {
+            type: "button",
+            className: "specs-subnav-item" + (isActive ? " specs-subnav-item--active" : ""),
+            ariaSelected: isActive ? "true" : "false",
+          },
+          panel.title,
+        );
+        btn.dataset.kind = kind;
+        const count = counts.get(kind);
+        const badge = el(
+          "span",
+          { className: "specs-subnav-count" + (count === "error" ? " specs-subnav-count--error" : "") },
+          count === "error" ? "!" : String(count ?? 0),
+        );
+        btn.appendChild(badge);
+        btn.addEventListener("click", () => {
+          activeFacet = kind;
+          renderSubnav();
+          renderActiveFacet();
+        });
+        groupList.appendChild(btn);
+      }
+      section.appendChild(groupList);
+      subnav.appendChild(section);
+    }
+  }
+
+  async function renderActiveFacet(): Promise<void> {
+    const panel = PANELS.find((p) => p.kind === activeFacet);
+    if (!panel) return;
+    main.textContent = "";
+    main.appendChild(el("p", { className: "status-loading" }, "Loading…"));
+    try {
+      const items = await fetchSpecList(panel.kind);
+      counts.set(panel.kind, items.length);
+      renderSubnav();
+      main.textContent = "";
+      main.appendChild(renderPanel(panel, { status: "fulfilled", value: items } as PromiseSettledResult<string[]>));
+    } catch (err) {
+      counts.set(panel.kind, "error");
+      renderSubnav();
+      main.textContent = "";
+      main.appendChild(renderPanel(panel, { status: "rejected", reason: err } as PromiseSettledResult<string[]>));
+    }
+  }
+
+  renderSubnav();
+  await renderActiveFacet();
+}
+
 async function mount(): Promise<void> {
   const root = document.getElementById("panel-specs");
   if (!root) return;
 
-  // Surface the configured newtron URL in the footer.
-  fetch("/api/health", { cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      const target = document.getElementById("newtron-target");
-      const d = data as Record<string, unknown> | null;
-      const newtronBlock = d?.newtron as Record<string, unknown> | undefined;
-      const url = newtronBlock?.url ?? d?.newtron_url;
-      if (target && typeof url === "string" && url.length > 0) {
-        target.textContent = url;
-      }
-    })
-    .catch(() => {
-      /* footer just shows "—" */
-    });
-
-  const results = await Promise.allSettled(PANELS.map((p) => fetchSpecList(p.kind)));
-
-  root.textContent = "";
-  PANELS.forEach((panel, i) => {
-    root.appendChild(renderPanel(panel, results[i]));
-  });
+  await mountSpecsView(root);
 
   setupTabs();
 

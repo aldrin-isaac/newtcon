@@ -503,3 +503,228 @@
   align-items: start;
 }
 #panel-specs[hidden] { display: none; }
+
+/* ---------- Specs view — hierarchical two-column ---------- */
+
+.specs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.specs-subnav {
+  position: sticky;
+  top: calc(var(--header-height) + var(--space-page-y));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.specs-subnav-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.specs-subnav-heading {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2xs);
+  padding: 0 var(--space-sm);
+}
+
+.specs-subnav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.specs-subnav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.specs-subnav-item:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.specs-subnav-item--active {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+  border-color: var(--color-border-subtle);
+  box-shadow: var(--shadow-xs);
+}
+
+.specs-subnav-count {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  background: var(--color-surface-sunken);
+  padding: 1px var(--space-xs);
+  border-radius: var(--radius-full);
+  min-width: 22px;
+  text-align: center;
+}
+
+.specs-subnav-item--active .specs-subnav-count {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+.specs-subnav-count--error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.specs-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* Single-facet panel in the main area gets richer chrome */
+.specs-main .panel {
+  min-height: 200px;
+}
+.specs-main .panel-list {
+  max-height: none;
+}
+.specs-main .panel-empty {
+  padding: var(--space-2xl) var(--space-md);
+}
+
+/* Override the #panel-specs grid layout when it contains specs-layout */
+#panel-specs:has(.specs-layout) {
+  display: block;
+}
+
+/* ---------- Lab view styling ---------- */
+
+#panel-lab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: 100%;
+}
+
+.lab-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+}
+
+.lab-card h2,
+.lab-card-name,
+.lab-card-header {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  padding: var(--space-md) var(--space-md) var(--space-xs);
+}
+
+.lab-card-state,
+.lab-card-status {
+  padding: 0 var(--space-md) var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.lab-card ul,
+.lab-card-nodes {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2xs) var(--space-md) var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.lab-card li,
+.lab-node-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 4px var(--space-xs);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-sunken);
+}
+
+.lab-card li .lab-node-name,
+.lab-node-row .lab-node-name { flex: 1; color: var(--color-text-primary); }
+.lab-node-state {
+  padding: 1px var(--space-xs);
+  font-size: var(--text-2xs);
+  border-radius: var(--radius-full);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-family: var(--font-system);
+}
+.lab-node-state--stopped { background: var(--color-surface-sunken); color: var(--color-text-muted); }
+.lab-node-state--error   { background: var(--color-danger-bg);  color: var(--color-danger); }
+
+.lab-card-actions,
+.lab-card > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-sunken);
+}
+
+.lab-card-actions button,
+.lab-card > div:last-child > button {
+  font-family: var(--font-system);
+  font-size: var(--text-xs);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.lab-card-actions button:hover,
+.lab-card > div:last-child > button:hover {
+  background: var(--color-surface-hover);
+}
+
+/* Restore visibility on the per-node Stop/Start button (small mono-row button) */
+.lab-card li button,
+.lab-node-row button {
+  font-family: var(--font-system);
+  font-size: var(--text-2xs);
+  padding: 2px var(--space-xs);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.lab-card li button:hover,
+.lab-node-row button:hover { background: var(--color-surface-hover); }
