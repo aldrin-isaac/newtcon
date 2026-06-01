@@ -8,61 +8,90 @@
     <link rel="stylesheet" href="design-system/typography.css" />
     <link rel="stylesheet" href="design-system/spacing.css" />
     <link rel="stylesheet" href="design-system/motion.css" />
+    <link rel="stylesheet" href="design-system/components.css" />
     <link rel="stylesheet" href="workspace.css" />
   </head>
   <body>
-    <header class="page-header">
-      <h1>newtcon</h1>
-      <p class="page-subtitle">
-        What this network knows — services, policies, filters, profiles, and zones defined in newtron.
-      </p>
-    </header>
-    <nav class="workspace-tabs" role="tablist" aria-label="Workspace views">
-      <button
-        class="workspace-tab workspace-tab--active"
-        role="tab"
-        id="tab-specs"
-        aria-controls="panel-specs"
-        aria-selected="true"
-        type="button"
-      >Specs</button>
-      <button
-        class="workspace-tab"
-        role="tab"
-        id="tab-topology"
-        aria-controls="panel-topology"
-        aria-selected="false"
-        type="button"
-      >Topology</button>
-      <button
-        class="workspace-tab"
-        role="tab"
-        id="tab-lab"
-        aria-controls="panel-lab"
-        aria-selected="false"
-        type="button"
-      >Lab</button>
-    </nav>
-    <main id="panel-specs" class="workspace" role="tabpanel" aria-labelledby="tab-specs">
-      <p class="status-loading">Loading…</p>
-    </main>
-    <main id="panel-topology" class="workspace workspace--topology" role="tabpanel" aria-labelledby="tab-topology" hidden>
-      <p class="status-loading">Loading…</p>
-    </main>
-    <main id="panel-lab" class="workspace workspace--lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
-      <p class="status-loading">Loading…</p>
-    </main>
-    <aside id="detail-drawer" class="drawer" aria-hidden="true">
-      <button id="drawer-close" class="drawer-close" type="button" aria-label="Close">×</button>
-      <div id="drawer-content" class="drawer-content"></div>
-    </aside>
-    <footer class="site-footer">
-      <small>
-        Connected to newtron on <code id="newtron-target">—</code> &middot;
-        <a href="/api/health">health</a> &middot;
-        <a href="/CLAUDE.md">CLAUDE.md</a>
-      </small>
-    </footer>
+    <div class="app-shell">
+
+      <aside class="app-sidebar" aria-label="Primary">
+        <div class="brand">
+          <span class="brand-mark">N</span>
+          <span class="brand-name">newtcon</span>
+        </div>
+        <nav class="nav" role="navigation" aria-label="Workspaces">
+          <button type="button" id="tab-specs" class="nav-item nav-item--active" role="tab" aria-selected="true">
+            <span class="nav-icon" data-icon="list"></span>
+            <span class="nav-label">Specs</span>
+          </button>
+          <button type="button" id="tab-topology" class="nav-item" role="tab" aria-selected="false">
+            <span class="nav-icon" data-icon="network"></span>
+            <span class="nav-label">Topology</span>
+          </button>
+          <button type="button" id="tab-lab" class="nav-item" role="tab" aria-selected="false">
+            <span class="nav-icon" data-icon="server"></span>
+            <span class="nav-label">Lab</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <button type="button" class="palette-trigger" id="palette-trigger" title="Open command palette">
+            <span class="nav-icon" data-icon="command"></span>
+            <span>Quick search</span>
+            <span class="kbd-group"><span class="kbd">⌘</span><span class="kbd">K</span></span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="app-main">
+
+        <header class="app-header">
+          <div class="breadcrumbs" id="breadcrumbs">
+            <span class="crumb" id="crumb-view">Specs</span>
+          </div>
+          <div class="header-status">
+            <span class="status-pill" id="newtron-pill" title="newtron connection">
+              <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
+              <span id="newtron-target">checking…</span>
+            </span>
+          </div>
+        </header>
+
+        <main class="app-content" id="app-content">
+          <section class="view view-specs" id="panel-specs">
+            <!-- mounted by app.ts mount() -->
+          </section>
+          <section class="view view-topology" id="panel-topology" hidden>
+            <!-- mounted by app.ts mountTopologyTab() -->
+          </section>
+          <section class="view view-lab" id="panel-lab" hidden>
+            <!-- mounted by app.ts mountLabTab() -->
+          </section>
+        </main>
+      </div>
+
+      <aside id="detail-drawer" class="drawer" aria-hidden="true" aria-label="Detail panel">
+        <header class="drawer-header">
+          <div id="drawer-breadcrumb" class="drawer-breadcrumb"></div>
+          <button id="drawer-close" type="button" class="btn btn-ghost btn-icon-only" aria-label="Close detail">
+            <span data-icon="x"></span>
+          </button>
+        </header>
+        <div id="drawer-content" class="drawer-content"></div>
+      </aside>
+
+      <div id="palette-overlay" class="palette-overlay" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+        <div class="palette" role="document">
+          <div class="palette-search">
+            <span data-icon="search"></span>
+            <input type="text" id="palette-input" placeholder="Type to filter specs, devices, actions…" autocomplete="off" />
+            <span class="kbd">esc</span>
+          </div>
+          <div id="palette-results" class="palette-results"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="shell.js"></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

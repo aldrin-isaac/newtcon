@@ -1,48 +1,26 @@
-/*
- * spacing.css — spacing scale for newtcon.
- *
- * A numeric scale based on a 4px base unit. Five sizes cover the full
- * range from tight inline spacing to generous page margins.
- * Per docs/operator-philosophy.md §What aesthetic discipline demands:
- * "Whitespace is generous and intentional. Information has room to
- * breathe. Density is opt-in, never the default surface."
- *
- * Scale:
- *
- *   --space-1   0.25rem /  4px  tight: inline badge padding, icon gaps
- *   --space-2   0.5rem  /  8px  compact: sibling element gaps, row padding top/bottom
- *   --space-3   0.75rem / 12px  standard: header/footer vertical padding
- *   --space-4   1rem    / 16px  medium: list item padding, section gaps within a block
- *   --space-5   1.5rem  / 24px  generous: paragraph spacing, between-section gaps
- *   --space-6   2rem    / 32px  large: page side padding, top-of-main padding
- *   --space-8   3rem    / 48px  extra: bottom-of-page breathing room
- *
- * Only values from this scale appear in layout rules. Ad-hoc pixel values
- * (e.g., padding: 1.25rem) are a lint signal that a scale value was available
- * and was not used. Pick the nearest scale value or file an ADR to extend.
- *
- * Content width:
- *
- *   --measure-prose  60ch   comfortable reading length for one-line-per-row
- *                           prose (subtitles, empty-state text, error messages).
- *                           Per typographic convention: 45–75 characters per line
- *                           is the comfortable range; 60ch is the midpoint.
- *   --measure-page   72rem  outer column for data tables and wider content.
- *                           Wide enough to show a service table without
- *                           horizontal scroll on a 1024px viewport; narrow
- *                           enough to stay centered with generous side margins
- *                           on a 1920px display.
- */
+/* Spacing scale + radii + layout dims. */
 
 :root {
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-8: 3rem;
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs:  6px;
+  --space-sm:  10px;
+  --space-md:  16px;
+  --space-lg:  24px;
+  --space-xl:  32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
 
-  --measure-prose: 60ch;
-  --measure-page:  72rem;
+  --space-page-x: 28px;
+  --space-page-y: 20px;
+
+  --sidebar-width: 232px;
+  --sidebar-collapsed: 56px;
+  --header-height: 52px;
+
+  --radius-xs:   3px;
+  --radius-sm:   5px;
+  --radius-md:   7px;
+  --radius-lg:   10px;
+  --radius-full: 9999px;
 }
