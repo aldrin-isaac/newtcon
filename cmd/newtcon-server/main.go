@@ -73,6 +73,13 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Lab lifecycle endpoints (slice 8): list topologies, status, deploy,
+	// destroy, provision, SSE events, start/stop nodes.
+	handlers.RegisterLabRoutes(mux, handlers.LabDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
 	// server.RegisterStaticAssets logs a warning and skips registration when

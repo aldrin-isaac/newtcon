@@ -84,6 +84,15 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// Flush delegates to the inner writer's Flush if supported. Required so
+// SSE handlers downstream can flush events to the client; the type-assertion
+// `w.(http.Flusher)` fails on the bare embedded struct.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Logging is an HTTP middleware that emits one structured log line per request.
 //
 // The line format is:

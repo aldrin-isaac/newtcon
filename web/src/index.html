@@ -34,11 +34,22 @@
         aria-selected="false"
         type="button"
       >Topology</button>
+      <button
+        class="workspace-tab"
+        role="tab"
+        id="tab-lab"
+        aria-controls="panel-lab"
+        aria-selected="false"
+        type="button"
+      >Lab</button>
     </nav>
     <main id="panel-specs" class="workspace" role="tabpanel" aria-labelledby="tab-specs">
       <p class="status-loading">Loading…</p>
     </main>
     <main id="panel-topology" class="workspace workspace--topology" role="tabpanel" aria-labelledby="tab-topology" hidden>
+      <p class="status-loading">Loading…</p>
+    </main>
+    <main id="panel-lab" class="workspace workspace--lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
       <p class="status-loading">Loading…</p>
     </main>
     <aside id="detail-drawer" class="drawer" aria-hidden="true">
