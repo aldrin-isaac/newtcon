@@ -16,7 +16,7 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 
-const ipvpnName = "Vpn_T" + Math.floor(Math.random() * 9000 + 1000);
+const zoneName = "zone_t" + Math.floor(Math.random() * 9000 + 1000);
 
 try {
   const page = await browser.newPage();
@@ -31,20 +31,20 @@ try {
   const barHiddenAtBoot = await page.$eval("#pending-bar", (el) => el.hidden);
   expect(barHiddenAtBoot === true, "pending bar hidden when queue is empty");
 
-  // ─── Stage an IP VPN spec via the Specs view ───────────────────────
-  console.log(`→ queue create IP VPN "${ipvpnName}"`);
-  // Specs is the default view. Click the "IP VPNs" subnav.
+  // ─── Stage an zone spec via the Specs view ───────────────────────
+  console.log(`→ queue create zone "${zoneName}"`);
+  // Specs is the default view. Click the "zones" subnav.
   await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll(".specs-subnav-item, .nav-item, .spec-row, button"));
-    const ipvpns = items.find((b) => /IP\s*VPN/i.test(b.textContent ?? ""));
-    if (ipvpns) ipvpns.click();
+    const zones = items.find((b) => /Zones/i.test(b.textContent ?? ""));
+    if (zones) zones.click();
   });
   await new Promise((r) => setTimeout(r, 300));
 
-  // Click the "+ Add" button for IP VPNs (panel-add-btn).
+  // Click the "+ Add" button for zones (panel-add-btn).
   await page.evaluate(() => {
     const panels = Array.from(document.querySelectorAll(".panel"));
-    const ipPanel = panels.find((p) => /IP\s*VPN/i.test(p.querySelector(".panel-title")?.textContent ?? ""));
+    const ipPanel = panels.find((p) => /Zones/i.test(p.querySelector(".panel-title")?.textContent ?? ""));
     ipPanel?.querySelector(".panel-add-btn")?.click();
   });
   await new Promise((r) => setTimeout(r, 400));
@@ -55,7 +55,7 @@ try {
     const nameLabel = labels.find((l) => /name/i.test(l.textContent ?? ""));
     const input = nameLabel?.parentElement?.querySelector("input") || document.querySelector("#drawer-content input");
     if (input) { input.value = n; input.dispatchEvent(new Event("input", { bubbles: true })); }
-  }, ipvpnName);
+  }, zoneName);
 
   // Submit the create form.
   await page.evaluate(() => {
@@ -73,16 +73,16 @@ try {
   const countText = await page.$eval(".pending-bar-count", (el) => el.textContent);
   expect(countText === "1", `pending count = 1 (got "${countText}")`);
 
-  // The IP VPN row should now appear in the panel with green pending styling.
+  // The zone row should now appear in the panel with green pending styling.
   const greenRowSeen = await page.evaluate(() => {
     return document.querySelectorAll(".panel-list-row--pending-add").length;
   });
   expect(greenRowSeen >= 1, `≥1 green pending-add row in the panel (got ${greenRowSeen})`);
 
   // Confirm newtron does NOT yet have it (still queued, not saved).
-  const beforeSave = await fetch(`${NEWTRON}/newtron/v1/network/default/ipvpn/${ipvpnName}`);
+  const beforeSave = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
   expect(beforeSave.status === 404 || beforeSave.status === 500,
-    `newtron does NOT have ${ipvpnName} pre-save (got ${beforeSave.status})`);
+    `newtron does NOT have ${zoneName} pre-save (got ${beforeSave.status})`);
 
   // ─── Click Save in the header ─────────────────────────────────────
   console.log("→ click Save in the header pending bar");
@@ -95,16 +95,16 @@ try {
   expect(barHiddenAfter, "pending bar hidden after Save");
 
   // newtron should now have the spec.
-  const afterSave = await fetch(`${NEWTRON}/newtron/v1/network/default/ipvpn/${ipvpnName}`);
-  expect(afterSave.ok, `newtron now serves /ipvpn/${ipvpnName} (got ${afterSave.status})`);
+  const afterSave = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
+  expect(afterSave.ok, `newtron now serves /zone/${zoneName} (got ${afterSave.status})`);
 
   // ─── Cleanup: queue a delete then Save ──────────────────────────
-  console.log(`→ queue delete IP VPN "${ipvpnName}"`);
+  console.log(`→ queue delete zone "${zoneName}"`);
   await page.evaluate((n) => {
     const rows = Array.from(document.querySelectorAll(".panel-list-row"));
     const row = rows.find((r) => r.querySelector(".panel-list-item")?.textContent.trim() === n);
     row?.querySelector(".panel-delete-btn")?.click();
-  }, ipvpnName);
+  }, zoneName);
   await new Promise((r) => setTimeout(r, 600));
   const redRowSeen = await page.evaluate(() => {
     return document.querySelectorAll(".panel-list-row--pending-del").length;
@@ -116,8 +116,8 @@ try {
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
   await new Promise((r) => setTimeout(r, 1500));
 
-  const afterDelete = await fetch(`${NEWTRON}/newtron/v1/network/default/ipvpn/${ipvpnName}`);
-  expect(!afterDelete.ok, `IP VPN ${ipvpnName} gone from newtron after delete (status ${afterDelete.status})`);
+  const afterDelete = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
+  expect(!afterDelete.ok, `zone ${zoneName} gone from newtron after delete (status ${afterDelete.status})`);
 
   console.log("");
   console.log(`✅ ${ok.length} passed, ❌ ${failed.length} failed`);

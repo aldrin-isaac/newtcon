@@ -2556,6 +2556,14 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
 
   renderSubnav();
   await renderActiveFacet();
+
+  // Subscribe to the staging queue so pending creates/deletes re-render the
+  // active facet immediately (green/red overlays + after-Save refresh).
+  if ((root as unknown as { _specsUnsub?: () => void })._specsUnsub) {
+    (root as unknown as { _specsUnsub?: () => void })._specsUnsub!();
+  }
+  const unsub = subscribePending(() => { void renderActiveFacet(); });
+  (root as unknown as { _specsUnsub?: () => void })._specsUnsub = unsub;
 }
 
 async function mount(): Promise<void> {
