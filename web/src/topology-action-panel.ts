@@ -628,30 +628,34 @@ function isCreatingNewEntity(actionID: string): boolean {
 function fieldSource(name: string, device: string, actionID: string): string | null {
   const creating = isCreatingNewEntity(actionID);
 
-  // Entity-identifier fields — only autofill when referencing an existing one.
-  const identifierSource = (() => {
-    switch (name) {
-      case "vlan_id":     return `vlans:${device}`;
-      case "vlan":        return `vlans:${device}`;
-      case "name":        // ambiguous; treat as identifier for delete-vlan/vrf/acl/etc.
-        return null;      // skip auto-source for "name" — schemas vary too much
-      case "portchannel": return `lags:${device}`;
-      default:            return null;
-    }
-  })();
-  if (identifierSource) return creating ? null : identifierSource;
+  // Per-action-id "name" field semantics. For delete-X / unbind-X, "name"
+  // refers to an existing entity; for create-X it's a new identifier.
+  if (name === "name" && !creating) {
+    if (actionID === "delete-vrf")          return `vrfs:${device}`;
+    if (actionID === "delete-acl")          return `acls:${device}`;
+    if (actionID === "delete-portchannel")  return `lags:${device}`;
+  }
+
+  // Identifier fields (vlan id, port-channel name…) — autofill only for
+  // delete/remove/unbind/configure-irb (existing VLAN). For create/add they
+  // stay free-form so the operator types a new value.
+  if (name === "id" || name === "vlan_id" || name === "vlan") {
+    return creating ? null : `vlans:${device}`;
+  }
 
   // Cross-entity reference fields — always dropdown from the named source.
   switch (name) {
     case "service":      return "services";
     case "ipvpn":        return "ipvpns";
     case "macvpn":       return "macvpns";
+    case "policy":       return "qos-policies"; // apply-qos
     case "qos_policy":   return "qos-policies";
     case "filter":       return "filters";
     case "route_policy": return "route-policies";
     case "prefix_list":  return "prefix-lists";
     case "acl":          return `acls:${device}`;
     case "vrf":          return `vrfs:${device}`;
+    case "portchannel":  return `lags:${device}`;
     case "interface":    return `interfaces:${device}`;
     default:             return null;
   }
