@@ -56,6 +56,34 @@ import {
   postUnbindService,
   postRefreshService,
 } from "./api/newtcon/nodes.js";
+import { NODE_ACTIONS, INTERFACE_ACTIONS } from "./topology-actions.js";
+import {
+  showContextMenu,
+  dismissContextMenu,
+  openLinkBetweenDrawer,
+} from "./topology-actions-ui.js";
+
+// normaliseInterfaceList accepts whatever shape newtron returns from
+// /node/{device}/interface and produces a plain string[] of interface names.
+function normaliseInterfaceList(data: unknown): string[] {
+  if (Array.isArray(data)) {
+    return data
+      .map((it) => typeof it === "string" ? it : (it as { name?: unknown }).name)
+      .filter((n): n is string => typeof n === "string");
+  }
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj["interfaces"])) {
+      return normaliseInterfaceList(obj["interfaces"]);
+    }
+    if (Array.isArray(obj["names"])) {
+      return normaliseInterfaceList(obj["names"]);
+    }
+    // Map-of-name → details shape.
+    return Object.keys(obj).sort();
+  }
+  return [];
+}
 
 // ---- DOM helper -------------------------------------------------------------
 
@@ -839,19 +867,48 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
+interface TopologyRenderOpts {
+  onNodeClick: (name: string, ev: MouseEvent) => void;
+  onNodeDoubleClick?: (name: string, ev: MouseEvent) => void;
+  onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
+  onInterfaceClick?: (device: string, iface: string, ev: MouseEvent) => void;
+  driftByDevice?: Map<string, number>;
+  onNodeDelete?: (name: string) => void;
+  selected?: Set<string>;
+  expanded?: Set<string>;
+  interfacesByDevice?: Map<string, string[]>;
+}
+
 function renderTopologySVG(
   data: TopologyData,
-  onNodeClick: (name: string) => void,
-  driftByDevice?: Map<string, number>,
-  onNodeDelete?: (name: string) => void
+  opts: TopologyRenderOpts,
 ): SVGSVGElement {
   const nodes: TopoNode[] = Array.isArray(data.nodes) ? data.nodes : [];
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
+  const selected = opts.selected ?? new Set<string>();
+  const expanded = opts.expanded ?? new Set<string>();
+  const ifacesMap = opts.interfacesByDevice ?? new Map<string, string[]>();
+
+  // Compute the per-node extra height needed when interfaces are expanded:
+  // we render pills in 3 rows of up to N per row, sized to NODE_W.
+  const IFACE_PILL_H = 22;
+  const IFACE_PILL_GAP = 6;
+  const IFACE_BAND_PAD = 10;
+  const IFACES_PER_ROW = 3;
+  const expandedExtra: Map<string, number> = new Map();
+  for (const n of nodes) {
+    if (!expanded.has(n.name)) continue;
+    const list = ifacesMap.get(n.name) ?? [];
+    if (list.length === 0) continue;
+    const rows = Math.ceil(list.length / IFACES_PER_ROW);
+    expandedExtra.set(n.name, IFACE_BAND_PAD + rows * (IFACE_PILL_H + IFACE_PILL_GAP));
+  }
 
   const cols = Math.min(nodes.length || 1, 4);
   const rows = nodes.length === 0 ? 1 : Math.ceil(nodes.length / cols);
+  const maxExpandedH = Math.max(0, ...Array.from(expandedExtra.values()));
   const svgW = (NODE_W + H_GAP) * cols + H_GAP;
-  const svgH = (NODE_H + V_GAP) * rows + V_GAP;
+  const svgH = (NODE_H + V_GAP) * rows + V_GAP + maxExpandedH;
 
   const svg = svgEl("svg", {
     width: String(svgW),
@@ -883,13 +940,27 @@ function renderTopologySVG(
   for (const node of nodes) {
     const pos = positions.get(node.name);
     if (!pos) continue;
+    const isSelected = selected.has(node.name);
+    const isExpanded = expanded.has(node.name);
 
     const g = svgEl("g", {
-      "class": "topo-node",
+      "class": "topo-node" + (isSelected ? " topo-node--selected" : "") + (isExpanded ? " topo-node--expanded" : ""),
       role: "button",
       tabindex: "0",
       "aria-label": `Device ${node.name}`,
     });
+
+    if (isSelected) {
+      // Selection ring drawn behind the node rect.
+      g.appendChild(svgEl("rect", {
+        "class": "topo-node-selection-ring",
+        x: String(pos.cx - NODE_W / 2 - 5),
+        y: String(pos.cy - NODE_H / 2 - 5),
+        width: String(NODE_W + 10),
+        height: String(NODE_H + 10),
+        rx: "8",
+      }));
+    }
 
     const rect = svgEl("rect", {
       x: String(pos.cx - NODE_W / 2),
@@ -917,16 +988,88 @@ function renderTopologySVG(
       g.appendChild(typeLabel);
     }
 
-    g.addEventListener("click", () => onNodeClick(node.name));
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      opts.onNodeClick(node.name, e);
+    });
+    g.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      opts.onNodeDoubleClick?.(node.name, e);
+    });
+    g.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      opts.onNodeContextMenu?.(node.name, e);
+    });
     g.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        onNodeClick(node.name);
+        opts.onNodeClick(node.name, new MouseEvent("click", {
+          clientX: pos.cx,
+          clientY: pos.cy,
+        }));
       }
     });
 
+    // Expanded interface band — pills under the device, clickable.
+    if (isExpanded) {
+      const list = ifacesMap.get(node.name) ?? [];
+      const bandTop = pos.cy + NODE_H / 2 + IFACE_BAND_PAD;
+      const pillW = NODE_W / IFACES_PER_ROW - 4;
+      list.forEach((ifaceName, idx) => {
+        const row = Math.floor(idx / IFACES_PER_ROW);
+        const col = idx % IFACES_PER_ROW;
+        const x = pos.cx - NODE_W / 2 + col * (pillW + 4) + 2;
+        const y = bandTop + row * (IFACE_PILL_H + IFACE_PILL_GAP);
+        const pill = svgEl("g", {
+          "class": "topo-iface-pill",
+          role: "button",
+          tabindex: "0",
+          "aria-label": `Interface ${ifaceName} on ${node.name}`,
+        });
+        pill.appendChild(svgEl("rect", {
+          x: String(x),
+          y: String(y),
+          width: String(pillW),
+          height: String(IFACE_PILL_H),
+          rx: "11",
+        }));
+        const text = svgEl("text", {
+          x: String(x + pillW / 2),
+          y: String(y + IFACE_PILL_H / 2 + 1),
+          "text-anchor": "middle",
+          "dominant-baseline": "central",
+        });
+        text.textContent = ifaceName;
+        pill.appendChild(text);
+        const capturedIface = ifaceName;
+        pill.addEventListener("click", (e) => {
+          e.stopPropagation();
+          opts.onInterfaceClick?.(node.name, capturedIface, e);
+        });
+        pill.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          opts.onInterfaceClick?.(node.name, capturedIface, e);
+        });
+        svg.appendChild(pill);
+      });
+      if (list.length === 0) {
+        const emptyText = svgEl("text", {
+          "class": "topo-iface-empty",
+          x: String(pos.cx),
+          y: String(bandTop + IFACE_PILL_H / 2),
+          "text-anchor": "middle",
+          "dominant-baseline": "central",
+        });
+        emptyText.textContent = "(no interfaces)";
+        svg.appendChild(emptyText);
+      }
+    }
+
     // Drift badge: small dot in the top-right when the device has drift.
-    const driftCount = driftByDevice?.get(node.name) ?? 0;
+    const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
     if (driftCount > 0) {
       const badge = svgEl("g", { "class": "topo-drift-badge" });
       const cx = pos.cx + NODE_W / 2 - 8;
@@ -947,7 +1090,8 @@ function renderTopologySVG(
     }
 
     // Delete button: × shown on node hover (top-left corner).
-    if (onNodeDelete) {
+    if (opts.onNodeDelete) {
+      const onNodeDelete = opts.onNodeDelete;
       const delBtn = svgEl("g", { "class": "topo-node-delete", "aria-label": `Remove ${node.name}` });
       const bx = pos.cx - NODE_W / 2;
       const by = pos.cy - NODE_H / 2;
@@ -1900,24 +2044,157 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     root.appendChild(toolbar);
 
-    const svg = renderTopologySVG(
-      topoData,
-      (deviceName) => { openNodeDrawer(deviceName); },
-      driftByDevice,
-      (deviceName) => {
-        // Delete device callback from the SVG × button.
-        if (!window.confirm(`Remove device "${deviceName}" from the topology? This cannot be undone.`)) return;
-        deleteTopologyDevice(deviceName)
-          .then(() => mountTopologyTab(root))
-          .catch((err) => {
-            const msg = err instanceof ApiError
-              ? translateErrorKind(err.kind) + ": " + err.message
-              : String(err);
-            alert("Remove device failed: " + msg);
+    // Persistent UI state for this view: which nodes are selected (multi-select
+    // for link creation) and which are expanded (interfaces visible).
+    const selected: Set<string> = new Set();
+    const expanded: Set<string> = new Set();
+    const interfacesByDevice: Map<string, string[]> = new Map();
+
+    // Slot to receive the SVG container so re-renders can swap it.
+    const graphSlot = el("div", { className: "topology-graph-slot" });
+    root.appendChild(graphSlot);
+
+    // Toolbar shown when 2 nodes are selected (the "Link these" affordance).
+    const multiToolbar = el("div", { className: "topo-multi-toolbar" });
+    multiToolbar.hidden = true;
+    root.appendChild(multiToolbar);
+
+    const rerender = (): void => {
+      graphSlot.textContent = "";
+      const svg = renderTopologySVG(topoData, {
+        onNodeClick: (deviceName, ev) => {
+          // Shift-click toggles selection; plain click opens the drawer or the menu.
+          if (ev.shiftKey) {
+            if (selected.has(deviceName)) selected.delete(deviceName);
+            else selected.add(deviceName);
+            renderMultiToolbar();
+            rerender();
+            return;
+          }
+          // Single click on a node opens the context menu at the click position.
+          showContextMenu(NODE_ACTIONS, {
+            kind: "node",
+            device: deviceName,
+            anchorX: ev.clientX + 4,
+            anchorY: ev.clientY + 4,
+            onComplete: () => mountTopologyTab(root),
+            onInspect: () => openNodeDrawer(deviceName),
           });
+        },
+        onNodeDoubleClick: (deviceName) => {
+          dismissContextMenu();
+          if (expanded.has(deviceName)) {
+            expanded.delete(deviceName);
+            rerender();
+            return;
+          }
+          expanded.add(deviceName);
+          // Lazy-fetch interfaces if we haven't yet.
+          if (!interfacesByDevice.has(deviceName)) {
+            fetchNodeInterfaces(deviceName)
+              .then((data) => {
+                interfacesByDevice.set(deviceName, normaliseInterfaceList(data));
+                rerender();
+              })
+              .catch(() => {
+                interfacesByDevice.set(deviceName, []);
+                rerender();
+              });
+          }
+          rerender();
+        },
+        onNodeContextMenu: (deviceName, ev) => {
+          showContextMenu(NODE_ACTIONS, {
+            kind: "node",
+            device: deviceName,
+            anchorX: ev.clientX,
+            anchorY: ev.clientY,
+            onComplete: () => mountTopologyTab(root),
+            onInspect: () => openNodeDrawer(deviceName),
+          });
+        },
+        onInterfaceClick: (device, iface, ev) => {
+          showContextMenu(INTERFACE_ACTIONS, {
+            kind: "interface",
+            device,
+            iface,
+            anchorX: ev.clientX + 4,
+            anchorY: ev.clientY + 4,
+            onComplete: () => mountTopologyTab(root),
+          });
+        },
+        driftByDevice,
+        onNodeDelete: (deviceName) => {
+          if (!window.confirm(`Remove device "${deviceName}" from the topology? This cannot be undone.`)) return;
+          deleteTopologyDevice(deviceName)
+            .then(() => mountTopologyTab(root))
+            .catch((err) => {
+              const msg = err instanceof ApiError
+                ? translateErrorKind(err.kind) + ": " + err.message
+                : String(err);
+              alert("Remove device failed: " + msg);
+            });
+        },
+        selected,
+        expanded,
+        interfacesByDevice,
+      });
+      graphSlot.appendChild(svg);
+    };
+
+    const renderMultiToolbar = (): void => {
+      multiToolbar.textContent = "";
+      if (selected.size === 0) {
+        multiToolbar.hidden = true;
+        return;
       }
-    );
-    root.appendChild(svg);
+      multiToolbar.hidden = false;
+      const count = el("span", { className: "topo-multi-toolbar-count" },
+        `${selected.size} device${selected.size === 1 ? "" : "s"} selected`);
+      multiToolbar.appendChild(count);
+
+      const clear = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Clear");
+      clear.addEventListener("click", () => {
+        selected.clear();
+        renderMultiToolbar();
+        rerender();
+      });
+      multiToolbar.appendChild(clear);
+
+      if (selected.size === 2) {
+        const [a, z] = Array.from(selected);
+        const linkBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" },
+          `Link ${a} ↔ ${z}`);
+        linkBtn.addEventListener("click", async () => {
+          // Ensure both devices' interfaces are loaded so the form has dropdowns.
+          await Promise.all([a, z].map(async (d) => {
+            if (interfacesByDevice.has(d)) return;
+            try {
+              const data = await fetchNodeInterfaces(d);
+              interfacesByDevice.set(d, normaliseInterfaceList(data));
+            } catch {
+              interfacesByDevice.set(d, []);
+            }
+          }));
+          openLinkBetweenDrawer(
+            a, z, interfacesByDevice,
+            (req) => postTopologyLink(req),
+            () => {
+              selected.clear();
+              mountTopologyTab(root);
+            },
+          );
+        });
+        multiToolbar.appendChild(linkBtn);
+      } else if (selected.size > 2) {
+        const hint = el("span", { className: "topo-multi-toolbar-hint" },
+          "Linking is supported between exactly two devices.");
+        multiToolbar.appendChild(hint);
+      }
+    };
+
+    rerender();
+    renderMultiToolbar();
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
     const summary = el(
