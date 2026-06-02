@@ -4,59 +4,19 @@
 // resulting parameters to the generic newtron RPC endpoints.
 
 import { iconSVG } from "./icons.js";
-import { ApiError, ErrorEnvelope } from "./api/newtcon/services.js";
+import { ApiError } from "./api/newtcon/services.js";
 import {
   type ActionDef,
   type ActionField,
   type ActionGroup,
 } from "./topology-actions.js";
+import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
 
 // ---- API helpers (avoid importing app.ts to keep this self-contained) -----
 
-async function postNodeRPC(
-  device: string,
-  subpath: string,
-  body: Record<string, unknown>,
-): Promise<unknown> {
-  return doRPC(`/api/nodes/${encodeURIComponent(device)}/rpc/${subpath}`, body);
-}
-
-async function postInterfaceRPC(
-  device: string,
-  iface: string,
-  subpath: string,
-  body: Record<string, unknown>,
-): Promise<unknown> {
-  return doRPC(
-    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(iface)}/rpc/${subpath}`,
-    body,
-  );
-}
-
-async function doRPC(path: string, body: Record<string, unknown>): Promise<unknown> {
-  const resp = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  const text = await resp.text();
-  let parsed: unknown = null;
-  if (text.length > 0) {
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-  }
-  if (!resp.ok) {
-    const inner = (parsed as { error?: { kind?: string; message?: string; details?: Record<string, unknown> } })?.error;
-    const envelope: ErrorEnvelope = {
-      error: {
-        kind: inner?.kind ?? "internal",
-        message: inner?.message ?? (typeof parsed === "string" && parsed !== "" ? parsed : resp.statusText),
-        details: inner?.details ?? {},
-      },
-    };
-    throw new ApiError(resp.status, envelope);
-  }
-  return parsed;
-}
+// Direct-POST helpers were removed when the floating menu switched to
+// queueing — actions go through staging.ts enqueue* functions, and the
+// Apply changes buttons call applyDevice / applyAll.
 
 // ---- Context menu ---------------------------------------------------------
 
@@ -187,10 +147,21 @@ function handleActionInvoke(action: ActionDef, ctx: MenuContext): void {
   const needsForm = (action.fields ?? []).length > 0;
   if (!needsForm) {
     if (action.confirm && !window.confirm(action.confirm)) return;
-    void runAction(action, ctx, {});
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
+    queueFromMenu(action, ctx, {});
+    ctx.onComplete?.();
     return;
   }
   openActionDrawer(action, ctx);
+}
+
+function queueFromMenu(action: ActionDef, ctx: MenuContext, body: Record<string, unknown>): void {
+  if (ctx.kind === "node") {
+    enqueueDeviceAction(ctx.device, action.id, action.label, body, action.danger);
+  } else {
+    enqueueInterfaceAction(ctx.device, ctx.iface ?? "", action.id, action.label, body, action.danger);
+  }
 }
 
 function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
@@ -240,7 +211,7 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "btn btn-primary";
-  submit.textContent = action.danger ? "Apply (destructive)" : "Apply";
+  submit.textContent = action.danger ? "Queue (destructive)" : "Queue";
   if (action.danger) submit.classList.add("btn-danger");
   actionsRow.appendChild(submit);
 
@@ -267,16 +238,19 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
     }
 
     if (action.confirm && !window.confirm(action.confirm)) return;
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
 
-    submit.disabled = true;
-    submit.textContent = "Applying…";
     try {
-      const result = await runAction(action, ctx, body);
-      renderResult(content, result);
+      queueFromMenu(action, ctx, body);
+      // Show a brief success summary, then close the drawer.
+      const ok = document.createElement("p");
+      ok.className = "form-success";
+      ok.textContent = "Queued. Click Apply changes (per-device or workspace) to send to newtron.";
+      content.appendChild(ok);
       ctx.onComplete?.();
+      setTimeout(() => closeDrawer(), 700);
     } catch (err) {
-      submit.disabled = false;
-      submit.textContent = action.danger ? "Apply (destructive)" : "Apply";
       const para = errorParagraph(formatError(err));
       errorOut.appendChild(para);
     }
@@ -366,42 +340,9 @@ function formatError(err: unknown): string {
   return String(err);
 }
 
-async function runAction(
-  action: ActionDef,
-  ctx: MenuContext,
-  body: Record<string, unknown>,
-): Promise<unknown> {
-  if (ctx.kind === "node") {
-    return postNodeRPC(ctx.device, action.id, body);
-  } else {
-    return postInterfaceRPC(ctx.device, ctx.iface ?? "", action.id, body);
-  }
-}
-
-function renderResult(content: HTMLElement, result: unknown): void {
-  const success = document.createElement("div");
-  success.className = "topo-action-result";
-  const heading = document.createElement("p");
-  heading.className = "form-success";
-  heading.textContent = "Applied.";
-  success.appendChild(heading);
-
-  if (result !== null && result !== undefined && result !== "") {
-    const pre = document.createElement("pre");
-    pre.className = "topo-action-result-body";
-    pre.textContent = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-    success.appendChild(pre);
-  }
-
-  const done = document.createElement("button");
-  done.type = "button";
-  done.className = "btn btn-secondary";
-  done.textContent = "Close";
-  done.addEventListener("click", () => closeDrawer());
-  success.appendChild(done);
-
-  content.appendChild(success);
-}
+// runAction / renderResult are no longer needed: actions are queued (not
+// POSTed immediately) via queueFromMenu / queueActionFromForm. The Apply
+// changes buttons drain the queue against newtron.
 
 function closeDrawer(): void {
   const drawer = document.getElementById("detail-drawer");

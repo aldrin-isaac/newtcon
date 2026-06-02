@@ -2072,11 +2072,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       graphSlot.appendChild(result.svg);
     };
 
-    // Re-render the topology tab when the pending queue changes (so freshly
-    // queued devices/links appear in green without the operator having to
-    // navigate away).
-    const unsub = subscribePending(() => mountTopologyTab(root));
-    // Replace the listener if mountTopologyTab is re-entered.
+    // Re-render the graph + panel when the pending queue changes — but do
+    // NOT remount: that would clear the current selection. The panel reads
+    // the queue and shows per-device queued items + Apply/Discard buttons.
+    const unsub = subscribePending(() => { renderGraph(); renderPanel(); });
     if ((root as unknown as { _topoUnsub?: () => void })._topoUnsub) {
       (root as unknown as { _topoUnsub?: () => void })._topoUnsub!();
     }
@@ -2091,7 +2090,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             interfacesFor: (d) => interfacesByDevice.get(d) ?? [],
             deviceType: deviceTypeOf,
           },
-          onChange: () => mountTopologyTab(root),
+          onChange: () => { renderGraph(); renderPanel(); },
           onLinkRequest: () => { selected.clear(); mountTopologyTab(root); },
         },
       );

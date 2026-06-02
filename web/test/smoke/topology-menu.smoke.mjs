@@ -59,8 +59,8 @@ try {
   const savebar = await page.$(".topo-action-panel-savebar");
   expect(!!savebar, "Save/Discard bar present on single-select");
   const saveText = await page.$eval(".topo-action-panel-savebar", (el) => el.textContent);
-  expect(/Save changes/.test(saveText) && /Discard/.test(saveText),
-    `bar has Save + Discard buttons (got "${saveText}")`);
+  expect(/Apply changes/.test(saveText) && /Discard/.test(saveText),
+    `bar has Apply + Discard buttons (got "${saveText}")`);
   const ifaceCount = await page.$$eval(".topo-iface-chip", (els) => els.length);
   expect(ifaceCount > 0, `interface chips populated from topology (got ${ifaceCount})`);
   const groupCount = await page.$$eval(".topo-action-group", (els) => els.length);

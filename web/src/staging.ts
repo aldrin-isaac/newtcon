@@ -23,12 +23,14 @@ export type SpecKind =
   | "route-policies" | "prefix-lists" | "profiles" | "zones";
 
 export type Pending =
-  | { id: string; group: "spec";     kind: SpecKind; op: "create"; name: string; body: Record<string, unknown>; }
-  | { id: string; group: "spec";     kind: SpecKind; op: "delete"; name: string; }
-  | { id: string; group: "topology"; op: "add-device";    name: string; body: Record<string, unknown>; }
-  | { id: string; group: "topology"; op: "remove-device"; name: string; }
-  | { id: string; group: "topology"; op: "add-link";      a: string; z: string; }
-  | { id: string; group: "topology"; op: "remove-link";   device: string; iface: string; };
+  | { id: string; group: "spec";      kind: SpecKind; op: "create"; name: string; body: Record<string, unknown>; }
+  | { id: string; group: "spec";      kind: SpecKind; op: "delete"; name: string; }
+  | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
+  | { id: string; group: "topology";  op: "remove-device"; name: string; }
+  | { id: string; group: "topology";  op: "add-link";      a: string; z: string; }
+  | { id: string; group: "topology";  op: "remove-link";   device: string; iface: string; }
+  | { id: string; group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
+  | { id: string; group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; };
 
 // ---- Store ---------------------------------------------------------------
 
@@ -90,6 +92,39 @@ export function enqueueTopologyRemoveLink(device: string, iface: string): Pendin
   queue.push(p); notify(); return p;
 }
 
+export function enqueueDeviceAction(device: string, actionId: string, label: string, body: Record<string, unknown>, danger?: boolean): Pending {
+  const p: Pending = { id: String(nextID++), group: "device", op: "action", device, actionId, label, body, ...(danger ? { danger: true } : {}) };
+  queue.push(p); notify(); return p;
+}
+
+export function enqueueInterfaceAction(device: string, iface: string, actionId: string, label: string, body: Record<string, unknown>, danger?: boolean): Pending {
+  const p: Pending = { id: String(nextID++), group: "interface", op: "action", device, iface, actionId, label, body, ...(danger ? { danger: true } : {}) };
+  queue.push(p); notify(); return p;
+}
+
+// Filter helpers — used by per-device Apply/Discard buttons.
+
+export function deviceQueue(device: string): readonly Pending[] {
+  return queue.filter((p) =>
+    (p.group === "device" && (p as { device: string }).device === device) ||
+    (p.group === "interface" && (p as { device: string }).device === device) ||
+    (p.group === "topology" && p.op === "remove-device" && (p as { name: string }).name === device) ||
+    (p.group === "topology" && p.op === "add-device" && (p as { name: string }).name === device));
+}
+
+export async function applyDevice(device: string): Promise<ApplyResult> {
+  const targets = deviceQueue(device);
+  return applySubset(targets);
+}
+
+export function discardDevice(device: string): void {
+  for (const p of deviceQueue(device)) {
+    const i = queue.findIndex((q) => q.id === p.id);
+    if (i >= 0) queue.splice(i, 1);
+  }
+  notify();
+}
+
 export function discardAll(): void {
   queue.length = 0;
   notify();
@@ -138,12 +173,13 @@ export interface ApplyResult {
 }
 
 export async function applyAll(): Promise<ApplyResult> {
-  // Order: spec creates → spec deletes → topology device adds → topology link adds
-  //        → topology link removes → topology device removes
-  // (Specs first so topology that references them resolves; deletes after creates;
-  //  removes last so we don't tear down something that a create depends on.)
-  const ordered = queue.slice().sort((a, b) => groupOrder(a) - groupOrder(b));
+  return applySubset(queue.slice());
+}
 
+async function applySubset(targets: readonly Pending[]): Promise<ApplyResult> {
+  // Order: spec creates → device adds → link adds → device-actions →
+  // interface-actions → link removes → device removes → spec deletes
+  const ordered = targets.slice().sort((a, b) => groupOrder(a) - groupOrder(b));
   const result: ApplyResult = { applied: [], failed: [] };
   for (const p of ordered) {
     try {
@@ -162,9 +198,11 @@ function groupOrder(p: Pending): number {
   if (p.group === "spec" && p.op === "create") return 1;
   if (p.group === "topology" && p.op === "add-device") return 2;
   if (p.group === "topology" && p.op === "add-link") return 3;
-  if (p.group === "topology" && p.op === "remove-link") return 4;
-  if (p.group === "topology" && p.op === "remove-device") return 5;
-  if (p.group === "spec" && p.op === "delete") return 6;
+  if (p.group === "device") return 4;
+  if (p.group === "interface") return 5;
+  if (p.group === "topology" && p.op === "remove-link") return 6;
+  if (p.group === "topology" && p.op === "remove-device") return 7;
+  if (p.group === "spec" && p.op === "delete") return 8;
   return 9;
 }
 
@@ -191,6 +229,14 @@ async function applyOne(p: Pending): Promise<void> {
   }
   if (p.group === "topology" && p.op === "remove-link") {
     await del(`/api/topology/links/${encodeURIComponent(p.device)}/${encodeURIComponent(p.iface)}`);
+    return;
+  }
+  if (p.group === "device" && p.op === "action") {
+    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}`, p.body);
+    return;
+  }
+  if (p.group === "interface" && p.op === "action") {
+    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/interfaces/${encodeURIComponent(p.iface)}/rpc/${p.actionId}`, p.body);
     return;
   }
   throw new Error("unknown pending op");
@@ -239,5 +285,7 @@ export function describePending(p: Pending): string {
   if (p.group === "topology" && p.op === "remove-device") return `− device ${p.name}`;
   if (p.group === "topology" && p.op === "add-link") return `+ link ${p.a} ↔ ${p.z}`;
   if (p.group === "topology" && p.op === "remove-link") return `− link ${p.device}:${p.iface}`;
+  if (p.group === "device" && p.op === "action") return `${p.device}: ${p.label}`;
+  if (p.group === "interface" && p.op === "action") return `${p.device}:${p.iface}: ${p.label}`;
   return "?";
 }

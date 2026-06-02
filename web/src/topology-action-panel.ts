@@ -20,6 +20,14 @@ import {
   type ActionField,
   type ActionGroup,
 } from "./topology-actions.js";
+import {
+  enqueueDeviceAction,
+  enqueueInterfaceAction,
+  deviceQueue,
+  applyDevice,
+  discardDevice,
+  describePending,
+} from "./staging.js";
 
 // ---- HTTP plumbing --------------------------------------------------------
 
@@ -185,6 +193,8 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
       { kind: "interface", device: sel.iface.device, iface: sel.iface.name },
       deps,
     ));
+    appendQueuedForDevice(root, sel.iface.device);
+    appendSaveDiscardRow(root, sel, deps);
     return;
   }
 
@@ -194,16 +204,17 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
     const hint = el("p", { className: "topo-action-panel-hint" },
       `Showing actions available on all ${sel.devices.length} selected devices.`);
     root.appendChild(hint);
-    if (common.length === 0) {
+    if (common.length > 0) {
+      root.appendChild(renderActionSection(
+        common,
+        { kind: "node-multi", devices: sel.devices },
+        deps,
+      ));
+    } else {
       root.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
         "No common actions for the selected device types."));
-      return;
     }
-    root.appendChild(renderActionSection(
-      common,
-      { kind: "node-multi", devices: sel.devices },
-      deps,
-    ));
+    appendSaveDiscardRow(root, sel, deps);
     return;
   }
 
@@ -215,6 +226,26 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
     { kind: "node", device },
     deps,
   ));
+  appendQueuedForDevice(root, device);
+  appendSaveDiscardRow(root, sel, deps);
+}
+
+// Shows the operator the queued changes scoped to this device, with green
+// (add/modify) or red (remove) styling, so they can verify before Apply.
+function appendQueuedForDevice(root: HTMLElement, device: string): void {
+  const items = deviceQueue(device);
+  if (items.length === 0) return;
+  const section = el("section", { className: "topo-action-panel-section topo-action-panel-section--queued" });
+  section.appendChild(el("h3", { className: "topo-action-panel-section-title" },
+    `Queued for ${device} (${items.length})`));
+  const list = el("ul", { className: "topo-queued-list" });
+  for (const p of items) {
+    const row = el("li", { className: "topo-queued-item" + ((p as { danger?: boolean }).danger ? " topo-queued-item--danger" : " topo-queued-item--add") });
+    row.appendChild(el("span", { className: "topo-queued-item-label" }, describePending(p)));
+    list.appendChild(row);
+  }
+  section.appendChild(list);
+  root.appendChild(section);
 }
 
 // ---- Header --------------------------------------------------------------
@@ -250,57 +281,64 @@ function renderHeader(sel: PanelSelection): HTMLElement {
       <span class="topo-action-panel-title-text">${escapeHtml(title)}</span>
     </div>`;
 
-  if (sel.devices.length >= 1 && !sel.iface) {
-    header.appendChild(renderSaveDiscardRow(sel.devices));
-  }
   return header;
 }
 
-// ---- Save / Discard ------------------------------------------------------
-// Save = newtron intent/save (per device).
-// Discard = newtron intent/reload (per device; reloads from disk).
+// Adds the Apply/Discard row at the bottom of the panel (after actions),
+// so the operator sees it after queueing some changes.
+function appendSaveDiscardRow(root: HTMLElement, sel: PanelSelection, deps: PanelDeps): void {
+  if (sel.devices.length >= 1 && !sel.iface) {
+    root.appendChild(renderSaveDiscardRow(sel.devices, () => deps.onChange()));
+  }
+}
 
-function renderSaveDiscardRow(devices: string[]): HTMLElement {
+// ---- Apply / Discard (per-device, client-side queue) --------------------
+//
+// "Apply changes" runs the workspace queue items targeting this device(s)
+// against newtron. "Discard changes" drops those queue items from the client
+// queue without calling newtron.
+
+function renderSaveDiscardRow(devices: string[], onChanged: () => void): HTMLElement {
   const row = el("div", { className: "topo-action-panel-savebar" });
 
-  const saveBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" },
-    devices.length === 1 ? "Save changes" : `Save changes (${devices.length})`);
-  saveBtn.addEventListener("click", async () => {
-    if (!window.confirm(
-      devices.length === 1
-        ? `Save pending intent to disk for ${devices[0]}?`
-        : `Save pending intent to disk for ${devices.length} devices?`
-    )) return;
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Saving…";
-    const errs: string[] = [];
-    for (const d of devices) {
-      try { await postNodeRPC(d, "intent/save", {}); }
-      catch (err) { errs.push(`${d}: ${formatError(err)}`); }
-    }
-    saveBtn.disabled = false;
-    saveBtn.textContent = devices.length === 1 ? "Save changes" : `Save changes (${devices.length})`;
-    if (errs.length > 0) alert("Some saves failed:\n" + errs.join("\n"));
-  });
-  row.appendChild(saveBtn);
+  // Count queued items targeting these devices so the button shows a badge.
+  let queued = 0;
+  for (const d of devices) queued += deviceQueue(d).length;
 
-  const discardBtn = el("button", { type: "button", className: "btn btn-danger btn-sm" }, "Discard changes");
-  discardBtn.addEventListener("click", async () => {
-    if (!window.confirm(
-      devices.length === 1
-        ? `Discard unsaved intent on ${devices[0]}? Reloads from disk.`
-        : `Discard unsaved intent on ${devices.length} devices? Reloads from disk.`
-    )) return;
-    discardBtn.disabled = true;
-    discardBtn.textContent = "Discarding…";
+  const applyBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" + (queued === 0 ? " btn-disabled" : "") },
+    queued > 0 ? `Apply changes (${queued})` : "Apply changes");
+  if (queued === 0) applyBtn.setAttribute("disabled", "");
+  applyBtn.addEventListener("click", async () => {
+    if (queued === 0) return;
+    const msg = devices.length === 1
+      ? `Apply ${queued} queued change${queued === 1 ? "" : "s"} on ${devices[0]}? This sends the changes to newtron now.`
+      : `Apply ${queued} queued change${queued === 1 ? "" : "s"} across ${devices.length} devices?`;
+    if (!window.confirm(msg)) return;
+    if (!window.confirm("Are you sure? This will modify the running device(s).")) return;
+    applyBtn.setAttribute("disabled", "");
+    applyBtn.textContent = "Applying…";
     const errs: string[] = [];
     for (const d of devices) {
-      try { await postNodeRPC(d, "intent/reload", {}); }
-      catch (err) { errs.push(`${d}: ${formatError(err)}`); }
+      const r = await applyDevice(d);
+      for (const f of r.failed) errs.push(`${describePending(f.pending)}: ${f.error}`);
     }
-    discardBtn.disabled = false;
-    discardBtn.textContent = "Discard changes";
-    if (errs.length > 0) alert("Some discards failed:\n" + errs.join("\n"));
+    if (errs.length > 0) alert(`Some changes failed to apply:\n\n${errs.join("\n")}`);
+    onChanged();
+  });
+  row.appendChild(applyBtn);
+
+  const discardBtn = el("button", { type: "button", className: "btn btn-danger btn-sm" + (queued === 0 ? " btn-disabled" : "") },
+    "Discard changes");
+  if (queued === 0) discardBtn.setAttribute("disabled", "");
+  discardBtn.addEventListener("click", () => {
+    if (queued === 0) return;
+    const msg = devices.length === 1
+      ? `Discard ${queued} queued change${queued === 1 ? "" : "s"} for ${devices[0]}? Nothing is sent to newtron.`
+      : `Discard ${queued} queued change${queued === 1 ? "" : "s"} across ${devices.length} devices? Nothing is sent to newtron.`;
+    if (!window.confirm(msg)) return;
+    if (!window.confirm("Are you sure?")) return;
+    for (const d of devices) discardDevice(d);
+    onChanged();
   });
   row.appendChild(discardBtn);
   return row;
@@ -452,17 +490,14 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
   // Remove any previously open inline form (one at a time keeps things clear).
   document.querySelectorAll(".topo-inline-form").forEach((el) => el.remove());
 
-  // No-fields path: just confirm + fire.
+  // No-fields path: confirm + queue (do not POST). Apply changes runs the queue.
   if ((action.fields ?? []).length === 0) {
     if (action.confirm && !window.confirm(action.confirm)) return;
-    void runActionAll(action, target).then(() => {
-      flash(anchor, "Applied");
-      invalidateSourceCache();
-      deps.onChange();
-    }).catch((err) => {
-      flash(anchor, "Failed", true);
-      alert("Action failed: " + formatError(err));
-    });
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
+    queueActionFromForm(action, target, {});
+    flash(anchor, "Queued");
+    deps.onChange();
     return;
   }
 
@@ -488,7 +523,7 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
   actions.appendChild(cancel);
 
   const submit = el("button", { type: "submit", className: "btn btn-primary btn-sm" + (action.danger ? " btn-danger" : "") },
-    action.danger ? "Apply (destructive)" : "Apply");
+    action.danger ? "Queue (destructive)" : "Queue");
   actions.appendChild(submit);
   form.appendChild(actions);
 
@@ -509,38 +544,32 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
       body[field.name] = coerceFieldValue(field, raw);
     }
     if (action.confirm && !window.confirm(action.confirm)) return;
-    submit.disabled = true;
-    submit.textContent = "Applying…";
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
     try {
-      await runActionAll(action, target, body);
+      queueActionFromForm(action, target, body);
       formWrap.remove();
-      flash(anchor, "Applied");
-      invalidateSourceCache();
+      flash(anchor, "Queued");
       deps.onChange();
     } catch (e) {
-      submit.disabled = false;
-      submit.textContent = action.danger ? "Apply (destructive)" : "Apply";
       errOut.appendChild(panelError(formatError(e)));
     }
   });
 }
 
-async function runActionAll(action: ActionDef, target: ActionTarget, body: Record<string, unknown> = {}): Promise<void> {
+// Queue an action (does NOT POST). For node-multi, queues one per device.
+function queueActionFromForm(action: ActionDef, target: ActionTarget, body: Record<string, unknown>): void {
   if (target.kind === "interface") {
-    await postInterfaceRPC(target.device, target.iface, action.id, body);
+    enqueueInterfaceAction(target.device, target.iface, action.id, action.label, body, action.danger);
     return;
   }
   if (target.kind === "node") {
-    await postNodeRPC(target.device, action.id, body);
+    enqueueDeviceAction(target.device, action.id, action.label, body, action.danger);
     return;
   }
-  // node-multi — fan out, surface partial errors.
-  const errs: string[] = [];
   for (const d of target.devices) {
-    try { await postNodeRPC(d, action.id, body); }
-    catch (err) { errs.push(`${d}: ${formatError(err)}`); }
+    enqueueDeviceAction(d, action.id, action.label, body, action.danger);
   }
-  if (errs.length > 0) throw new Error(errs.join(" · "));
 }
 
 // ---- Field rendering -----------------------------------------------------
