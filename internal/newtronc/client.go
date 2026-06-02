@@ -94,7 +94,7 @@ type networkEntry struct {
 // GET /network is the lightest read newtron-server exposes and is confirmed
 // present at pkg/newtron/api/handler.go:23 ("GET /network").
 func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/network", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/newtron/v1/network", nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
 	}

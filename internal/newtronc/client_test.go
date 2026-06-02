@@ -14,10 +14,11 @@ import (
 // TestClient_ListNetworks_Success verifies that ListNetworks parses the newtron
 // APIResponse envelope and returns the network IDs.
 //
-// Substrate: GET /network confirmed at pkg/newtron/api/handler.go:23.
+// Newtron-server v1.2 serves the API under /newtron/v1/ (composed under
+// newt-server alongside /newtrun/v1/ and /newtlab/v1/).
 func TestClient_ListNetworks_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/network" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
