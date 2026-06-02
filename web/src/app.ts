@@ -6,8 +6,6 @@
 import {
   fetchSpecList,
   fetchSpecDetail,
-  createSpec,
-  deleteSpec,
   addSubRule,
   removeQoSQueue,
   removeFilterRule,
@@ -48,17 +46,32 @@ import {
   fetchNodeProjection,
   fetchNodeIntentTree,
   postNodeReconcile,
-  postTopologyDevice,
-  deleteTopologyDevice,
-  postTopologyLink,
   deleteTopologyLink,
   postBindService,
   postUnbindService,
   postRefreshService,
 } from "./api/newtcon/nodes.js";
+// Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
+// were previously called directly from the topology view. With the staging
+// queue introduced in staging.ts, those flows go through enqueue* + applyAll
+// instead, so we don't import them here.
 import { NODE_ACTIONS } from "./topology-actions.js";
 import { showContextMenu } from "./topology-actions-ui.js";
 import { renderActionPanel } from "./topology-action-panel.js";
+import {
+  enqueueSpecCreate,
+  enqueueSpecDelete,
+  enqueueTopologyAddDevice,
+  enqueueTopologyRemoveDevice,
+  enqueueTopologyAddLink,
+  pendingSpecCreates,
+  isSpecPendingDelete,
+  pendingTopologyDeviceAdds,
+  isDevicePendingRemove,
+  pendingTopologyLinkAdds,
+  subscribe as subscribePending,
+  type SpecKind as StagingSpecKind,
+} from "./staging.js";
 
 // ---- DOM helper -------------------------------------------------------------
 
@@ -327,19 +340,17 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Create");
   content.appendChild(submitBtn);
 
-  submitBtn.addEventListener("click", async () => {
+  submitBtn.addEventListener("click", () => {
     errorOut.textContent = "";
     submitBtn.disabled = true;
-    submitBtn.textContent = "Creating…";
-
+    submitBtn.textContent = "Queued";
     try {
       const values = getValues();
-      await createSpec(kind, values);
-      submitBtn.textContent = "Created";
-      const ok = el("p", { className: "form-success" }, "Created successfully.");
+      const name = String(values["name"] ?? values["id"] ?? "(unnamed)");
+      enqueueSpecCreate(kind as StagingSpecKind, name, values);
+      const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, submitBtn);
       onSuccess();
-      // Close drawer after short delay.
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
         drawer.classList.remove("open");
@@ -347,12 +358,7 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Create";
-      if (err instanceof ApiError) {
-        const kindLabel = translateErrorKind(err.kind);
-        errorOut.appendChild(el("p", { className: "panel-error" }, kindLabel + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -397,45 +403,49 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
 
     container.appendChild(header);
 
-    if (items.length === 0) {
+    // Combine server-side items with pending creates (overlay so the operator
+    // sees both committed and queued items in one list, with color).
+    const queuedAdds = pendingSpecCreates(panel.kind as StagingSpecKind);
+    type SpecRow = { name: string; pending: "none" | "create" };
+    const allRows: SpecRow[] = items.map((n) => ({ name: n, pending: "none" as const }));
+    for (const n of queuedAdds) {
+      if (!items.includes(n)) allRows.push({ name: n, pending: "create" });
+    }
+
+    if (allRows.length === 0) {
       container.appendChild(el("p", { className: "panel-empty" }, "none defined"));
     } else {
       const list = el("ul", { className: "panel-list" });
-      for (const name of items) {
-        const row = el("li", { className: "panel-list-row" });
-        const item = el("span", { className: "panel-list-item", tabIndex: 0 }, name);
-        item.addEventListener("click", () => openDetail(panel.kind, panel.title, name));
+      for (const r of allRows) {
+        const isPendingCreate = r.pending === "create";
+        const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
+        const row = el("li", {
+          className: "panel-list-row"
+            + (isPendingCreate ? " panel-list-row--pending-add" : "")
+            + (isPendingDelete ? " panel-list-row--pending-del" : ""),
+        });
+        const item = el("span", { className: "panel-list-item", tabIndex: 0 }, r.name);
+        item.addEventListener("click", () => openDetail(panel.kind, panel.title, r.name));
         item.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            openDetail(panel.kind, panel.title, name);
+            openDetail(panel.kind, panel.title, r.name);
           }
         });
         row.appendChild(item);
 
         // Delete affordance — × button shown on hover.
-        if (specForms[panel.kind]) {
+        if (specForms[panel.kind] && !isPendingCreate) {
           const delBtn = el("button", {
             type: "button",
             className: "panel-delete-btn",
-            title: "Delete " + name,
-            ariaLabel: "Delete " + name,
-          }, "×");
+            title: isPendingDelete ? "Cancel delete" : "Delete " + r.name,
+            ariaLabel: isPendingDelete ? "Cancel delete of " + r.name : "Delete " + r.name,
+          }, isPendingDelete ? "↺" : "×");
           delBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (!window.confirm(`Delete ${panel.title.replace(/s$/, "").toLowerCase()} "${name}"? This cannot be undone.`)) return;
-            delBtn.disabled = true;
-            delBtn.textContent = "…";
-            deleteSpec(panel.kind, name)
-              .then(() => refreshPanel(panel, container))
-              .catch((err) => {
-                delBtn.disabled = false;
-                delBtn.textContent = "×";
-                const msg = err instanceof ApiError
-                  ? translateErrorKind(err.kind) + ": " + err.message
-                  : String(err);
-                alert("Delete failed: " + msg);
-              });
+            enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
+            refreshPanel(panel, container);
           });
           row.appendChild(delBtn);
         }
@@ -856,6 +866,9 @@ interface TopologyRenderOpts {
   onNodeDelete?: (name: string) => void;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
+  // Staging overlays — render device cards in green/red according to queue state.
+  isPendingAdd?: (name: string) => boolean;
+  isPendingRemove?: (name: string) => boolean;
 }
 
 interface TopologyRenderResult {
@@ -915,9 +928,15 @@ function renderTopologySVG(
     if (!pos) continue;
     const isSelected = selected.has(node.name);
     const pendingCount = opts.pendingByDevice?.get(node.name) ?? 0;
+    const isPendingAdd = opts.isPendingAdd?.(node.name) ?? false;
+    const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
 
     const g = svgEl("g", {
-      "class": "topo-node" + (isSelected ? " topo-node--selected" : "") + (pendingCount > 0 ? " topo-node--pending" : ""),
+      "class": "topo-node"
+        + (isSelected ? " topo-node--selected" : "")
+        + (pendingCount > 0 ? " topo-node--pending" : "")
+        + (isPendingAdd ? " topo-node--pending-add" : "")
+        + (isPendingRemove ? " topo-node--pending-del" : ""),
       role: "button",
       tabindex: "0",
       "aria-label": `Device ${node.name}`,
@@ -1808,7 +1827,7 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
   submitBtn.addEventListener("click", async () => {
     errorOut.textContent = "";
     submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
+    submitBtn.textContent = "Queued";
     try {
       const values = getValues();
       const name = values["name"] as string;
@@ -1818,10 +1837,9 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
         submitBtn.textContent = "Add device";
         return;
       }
-      // Minimal device body — steps and ports may be added later via update.
-      await postTopologyDevice({ name, device: { steps: [], ports: {} } });
-      submitBtn.textContent = "Added";
-      content.insertBefore(el("p", { className: "form-success" }, "Device added."), submitBtn);
+      // Stage rather than POST. Final body is materialised on Save.
+      enqueueTopologyAddDevice(name, { steps: [], ports: {} });
+      content.insertBefore(el("p", { className: "form-success" }, "Device queued (green). Click Save in the header to apply."), submitBtn);
       onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
@@ -1830,12 +1848,7 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Add device";
-      if (err instanceof ApiError) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -1909,11 +1922,10 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     }
 
     submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
+    submitBtn.textContent = "Queued";
     try {
-      await postTopologyLink({ a: `${aDevice}:${aIface}`, z: `${zDevice}:${zIface}` });
-      submitBtn.textContent = "Added";
-      content.insertBefore(el("p", { className: "form-success" }, "Link added."), submitBtn);
+      enqueueTopologyAddLink(`${aDevice}:${aIface}`, `${zDevice}:${zIface}`);
+      content.insertBefore(el("p", { className: "form-success" }, "Link queued (green). Click Save in the header to apply."), submitBtn);
       onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
@@ -1922,12 +1934,7 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Add link";
-      if (err instanceof ApiError) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -1992,7 +1999,29 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // live-fetched lists merge in via the panel module's source cache.
     const interfacesByDevice: Map<string, string[]> = new Map();
     const rawData = (data ?? {}) as { devices?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
-    const rawDevices = rawData.devices ?? {};
+    const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.devices ?? {}) };
+    // Overlay pending topology additions so the diagram shows them in green.
+    const pendingDeviceAdds = pendingTopologyDeviceAdds();
+    for (const p of pendingDeviceAdds) {
+      if (!(p.name in rawDevices)) rawDevices[p.name] = (p.body as { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> });
+    }
+    // Merge pending-link adds into topoData.links so the graph draws them.
+    for (const ln of pendingTopologyLinkAdds()) {
+      topoData.links = topoData.links ?? [];
+      const [aDev, aIf] = ln.a.split(":");
+      const [zDev, zIf] = ln.z.split(":");
+      topoData.links.push({
+        local_device: aDev, local_interface: aIf,
+        remote_device: zDev, remote_interface: zIf,
+      });
+    }
+    // Add pending-device nodes (green) to topoData.nodes.
+    topoData.nodes = topoData.nodes ?? [];
+    for (const p of pendingDeviceAdds) {
+      if (!topoData.nodes.some((n) => n.name === p.name)) {
+        topoData.nodes.push({ name: p.name, type: "queued" });
+      }
+    }
     for (const [name, dev] of Object.entries(rawDevices)) {
       interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort());
     }
@@ -2032,20 +2061,26 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         },
         driftByDevice,
         onNodeDelete: (deviceName) => {
-          if (!window.confirm(`Remove device "${deviceName}" from the topology? This cannot be undone.`)) return;
-          deleteTopologyDevice(deviceName)
-            .then(() => mountTopologyTab(root))
-            .catch((err) => {
-              const msg = err instanceof ApiError
-                ? translateErrorKind(err.kind) + ": " + err.message
-                : String(err);
-              alert("Remove device failed: " + msg);
-            });
+          // Stage the remove rather than fire immediately; toggles if already queued.
+          enqueueTopologyRemoveDevice(deviceName);
+          mountTopologyTab(root);
         },
         selected,
+        isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
+        isPendingRemove: (n) => isDevicePendingRemove(n),
       });
       graphSlot.appendChild(result.svg);
     };
+
+    // Re-render the topology tab when the pending queue changes (so freshly
+    // queued devices/links appear in green without the operator having to
+    // navigate away).
+    const unsub = subscribePending(() => mountTopologyTab(root));
+    // Replace the listener if mountTopologyTab is re-entered.
+    if ((root as unknown as { _topoUnsub?: () => void })._topoUnsub) {
+      (root as unknown as { _topoUnsub?: () => void })._topoUnsub!();
+    }
+    (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
 
     const renderPanel = (): void => {
       renderActionPanel(

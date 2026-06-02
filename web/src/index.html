@@ -49,6 +49,15 @@
             <span class="crumb" id="crumb-view">Specs</span>
           </div>
           <div class="header-status">
+            <div id="pending-bar" class="pending-bar" hidden>
+              <button type="button" id="pending-bar-toggle" class="pending-bar-toggle" title="Show pending changes">
+                <span class="pending-bar-count">0</span>
+                <span class="pending-bar-label">pending</span>
+              </button>
+              <button type="button" id="pending-bar-discard" class="btn btn-ghost btn-sm">Discard</button>
+              <button type="button" id="pending-bar-save" class="btn btn-primary btn-sm">Save</button>
+            </div>
+            <div id="pending-bar-list" class="pending-bar-list" hidden></div>
             <span class="status-pill" id="newtron-pill" title="newtron connection">
               <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
               <span id="newtron-target">checking…</span>
