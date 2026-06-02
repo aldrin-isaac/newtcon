@@ -863,6 +863,7 @@ interface TopologyRenderOpts {
   onNodeClick: (name: string, ev: MouseEvent) => void;
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
+  onlineByDevice?: Map<string, boolean>;
   onNodeDelete?: (name: string) => void;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
@@ -930,13 +931,19 @@ function renderTopologySVG(
     const pendingCount = opts.pendingByDevice?.get(node.name) ?? 0;
     const isPendingAdd = opts.isPendingAdd?.(node.name) ?? false;
     const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
+    const onlineState = opts.onlineByDevice?.get(node.name);
+    // unknown (probe still in flight or not run) → no class; online → green; offline → grey
+    const onlineClass = onlineState === true ? " topo-node--online"
+                      : onlineState === false ? " topo-node--offline"
+                      : "";
 
     const g = svgEl("g", {
       "class": "topo-node"
         + (isSelected ? " topo-node--selected" : "")
         + (pendingCount > 0 ? " topo-node--pending" : "")
         + (isPendingAdd ? " topo-node--pending-add" : "")
-        + (isPendingRemove ? " topo-node--pending-del" : ""),
+        + (isPendingRemove ? " topo-node--pending-del" : "")
+        + onlineClass,
       role: "button",
       tabindex: "0",
       "aria-label": `Device ${node.name}`,
@@ -998,6 +1005,21 @@ function renderTopologySVG(
         }));
       }
     });
+
+    // Online/offline indicator — small status dot in the bottom-left.
+    if (onlineState !== undefined) {
+      const sx = pos.cx - NODE_W / 2 + 8;
+      const sy = pos.cy + NODE_H / 2 - 8;
+      const dot = svgEl("g", { "class": "topo-online-badge" });
+      dot.appendChild(svgEl("circle", {
+        cx: String(sx), cy: String(sy), r: "5",
+        "class": onlineState ? "topo-online-dot topo-online-dot--ok" : "topo-online-dot topo-online-dot--off",
+      }));
+      const t = svgEl("title");
+      t.textContent = onlineState ? `${node.name} is online` : `${node.name} is offline`;
+      dot.appendChild(t);
+      g.appendChild(dot);
+    }
 
     // Pending-changes badge (small dot in the bottom-right; drift is top-right,
     // delete is top-left, so we avoid overlap.)
@@ -1950,19 +1972,36 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     root.textContent = "";
     const topoData = adaptTopology(data);
 
-    // Fetch drift for each device in parallel; render badges where present.
+    // Per-device probes: online (does newtron reach the device?) and drift
+    // (does the device's CONFIG_DB diverge from the projected intent?).
+    // Both probe in parallel; both tolerate failure (a device that is offline
+    // is rendered with the offline badge; drift is only meaningful if online).
     const deviceNames = Array.isArray(topoData.nodes)
       ? topoData.nodes.map((n) => n.name).filter((n) => typeof n === "string")
       : [];
+
+    const onlineByDevice = new Map<string, boolean>();
     const driftByDevice = new Map<string, number>();
-    const driftResults = await Promise.allSettled(
-      deviceNames.map((name) => fetchNodeDrift(name))
+    const probeResults = await Promise.allSettled(
+      deviceNames.map(async (name) => {
+        // Hit /info as the cheapest available liveness probe. Success → online.
+        // Failure → offline (we don't distinguish reasons in v1; newtron#75
+        // tracks a dedicated /status endpoint).
+        try {
+          await fetchNodeInfo(name);
+          onlineByDevice.set(name, true);
+        } catch {
+          onlineByDevice.set(name, false);
+          return;
+        }
+        // Drift only makes sense for online devices.
+        try {
+          const drift = await fetchNodeDrift(name);
+          if (Array.isArray(drift)) driftByDevice.set(name, drift.length);
+        } catch { /* drift unavailable; leave count undefined */ }
+      })
     );
-    driftResults.forEach((r, i) => {
-      if (r.status === "fulfilled" && Array.isArray(r.value)) {
-        driftByDevice.set(deviceNames[i], r.value.length);
-      }
-    });
+    void probeResults;
 
     // Build toolbar with Add device and Add link buttons.
     const toolbar = el("div", { className: "topology-toolbar" });
@@ -2060,6 +2099,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           });
         },
         driftByDevice,
+        onlineByDevice,
         onNodeDelete: (deviceName) => {
           // Stage the remove rather than fire immediately; toggles if already queued.
           enqueueTopologyRemoveDevice(deviceName);

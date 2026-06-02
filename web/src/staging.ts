@@ -114,7 +114,53 @@ export function deviceQueue(device: string): readonly Pending[] {
 
 export async function applyDevice(device: string): Promise<ApplyResult> {
   const targets = deviceQueue(device);
-  return applySubset(targets);
+  const onlineStatus = await probeOnline(device);
+  // Use topology mode for offline devices so the POST writes to the in-memory
+  // tree without trying to talk to redis. Online devices use the default
+  // (intent) mode so the change lands on the actual switch.
+  const mode: "default" | "topology" = onlineStatus === false ? "topology" : "default";
+  const result = await applySubset(targets, mode);
+  // After the per-action POSTs succeed for this device, persist the resulting
+  // intent tree to topology.json so the offline representation includes them
+  // (matches the operator's "(1) saved to offline topology" requirement).
+  // Only call /intent/save if at least one device-targeted action applied —
+  // otherwise nothing changed on the in-memory tree and saving is a no-op.
+  const touched = result.applied.some((p) =>
+    (p.group === "device" && (p as { device: string }).device === device) ||
+    (p.group === "interface" && (p as { device: string }).device === device));
+  if (touched) {
+    try {
+      await postJSON(`/api/nodes/${encodeURIComponent(device)}/rpc/intent/save${mode === "topology" ? "?mode=topology" : ""}`, {});
+    } catch (err) {
+      // The actions landed (on device + in-memory) but the topology.json save
+      // failed. Surface as a synthetic failed entry so the operator sees it.
+      result.failed.push({
+        pending: { id: "intent-save", group: "device", op: "action", device, actionId: "intent/save", label: "persist to topology.json", body: {} } as Pending,
+        error: formatError(err),
+      });
+    }
+  }
+  return result;
+}
+
+// Probe newtron's /info to learn whether a device is reachable. Caches a
+// freshness window so a burst of applyDevice calls in close succession only
+// probes once per device.
+const onlineCache: Map<string, { at: number; online: boolean }> = new Map();
+const ONLINE_CACHE_MS = 5_000;
+
+async function probeOnline(device: string): Promise<boolean | undefined> {
+  const cached = onlineCache.get(device);
+  if (cached && Date.now() - cached.at < ONLINE_CACHE_MS) return cached.online;
+  try {
+    const r = await fetch(`/api/nodes/${encodeURIComponent(device)}/info`, { cache: "no-store" });
+    const online = r.ok;
+    onlineCache.set(device, { at: Date.now(), online });
+    return online;
+  } catch {
+    onlineCache.set(device, { at: Date.now(), online: false });
+    return false;
+  }
 }
 
 export function discardDevice(device: string): void {
@@ -173,17 +219,41 @@ export interface ApplyResult {
 }
 
 export async function applyAll(): Promise<ApplyResult> {
-  return applySubset(queue.slice());
+  // Default mode for everyone; per-device applies decide topology mode based
+  // on online status. applyAll is the workspace-wide Save; individual offline
+  // devices in the queue will have their actions fail, which is correct
+  // behavior (their items stay queued; surface the failure to the operator).
+  const result = await applySubset(queue.slice(), "default");
+  // After cross-device actions land, fan out an intent/save per touched device
+  // so topology.json picks up the changes. Best-effort — any save failures
+  // surface as synthetic failed entries.
+  const touchedDevices = new Set<string>();
+  for (const p of result.applied) {
+    if (p.group === "device" || p.group === "interface") {
+      touchedDevices.add((p as { device: string }).device);
+    }
+  }
+  for (const d of touchedDevices) {
+    try {
+      await postJSON(`/api/nodes/${encodeURIComponent(d)}/rpc/intent/save`, {});
+    } catch (err) {
+      result.failed.push({
+        pending: { id: "intent-save", group: "device", op: "action", device: d, actionId: "intent/save", label: "persist to topology.json", body: {} } as Pending,
+        error: formatError(err),
+      });
+    }
+  }
+  return result;
 }
 
-async function applySubset(targets: readonly Pending[]): Promise<ApplyResult> {
+async function applySubset(targets: readonly Pending[], mode: "default" | "topology"): Promise<ApplyResult> {
   // Order: spec creates → device adds → link adds → device-actions →
   // interface-actions → link removes → device removes → spec deletes
   const ordered = targets.slice().sort((a, b) => groupOrder(a) - groupOrder(b));
   const result: ApplyResult = { applied: [], failed: [] };
   for (const p of ordered) {
     try {
-      await applyOne(p);
+      await applyOne(p, mode);
       removeFromQueue(p.id);
       result.applied.push(p);
     } catch (err) {
@@ -206,7 +276,8 @@ function groupOrder(p: Pending): number {
   return 9;
 }
 
-async function applyOne(p: Pending): Promise<void> {
+async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void> {
+  const modeQS = mode === "topology" ? "?mode=topology" : "";
   if (p.group === "spec" && p.op === "create") {
     await postJSON(`/api/${p.kind}`, p.body);
     return;
@@ -232,11 +303,11 @@ async function applyOne(p: Pending): Promise<void> {
     return;
   }
   if (p.group === "device" && p.op === "action") {
-    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}`, p.body);
+    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}${modeQS}`, p.body);
     return;
   }
   if (p.group === "interface" && p.op === "action") {
-    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/interfaces/${encodeURIComponent(p.iface)}/rpc/${p.actionId}`, p.body);
+    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/interfaces/${encodeURIComponent(p.iface)}/rpc/${p.actionId}${modeQS}`, p.body);
     return;
   }
   throw new Error("unknown pending op");

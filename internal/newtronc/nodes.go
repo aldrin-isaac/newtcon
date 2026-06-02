@@ -494,18 +494,24 @@ func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, er
 // NodeRPC POSTs an arbitrary node-level newtron action with an optional JSON
 // body. subpath is the path segment after /node/{device}/ (for example
 // "create-vlan", "save-config", "add-static-route"). The full URL is
-//   /newtron/v1/network/{network}/node/{device}/{subpath}
-// This lets newtcon surface every node-level write endpoint newtron offers
-// without enumerating each one as a typed client method.
-func (c *Client) NodeRPC(ctx context.Context, network, device, subpath string, body []byte) (json.RawMessage, error) {
+//   /newtron/v1/network/{network}/node/{device}/{subpath}?{rawQuery}
+// rawQuery is forwarded verbatim so caller-supplied options like
+// ?mode=topology and ?execute=false reach newtron unchanged.
+func (c *Client) NodeRPC(ctx context.Context, network, device, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
 	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/%s", network, device, subpath)
+	if rawQuery != "" {
+		path = path + "?" + rawQuery
+	}
 	return c.nodePostRaw(ctx, path, body)
 }
 
-// InterfaceRPC POSTs an arbitrary per-interface newtron action. The full URL is
-//   /newtron/v1/network/{network}/node/{device}/interface/{iface}/{subpath}
-func (c *Client) InterfaceRPC(ctx context.Context, network, device, iface, subpath string, body []byte) (json.RawMessage, error) {
+// InterfaceRPC POSTs an arbitrary per-interface newtron action. rawQuery is
+// forwarded verbatim (see NodeRPC).
+func (c *Client) InterfaceRPC(ctx context.Context, network, device, iface, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
 	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/interface/%s/%s", network, device, iface, subpath)
+	if rawQuery != "" {
+		path = path + "?" + rawQuery
+	}
 	return c.nodePostRaw(ctx, path, body)
 }
 
