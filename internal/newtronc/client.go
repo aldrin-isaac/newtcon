@@ -4,9 +4,26 @@
 // of newtron-server in the codebase. CI enforces this isolation: no other
 // package may construct an http.Client or call http.Get/http.Post against
 // newtron-server's address."
+//
+// Wire shape (newtron docs/newt-server.md). The base URL points at the
+// aggregated bin/newt-server, which fans out by prefix to three engines and
+// its own health probe. All path construction in this package routes through
+// the engine-base helpers below; per-callsite Sprintf must not concatenate
+// the prefix again.
+//
+//	/newtron/v1/...        newtron engine        →  c.newtronBase()
+//	/newtrun/v1/...        newtrun engine        →  c.newtrunBase()
+//	/newtlab/v1/...        newtlab engine        →  c.newtlabBase()
+//	/newt-server/v1/health server-level liveness →  c.newtServerBase()
+//
+// Concurrency: as of newtron PR #101 (see docs/newtron/hld.md §8) the API
+// layer holds no spec lock and per-engine atomicity is owned by the engine.
+// Multiple concurrent calls through this client into the same network are
+// safe; callers do not need to serialize.
 package newtronc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,6 +93,21 @@ type newtronAPIResponse struct {
 	Error string          `json:"error"`
 }
 
+// Engine-base helpers — the only places the service prefix string lives.
+//
+// docs/newt-server.md (newtron repo) pins these prefixes. newt-server's outer
+// mux routes by prefix only and forwards the URL to the engine handler
+// unchanged. Callers Sprintf relative paths onto the helper output; they MUST
+// NOT concatenate "/newtron/v1" themselves.
+//
+// There is no newtrunBase(): newtrun's /newtrun/v1/topologies has been removed
+// (spec-scaffolding moved to POST /newtron/v1/network {scaffold:true}; see
+// [Client.RegisterNetwork]). Add a newtrunBase() helper if and when a real
+// newtrun endpoint surfaces.
+
+func (c *Client) newtronBase() string    { return c.baseURL + "/newtron/v1" }
+func (c *Client) newtServerBase() string { return c.baseURL + "/newt-server/v1" }
+
 // networkEntry is the minimal shape we decode from GET /network responses.
 // Newtron returns an array of network objects; we only need the ID field for
 // the health probe.
@@ -83,18 +115,14 @@ type networkEntry struct {
 	ID string `json:"id"`
 }
 
-// ListNetworks calls GET {baseURL}/network and returns the IDs of all registered
-// networks.
+// ListNetworks calls GET /newtron/v1/network and returns the IDs of all
+// registered networks (pkg/newtron/api/handler.go:24 — handleListNetworks).
 //
-// On any non-200 response, ListNetworks returns a *UnavailableError (5xx) or the
-// appropriate typed error. On transport failure, it returns a *UnavailableError
-// wrapping the original error.
-//
-// This is also the substrate call used by Health for the reachability probe:
-// GET /network is the lightest read newtron-server exposes and is confirmed
-// present at pkg/newtron/api/handler.go:23 ("GET /network").
+// On any non-200 response, ListNetworks returns a *UnavailableError (5xx) or
+// the appropriate typed error. On transport failure, it returns a
+// *UnavailableError wrapping the original error.
 func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/newtron/v1/network", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtronBase()+"/network", nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
 	}
@@ -149,19 +177,137 @@ func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// Health probes newtron-server's reachability by calling ListNetworks.
+// newtServerHealthData is the data field shape inside the envelope returned by
+// GET /newt-server/v1/health. Documented in newtron's docs/newt-server.md
+// (Routes table); the response payload was observed live as
+// {"data":{"status":"ok","version":"dev"}}. The version field is best-effort
+// (it carries the newtron build's version stamp); the probe does not require
+// it for reachability.
+type newtServerHealthData struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
+
+// Health probes newt-server's reachability via the server-level liveness
+// endpoint, GET /newt-server/v1/health (docs/newt-server.md Routes table).
 //
-// Returns (true, "") if newtron-server is reachable (any non-error response).
-// Returns (false, "") if newtron-server is unreachable.
+// This is the cheap path: it does not spin up any engine's network-list code,
+// it is documented as the server-level health probe, and it returns a short
+// JSON envelope newt-server constructs synchronously.
 //
-// The version string is always "" in v1. Newtron-server exposes no /version
-// endpoint (confirmed: pkg/newtron/api/handler.go buildMux() registers only
-// POST/GET /network at the top level — no /health or /version route). This is
-// a v1 limitation; newtron-version is not load-bearing for Composer v1.
+// Returns (true, version) when the endpoint responds 200 with status:"ok".
+// Returns (false, "") for any non-200 response, transport failure, or
+// undecodable envelope.
 func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
-	_, err := c.ListNetworks(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtServerBase()+"/health", nil)
 	if err != nil {
 		return false, ""
 	}
-	return true, ""
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, ""
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, ""
+	}
+	var env newtronAPIResponse
+	if err := json.Unmarshal(body, &env); err != nil {
+		return false, ""
+	}
+	var data newtServerHealthData
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		// Server responded 200 but with an unexpected envelope. Treat as
+		// "reachable but version unknown" — the status code is the load-bearing
+		// signal for the status pill.
+		return true, ""
+	}
+	return data.Status == "ok", data.Version
+}
+
+// RegisterNetwork registers a network with newtron. Mirrors the wire shape
+// documented in newtron's docs/newtron/api.md §POST /newtron/v1/network:
+//
+//	{"id":..., "spec_dir":..., "scaffold":..., "description":...}
+//
+// When scaffold=false (the default), the spec_dir must already contain a
+// valid spec layout and newtron loads it as-is. When scaffold=true, newtron
+// creates an empty spec layout at spec_dir (three zero-valued spec files and
+// an empty profiles/ subdirectory) before registering. description is only
+// consulted on scaffold=true and seeds topology.json's description field.
+//
+// Error mapping (newtron docs api.md §Status codes):
+//
+//	400 → *ValidationError (missing id/spec_dir or invalid JSON)
+//	409 → *ConflictError   (id already registered OR scaffold-into-initialized-dir)
+//	5xx → *UnavailableError (spec directory load error)
+//
+// Callers cannot disambiguate the two 409 causes from the typed error alone;
+// the underlying response body (preserved in *ConflictError.Body) carries the
+// distinguishing message from newtron.
+//
+// Returns the network ID newtron acknowledged.
+func (c *Client) RegisterNetwork(ctx context.Context, id, specDir string, scaffold bool, description string) (string, error) {
+	body := map[string]any{
+		"id":       id,
+		"spec_dir": specDir,
+	}
+	if scaffold {
+		body["scaffold"] = true
+		if description != "" {
+			body["description"] = description
+		}
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.newtronBase()+"/network", bytes.NewReader(b))
+	if err != nil {
+		return "", &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
+		// fall through
+	case resp.StatusCode == http.StatusBadRequest:
+		return "", &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusNotFound:
+		return "", &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusConflict:
+		return "", &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode >= 500:
+		return "", &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	default:
+		return "", &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	}
+	var env newtronAPIResponse
+	if err := json.Unmarshal(respBody, &env); err != nil {
+		return "", &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if env.Error != "" {
+		return "", &UnavailableError{Cause: env.Error}
+	}
+	var data struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return "", &UnavailableError{Cause: fmt.Sprintf("decoding RegisterNetwork response: %v", err)}
+	}
+	return data.ID, nil
 }

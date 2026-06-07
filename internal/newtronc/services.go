@@ -3,14 +3,14 @@
 // originates here; no other package may construct an http.Client or call
 // http.Get/http.Post against newtron-server's address.
 //
-// This file implements service-related newtron-server calls:
+// This file implements service-related newtron calls:
 //   - [Client.Network] — returns the network ID newtcon-server uses for v1.
-//   - [Client.ListServices] — GET {baseURL}/network/{netID}/service.
-//   - [Client.ShowService] — GET {baseURL}/network/{netID}/service/{name}.
+//   - [Client.ListServices] — GET /newtron/v1/network/{netID}/service.
+//   - [Client.ShowService] — GET /newtron/v1/network/{netID}/service/{name}.
 //
 // Newtron substrate verified against pkg/newtron/api/handler.go buildMux():
-//   - Line 30: mux.HandleFunc("GET /network/{netID}/service", s.handleListServices)
-//   - Line 31: mux.HandleFunc("GET /network/{netID}/service/{name}", s.handleShowService)
+//   - mux.HandleFunc("GET /newtron/v1/network/{netID}/service",         s.handleListServices)
+//   - mux.HandleFunc("GET /newtron/v1/network/{netID}/service/{name}",  s.handleShowService)
 package newtronc
 
 import (
@@ -67,19 +67,18 @@ func (c *Client) Network(ctx context.Context) string {
 	return "default"
 }
 
-// ListServices calls GET {baseURL}/network/{netID}/service and returns the list
-// of service names registered in that network.
+// ListServices calls GET /newtron/v1/network/{netID}/service and returns the
+// list of service names registered in that network.
 //
 // Newtron returns {"data":["svc1","svc2"],"error":""} — see
-// pkg/newtron/api/handler_network.go:61 handleListServices and
-// pkg/newtron/spec_ops.go:16 ListServices() []string.
+// pkg/newtron/api/handler_network.go handleListServices.
 //
 // Error mapping:
 //   - Transport failure or 5xx → *UnavailableError
 //   - 404 (network not registered) → *NotFoundError
 //   - Other 4xx → *UnavailableError (unexpected from this endpoint)
 func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronService, error) {
-	url := fmt.Sprintf("%s/newtron/v1/network/%s/service", c.baseURL, network)
+	url := fmt.Sprintf("%s/network/%s/service", c.newtronBase(), network)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -132,19 +131,18 @@ func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronSer
 	return services, nil
 }
 
-// ShowService calls GET {baseURL}/network/{netID}/service/{name} and returns
+// ShowService calls GET /newtron/v1/network/{netID}/service/{name} and returns
 // the full service detail for the named service.
 //
 // Newtron returns {"data":{...ServiceDetail...},"error":""} — see
-// pkg/newtron/api/handler_network.go:76 handleShowService and
-// pkg/newtron/spec_ops.go:21 ShowService() *ServiceDetail.
+// pkg/newtron/api/handler_network.go handleShowService.
 //
 // Error mapping:
 //   - Transport failure or 5xx → *UnavailableError
 //   - 404 (service not found) → *NotFoundError
 //   - Other 4xx → *UnavailableError (unexpected from this endpoint in v1)
 func (c *Client) ShowService(ctx context.Context, network, name string) (*NewtronServiceDetail, error) {
-	url := fmt.Sprintf("%s/newtron/v1/network/%s/service/%s", c.baseURL, network, name)
+	url := fmt.Sprintf("%s/network/%s/service/%s", c.newtronBase(), network, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}

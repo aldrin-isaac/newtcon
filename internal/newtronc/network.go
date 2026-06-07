@@ -17,7 +17,7 @@ import (
 // listNames is the shared helper for every network-level list endpoint.
 // Newtron returns {"data":["name1","name2"],"error":""} for all of them.
 func (c *Client) listNames(ctx context.Context, network, kind string) ([]string, error) {
-	url := fmt.Sprintf("%s/newtron/v1/network/%s/%s", c.baseURL, network, kind)
+	url := fmt.Sprintf("%s/network/%s/%s", c.newtronBase(), network, kind)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -100,8 +100,8 @@ func (c *Client) ListPlatforms(ctx context.Context, network string) ([]string, e
 // Write helpers
 // ============================================================================
 
-// networkPost sends POST {baseURL}/network/{netID}/{verb} with the given JSON
-// body. On 200/201 it returns the decoded "data" field as RawMessage.
+// networkPost sends POST /newtron/v1/network/{netID}/{verb} with the given
+// JSON body. On 200/201 it returns the decoded "data" field as RawMessage.
 //
 // Error mapping mirrors newtron's RPC conventions:
 //   - 400 → *ValidationError (invalid input)
@@ -113,7 +113,7 @@ func (c *Client) networkPost(ctx context.Context, network, verb string, body any
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
 	}
-	url := fmt.Sprintf("%s/newtron/v1/network/%s/%s", c.baseURL, network, verb)
+	url := fmt.Sprintf("%s/network/%s/%s", c.newtronBase(), network, verb)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -259,7 +259,7 @@ func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy stri
 // Returns the decoded "data" field as RawMessage — callers forward it
 // verbatim to keep the substrate honest (no field stripping, no rename).
 func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json.RawMessage, error) {
-	url := fmt.Sprintf("%s/newtron/v1/network/%s/%s/%s", c.baseURL, network, kind, name)
+	url := fmt.Sprintf("%s/network/%s/%s/%s", c.newtronBase(), network, kind, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
