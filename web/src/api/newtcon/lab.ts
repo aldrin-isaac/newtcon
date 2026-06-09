@@ -2,19 +2,19 @@
 //
 // All calls go through newtcon-server which proxies to newtlab-server.
 // Endpoints:
-//   GET  /api/lab/topologies
-//   GET  /api/lab/topologies/{name}/status
-//   POST /api/lab/topologies/{name}/deploy
-//   POST /api/lab/topologies/{name}/destroy
-//   POST /api/lab/topologies/{name}/provision
-//   GET  /api/lab/topologies/{name}/events    ← EventSource-based SSE
-//   POST /api/lab/topologies/{name}/nodes/{node}/start
-//   POST /api/lab/topologies/{name}/nodes/{node}/stop
+//   GET  /api/labs
+//   GET  /api/labs/{name}/status
+//   POST /api/labs/{name}/deploy
+//   POST /api/labs/{name}/destroy
+//   POST /api/labs/{name}/provision
+//   GET  /api/labs/{name}/events    ← EventSource-based SSE
+//   POST /api/labs/{name}/nodes/{node}/start
+//   POST /api/labs/{name}/nodes/{node}/stop
 
 import { ApiError } from "./services.js";
 
-// TopologyListItem is one entry from GET /api/lab/topologies.
-export interface TopologyListItem {
+// LabListItem is one entry from GET /api/labs.
+export interface LabListItem {
   name: string;
 }
 
@@ -39,7 +39,7 @@ export interface LabState {
   nodes: Record<string, NodeState>;
 }
 
-// DeployRequest is the optional body for POST /api/lab/topologies/{name}/deploy.
+// DeployRequest is the optional body for POST /api/labs/{name}/deploy.
 export interface DeployRequest {
   provision?: boolean;
   force?: boolean;
@@ -47,9 +47,9 @@ export interface DeployRequest {
   parallel?: number;
 }
 
-// DeployResponse is the 202 body for POST /api/lab/topologies/{name}/deploy.
+// DeployResponse is the 202 body for POST /api/labs/{name}/deploy.
 export interface DeployResponse {
-  topology: string;
+  lab: string;
   started: string;  // RFC3339
 }
 
@@ -135,63 +135,63 @@ async function postLab(url: string, body?: unknown): Promise<unknown> {
   return response.json();
 }
 
-// fetchLabTopologies returns all known topologies from GET /api/lab/topologies.
-export async function fetchLabTopologies(): Promise<TopologyListItem[]> {
-  const data = await fetchLabRaw("/api/lab/topologies");
-  return data as TopologyListItem[];
+// fetchLabs returns all known labs from GET /api/labs.
+export async function fetchLabs(): Promise<LabListItem[]> {
+  const data = await fetchLabRaw("/api/labs");
+  return data as LabListItem[];
 }
 
-// fetchLabTopologyStatus returns the LabState for one topology from
-// GET /api/lab/topologies/{name}/status.
-export async function fetchLabTopologyStatus(name: string): Promise<LabState> {
-  const data = await fetchLabRaw(`/api/lab/topologies/${encodeURIComponent(name)}/status`);
+// fetchLabStatus returns the LabState for one lab from
+// GET /api/labs/{name}/status.
+export async function fetchLabStatus(name: string): Promise<LabState> {
+  const data = await fetchLabRaw(`/api/labs/${encodeURIComponent(name)}/status`);
   return data as LabState;
 }
 
-// postLabDeploy starts an async deploy of the named topology.
-// Returns the DeployResponse (topology + started timestamp). 202 Accepted
+// postLabDeploy starts an async deploy of the named lab.
+// Returns the DeployResponse (lab + started timestamp). 202 Accepted
 // means the operation is in progress; subscribe to labEvents() for progress.
 export async function postLabDeploy(name: string, req: DeployRequest = {}): Promise<DeployResponse> {
-  const data = await postLab(`/api/lab/topologies/${encodeURIComponent(name)}/deploy`, req);
+  const data = await postLab(`/api/labs/${encodeURIComponent(name)}/deploy`, req);
   return data as DeployResponse;
 }
 
-// postLabDestroy tears down the named topology. Synchronous.
+// postLabDestroy tears down the named lab. Synchronous.
 // Returns the upstream result object.
 export async function postLabDestroy(name: string): Promise<unknown> {
-  return postLab(`/api/lab/topologies/${encodeURIComponent(name)}/destroy`);
+  return postLab(`/api/labs/${encodeURIComponent(name)}/destroy`);
 }
 
 // postLabProvision runs the post-deploy provisioning pass. Synchronous.
 export async function postLabProvision(name: string, parallel?: number): Promise<unknown> {
   const url = parallel && parallel > 0
-    ? `/api/lab/topologies/${encodeURIComponent(name)}/provision?parallel=${parallel}`
-    : `/api/lab/topologies/${encodeURIComponent(name)}/provision`;
+    ? `/api/labs/${encodeURIComponent(name)}/provision?parallel=${parallel}`
+    : `/api/labs/${encodeURIComponent(name)}/provision`;
   return postLab(url);
 }
 
 // postLabStartNode starts a stopped node. Synchronous.
-export async function postLabStartNode(topology: string, node: string): Promise<unknown> {
-  return postLab(`/api/lab/topologies/${encodeURIComponent(topology)}/nodes/${encodeURIComponent(node)}/start`);
+export async function postLabStartNode(lab: string, node: string): Promise<unknown> {
+  return postLab(`/api/labs/${encodeURIComponent(lab)}/nodes/${encodeURIComponent(node)}/start`);
 }
 
 // postLabStopNode stops a running node. Synchronous.
-export async function postLabStopNode(topology: string, node: string): Promise<unknown> {
-  return postLab(`/api/lab/topologies/${encodeURIComponent(topology)}/nodes/${encodeURIComponent(node)}/stop`);
+export async function postLabStopNode(lab: string, node: string): Promise<unknown> {
+  return postLab(`/api/labs/${encodeURIComponent(lab)}/nodes/${encodeURIComponent(node)}/stop`);
 }
 
 // labEvents opens an EventSource SSE connection to the deploy event stream
-// for the named topology.
+// for the named lab.
 //
 // onEvent is called for each SSE message. The raw event data is the JSON
 // string from the server. onError is called on connection errors.
 // The returned EventSource can be .close()'d by the caller to stop streaming.
 export function labEvents(
-  topology: string,
+  lab: string,
   onEvent: (eventType: string, data: string) => void,
   onError: (err: Event) => void,
 ): EventSource {
-  const src = new EventSource(`/api/lab/topologies/${encodeURIComponent(topology)}/events`);
+  const src = new EventSource(`/api/labs/${encodeURIComponent(lab)}/events`);
 
   // newtlab emits three event types: "phase", "complete", "error".
   for (const eventType of ["phase", "complete", "error"]) {

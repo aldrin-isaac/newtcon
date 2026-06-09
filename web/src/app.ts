@@ -15,8 +15,8 @@ import {
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
 import {
-  fetchLabTopologies,
-  fetchLabTopologyStatus,
+  fetchLabs,
+  fetchLabStatus,
   postLabDeploy,
   postLabDestroy,
   postLabProvision,
@@ -24,7 +24,7 @@ import {
   postLabStopNode,
   labEvents,
   type LabState,
-  type TopologyListItem,
+  type LabListItem,
 } from "./api/newtcon/lab.js";
 import {
   fetchTopology,
@@ -2175,16 +2175,16 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
 // ---- Lab tab ----------------------------------------------------------------
 
-// mountLabTab renders the Lab tab: list topologies with status badges, and
-// per-topology Deploy / Destroy / Provision buttons plus per-node Start/Stop.
+// mountLabTab renders the Lab tab: list labs with status badges, and
+// per-lab Deploy / Destroy / Provision buttons plus per-node Start/Stop.
 // Deploy opens an SSE log panel streaming phase events in real time.
 async function mountLabTab(root: HTMLElement): Promise<void> {
   root.textContent = "";
-  root.appendChild(el("p", { className: "status-loading" }, "Loading lab topologies…"));
+  root.appendChild(el("p", { className: "status-loading" }, "Loading labs…"));
 
-  let topologies: TopologyListItem[];
+  let labs: LabListItem[];
   try {
-    topologies = await fetchLabTopologies();
+    labs = await fetchLabs();
   } catch (err) {
     root.textContent = "";
     root.appendChild(el("p", { className: "topology-error" }, "Could not reach the lab server."));
@@ -2196,15 +2196,15 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
 
   root.textContent = "";
 
-  if (topologies.length === 0) {
-    root.appendChild(el("p", { className: "topology-empty" }, "No lab topologies found."));
+  if (labs.length === 0) {
+    root.appendChild(el("p", { className: "topology-empty" }, "No labs found."));
     return;
   }
 
-  // Render one card per topology.
-  for (const topo of topologies) {
+  // Render one card per lab.
+  for (const lab of labs) {
     const card = el("section", { className: "lab-card" });
-    card.appendChild(el("h2", { className: "lab-card-title" }, topo.name));
+    card.appendChild(el("h2", { className: "lab-card-title" }, lab.name));
 
     // Status section — loaded lazily.
     const statusDiv = el("div", { className: "lab-card-status" });
@@ -2237,9 +2237,9 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
     // Load status and render node list.
     const loadStatus = async (): Promise<void> => {
       try {
-        const state = await fetchLabTopologyStatus(topo.name);
+        const state = await fetchLabStatus(lab.name);
         renderLabStatus(statusDiv, state);
-        renderLabNodes(nodesDiv, logPanel, topo.name, state);
+        renderLabNodes(nodesDiv, logPanel, lab.name, state);
       } catch (err) {
         statusDiv.textContent = "";
         statusDiv.appendChild(el("span", { className: "lab-status lab-status--unknown" }, "status unavailable"));
@@ -2256,7 +2256,7 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
     deployBtn.addEventListener("click", () => {
       logPanel.hidden = false;
       logPanel.textContent = "";
-      logPanel.appendChild(el("p", { className: "lab-log-header" }, "Deploying " + topo.name + "…"));
+      logPanel.appendChild(el("p", { className: "lab-log-header" }, "Deploying " + lab.name + "…"));
 
       const logLines = el("pre", { className: "lab-log-lines" });
       logPanel.appendChild(logLines);
@@ -2265,7 +2265,7 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
 
       const startDeploy = async (): Promise<void> => {
         try {
-          await postLabDeploy(topo.name, {});
+          await postLabDeploy(lab.name, {});
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           logLines.textContent += `\n[error] deploy failed: ${msg}`;
@@ -2273,7 +2273,7 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
         }
 
         src = labEvents(
-          topo.name,
+          lab.name,
           (eventType, data) => {
             try {
               const payload = JSON.parse(data) as Record<string, unknown>;
@@ -2305,10 +2305,10 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
 
     // Destroy: gate with confirm to prevent accidental teardown.
     destroyBtn.addEventListener("click", () => {
-      if (!window.confirm(`Destroy lab "${topo.name}"? This tears down all VMs and links.`)) return;
+      if (!window.confirm(`Destroy lab "${lab.name}"? This tears down all VMs and links.`)) return;
       destroyBtn.disabled = true;
       destroyBtn.textContent = "Destroying…";
-      postLabDestroy(topo.name)
+      postLabDestroy(lab.name)
         .then(() => {
           destroyBtn.textContent = "Destroy";
           destroyBtn.disabled = false;
@@ -2326,7 +2326,7 @@ async function mountLabTab(root: HTMLElement): Promise<void> {
     provisionBtn.addEventListener("click", () => {
       provisionBtn.disabled = true;
       provisionBtn.textContent = "Provisioning…";
-      postLabProvision(topo.name)
+      postLabProvision(lab.name)
         .then(() => {
           provisionBtn.textContent = "Provision";
           provisionBtn.disabled = false;
@@ -2367,7 +2367,7 @@ function renderLabStatus(statusDiv: HTMLElement, state: LabState): void {
 function renderLabNodes(
   nodesDiv: HTMLElement,
   _logPanel: HTMLElement,
-  topology: string,
+  lab: string,
   state: LabState,
 ): void {
   nodesDiv.textContent = "";
@@ -2395,15 +2395,15 @@ function renderLabNodes(
       startBtn.addEventListener("click", () => {
         startBtn.disabled = true;
         startBtn.textContent = "Starting…";
-        postLabStartNode(topology, nodeName)
+        postLabStartNode(lab, nodeName)
           .then(() => {
             // Reload the parent card status to refresh all node states.
-            fetchLabTopologyStatus(topology)
+            fetchLabStatus(lab)
               .then((s) => {
                 const parentCard = nodesDiv.closest(".lab-card");
                 const statusDiv = parentCard?.querySelector(".lab-card-status") as HTMLElement | null;
                 if (statusDiv) renderLabStatus(statusDiv, s);
-                renderLabNodes(nodesDiv, _logPanel, topology, s);
+                renderLabNodes(nodesDiv, _logPanel, lab, s);
               })
               .catch(() => {
                 startBtn.textContent = "Start";
@@ -2423,17 +2423,17 @@ function renderLabNodes(
     if (nodeState.status === "running") {
       const stopBtn = el("button", { type: "button", className: "lab-btn lab-btn--sm lab-btn--danger" }, "Stop");
       stopBtn.addEventListener("click", () => {
-        if (!window.confirm(`Stop node "${nodeName}" in lab "${topology}"?`)) return;
+        if (!window.confirm(`Stop node "${nodeName}" in lab "${lab}"?`)) return;
         stopBtn.disabled = true;
         stopBtn.textContent = "Stopping…";
-        postLabStopNode(topology, nodeName)
+        postLabStopNode(lab, nodeName)
           .then(() => {
-            fetchLabTopologyStatus(topology)
+            fetchLabStatus(lab)
               .then((s) => {
                 const parentCard = nodesDiv.closest(".lab-card");
                 const statusDiv = parentCard?.querySelector(".lab-card-status") as HTMLElement | null;
                 if (statusDiv) renderLabStatus(statusDiv, s);
-                renderLabNodes(nodesDiv, _logPanel, topology, s);
+                renderLabNodes(nodesDiv, _logPanel, lab, s);
               })
               .catch(() => {
                 stopBtn.textContent = "Stop";

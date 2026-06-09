@@ -19,7 +19,7 @@ const DEFAULT_NET = "default";
 const NETWORK_AGNOSTIC = [
   "/api/health",
   "/api/networks",          // GET list / POST register operate on the registry
-  "/api/lab/",              // newtlab — separate engine, lab names are global
+  "/api/labs",              // newtlab — separate engine, lab names are global
 ];
 
 interface NetworkInfo {

@@ -24,8 +24,8 @@ func newLabMux(upstream *httptest.Server) *http.ServeMux {
 	return mux
 }
 
-// TestLabListLabs_Handler_Success verifies GET /api/lab/topologies returns
-// the topology list from newtlab verbatim.
+// TestLabListLabs_Handler_Success verifies GET /api/labs returns
+// the lab list from newtlab verbatim.
 func TestLabListLabs_Handler_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/newtlab/v1/labs" {
@@ -37,7 +37,7 @@ func TestLabListLabs_Handler_Success(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodGet, "/api/lab/topologies", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/labs", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -50,10 +50,10 @@ func TestLabListLabs_Handler_Success(t *testing.T) {
 		t.Fatalf("decoding response: %v", err)
 	}
 	if len(items) != 2 {
-		t.Fatalf("expected 2 topologies, got %d", len(items))
+		t.Fatalf("expected 2 labs, got %d", len(items))
 	}
 	if items[0]["name"] != "1node-vs" {
-		t.Errorf("expected first topology 1node-vs, got %q", items[0]["name"])
+		t.Errorf("expected first lab 1node-vs, got %q", items[0]["name"])
 	}
 }
 
@@ -66,7 +66,7 @@ func TestLabListLabs_Handler_Unavailable(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodGet, "/api/lab/topologies", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/labs", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -86,12 +86,12 @@ func TestLabListLabs_Handler_Unavailable(t *testing.T) {
 	}
 }
 
-// TestLabStatus_Handler_Success verifies GET /api/lab/topologies/{name}/status
+// TestLabStatus_Handler_Success verifies GET /api/labs/{name}/status
 // returns the LabState from newtlab.
 func TestLabStatus_Handler_Success(t *testing.T) {
-	const topoName = "2node-vs-service"
+	const labName = "2node-vs-service"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/labs/" + topoName + "/status"
+		expected := "/newtlab/v1/labs/" + labName + "/status"
 		if r.URL.Path != expected {
 			t.Errorf("unexpected path: want %s, got %s", expected, r.URL.Path)
 		}
@@ -101,7 +101,7 @@ func TestLabStatus_Handler_Success(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodGet, "/api/lab/topologies/"+topoName+"/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/"+labName+"/status", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -128,7 +128,7 @@ func TestLabStatus_Handler_NotFound(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodGet, "/api/lab/topologies/nonexistent/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/nonexistent/status", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -145,23 +145,23 @@ func TestLabStatus_Handler_NotFound(t *testing.T) {
 	}
 }
 
-// TestLabDeploy_Handler_Success verifies POST /api/lab/topologies/{name}/deploy
+// TestLabDeploy_Handler_Success verifies POST /api/labs/{name}/deploy
 // returns 202 with the deploy response.
 func TestLabDeploy_Handler_Success(t *testing.T) {
-	const topoName = "1node-vs"
+	const labName = "1node-vs"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/labs/" + topoName + "/deploy"
+		expected := "/newtlab/v1/labs/" + labName + "/deploy"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprintln(w, `{"data":{"topology":"1node-vs","started":"2026-05-31T12:00:00Z"},"error":""}`)
+		fmt.Fprintln(w, `{"data":{"lab":"1node-vs","started":"2026-05-31T12:00:00Z"},"error":""}`)
 	}))
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/"+topoName+"/deploy",
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/"+labName+"/deploy",
 		strings.NewReader(`{"provision":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -174,8 +174,8 @@ func TestLabDeploy_Handler_Success(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	if topology, _ := resp["topology"].(string); topology != "1node-vs" {
-		t.Errorf("expected topology 1node-vs, got %q", topology)
+	if lab, _ := resp["lab"].(string); lab != "1node-vs" {
+		t.Errorf("expected lab 1node-vs, got %q", lab)
 	}
 }
 
@@ -190,7 +190,7 @@ func TestLabDeploy_Handler_Conflict(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/1node-vs/deploy", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/1node-vs/deploy", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -207,7 +207,7 @@ func TestLabDeploy_Handler_Conflict(t *testing.T) {
 	}
 }
 
-// TestLabStartNode_Handler_Success verifies POST /api/lab/topologies/{name}/nodes/{node}/start
+// TestLabStartNode_Handler_Success verifies POST /api/labs/{name}/nodes/{node}/start
 // returns 200 with the node start result.
 func TestLabStartNode_Handler_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,12 +216,12 @@ func TestLabStartNode_Handler_Success(t *testing.T) {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"data":{"topology":"my-lab","node":"switch1","status":"started"},"error":""}`)
+		fmt.Fprintln(w, `{"data":{"lab":"my-lab","node":"switch1","status":"started"},"error":""}`)
 	}))
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/my-lab/nodes/switch1/start", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/my-lab/nodes/switch1/start", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -237,7 +237,7 @@ func TestLabStartNode_Handler_Success(t *testing.T) {
 	}
 }
 
-// TestLabStopNode_Handler_Success verifies POST /api/lab/topologies/{name}/nodes/{node}/stop
+// TestLabStopNode_Handler_Success verifies POST /api/labs/{name}/nodes/{node}/stop
 // returns 200 with the node stop result.
 func TestLabStopNode_Handler_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -246,12 +246,12 @@ func TestLabStopNode_Handler_Success(t *testing.T) {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"data":{"topology":"my-lab","node":"switch1","status":"stopped"},"error":""}`)
+		fmt.Fprintln(w, `{"data":{"lab":"my-lab","node":"switch1","status":"stopped"},"error":""}`)
 	}))
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/my-lab/nodes/switch1/stop", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/my-lab/nodes/switch1/stop", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -267,7 +267,7 @@ func TestLabStopNode_Handler_Success(t *testing.T) {
 	}
 }
 
-// TestLabEvents_Handler_SSEPassthrough verifies GET /api/lab/topologies/{name}/events
+// TestLabEvents_Handler_SSEPassthrough verifies GET /api/labs/{name}/events
 // proxies the SSE stream from newtlab to the browser client line-by-line.
 func TestLabEvents_Handler_SSEPassthrough(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +290,7 @@ func TestLabEvents_Handler_SSEPassthrough(t *testing.T) {
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodGet, "/api/lab/topologies/my-lab/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/my-lab/events", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -310,22 +310,22 @@ func TestLabEvents_Handler_SSEPassthrough(t *testing.T) {
 	}
 }
 
-// TestLabDestroy_Handler_Success verifies POST /api/lab/topologies/{name}/destroy
+// TestLabDestroy_Handler_Success verifies POST /api/labs/{name}/destroy
 // returns 200 with the destroy result.
 func TestLabDestroy_Handler_Success(t *testing.T) {
-	const topoName = "my-lab"
+	const labName = "my-lab"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/labs/" + topoName + "/destroy"
+		expected := "/newtlab/v1/labs/" + labName + "/destroy"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"data":{"topology":"my-lab","status":"destroyed"},"error":""}`)
+		fmt.Fprintln(w, `{"data":{"lab":"my-lab","status":"destroyed"},"error":""}`)
 	}))
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/"+topoName+"/destroy", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/"+labName+"/destroy", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -341,22 +341,22 @@ func TestLabDestroy_Handler_Success(t *testing.T) {
 	}
 }
 
-// TestLabProvision_Handler_Success verifies POST /api/lab/topologies/{name}/provision
+// TestLabProvision_Handler_Success verifies POST /api/labs/{name}/provision
 // returns 200 with the provision result.
 func TestLabProvision_Handler_Success(t *testing.T) {
-	const topoName = "my-lab"
+	const labName = "my-lab"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/labs/" + topoName + "/provision"
+		expected := "/newtlab/v1/labs/" + labName + "/provision"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintln(w, `{"data":{"topology":"my-lab","status":"provisioned"},"error":""}`)
+		fmt.Fprintln(w, `{"data":{"lab":"my-lab","status":"provisioned"},"error":""}`)
 	}))
 	defer upstream.Close()
 
 	mux := newLabMux(upstream)
-	req := httptest.NewRequest(http.MethodPost, "/api/lab/topologies/"+topoName+"/provision", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/"+labName+"/provision", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
