@@ -10,14 +10,14 @@
 //
 //	pkg/newtlab/api/handler.go buildHandler()
 //	  GET  /newtlab/v1/health
-//	  GET  /newtlab/v1/topologies
-//	  GET  /newtlab/v1/topologies/{name}/status
-//	  POST /newtlab/v1/topologies/{name}/deploy
-//	  POST /newtlab/v1/topologies/{name}/destroy
-//	  POST /newtlab/v1/topologies/{name}/provision
-//	  GET  /newtlab/v1/topologies/{name}/events      ← raw SSE stream
-//	  POST /newtlab/v1/topologies/{name}/nodes/{node}/start
-//	  POST /newtlab/v1/topologies/{name}/nodes/{node}/stop
+//	  GET  /newtlab/v1/labs
+//	  GET  /newtlab/v1/labs/{name}/status
+//	  POST /newtlab/v1/labs/{name}/deploy
+//	  POST /newtlab/v1/labs/{name}/destroy
+//	  POST /newtlab/v1/labs/{name}/provision
+//	  GET  /newtlab/v1/labs/{name}/events      ← raw SSE stream
+//	  POST /newtlab/v1/labs/{name}/nodes/{node}/start
+//	  POST /newtlab/v1/labs/{name}/nodes/{node}/stop
 //
 // Responses use the pkg/httputil APIResponse envelope {"data":…,"error":""}.
 // The events endpoint is a raw SSE stream (no envelope).
@@ -36,6 +36,13 @@ import (
 func (c *Client) newtlabBase() string {
 	return c.baseURL + "/newtlab/v1"
 }
+
+// newtlabLabsSegment is the URL segment that names a lab in newtlab's HTTP
+// routes — "labs" per PR #111. Vocabulary matches the rest of newtlab
+// (CLI binary, ~/.newtlab/labs/, LabState, ListLabs()). Every per-lab
+// Sprintf in this file MUST use this constant — keeps the wire shape in
+// one place.
+const newtlabLabsSegment = "labs"
 
 // newtlabGet performs a GET request to a newtlab-server path and returns
 // the decoded "data" field as json.RawMessage. Follows the same error-mapping
@@ -148,20 +155,20 @@ func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (in
 	return resp.StatusCode, apiResp.Data, nil
 }
 
-// LabListTopologies calls GET /newtlab/v1/topologies and returns the raw
+// LabListLabs calls GET /newtlab/v1/labs and returns the raw
 // "data" payload (an array of {"name":string} objects).
 //
-// Verified: pkg/newtlab/api/topologies.go handleListTopologies
-func (c *Client) LabListTopologies(ctx context.Context) (json.RawMessage, error) {
-	return c.newtlabGet(ctx, "/topologies")
+// Verified: pkg/newtlab/api/labs.go handleListTopologies
+func (c *Client) LabListLabs(ctx context.Context) (json.RawMessage, error) {
+	return c.newtlabGet(ctx, "/"+newtlabLabsSegment)
 }
 
-// LabTopologyStatus calls GET /newtlab/v1/topologies/{name}/status and returns
+// LabStatus calls GET /newtlab/v1/labs/{name}/status and returns
 // the raw LabState payload.
 //
-// Verified: pkg/newtlab/api/topologies.go handleGetStatus
-func (c *Client) LabTopologyStatus(ctx context.Context, name string) (json.RawMessage, error) {
-	return c.newtlabGet(ctx, fmt.Sprintf("/topologies/%s/status", name))
+// Verified: pkg/newtlab/api/labs.go handleGetStatus
+func (c *Client) LabStatus(ctx context.Context, name string) (json.RawMessage, error) {
+	return c.newtlabGet(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/status", name))
 }
 
 // LabDeployRequest mirrors DeployRequest in pkg/newtlab/api/types.go.
@@ -174,29 +181,29 @@ type LabDeployRequest struct {
 	Parallel  int    `json:"parallel,omitempty"`
 }
 
-// LabDeploy calls POST /newtlab/v1/topologies/{name}/deploy. Returns the
+// LabDeploy calls POST /newtlab/v1/labs/{name}/deploy. Returns the
 // upstream HTTP status code (202 Accepted on success) and the raw response
 // data payload.
 //
-// Verified: pkg/newtlab/api/topologies.go handleDeploy
+// Verified: pkg/newtlab/api/labs.go handleDeploy
 func (c *Client) LabDeploy(ctx context.Context, name string, req LabDeployRequest) (int, json.RawMessage, error) {
-	return c.newtlabPost(ctx, fmt.Sprintf("/topologies/%s/deploy", name), req)
+	return c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/deploy", name), req)
 }
 
-// LabDestroy calls POST /newtlab/v1/topologies/{name}/destroy. Synchronous.
+// LabDestroy calls POST /newtlab/v1/labs/{name}/destroy. Synchronous.
 //
-// Verified: pkg/newtlab/api/topologies.go handleDestroy
+// Verified: pkg/newtlab/api/labs.go handleDestroy
 func (c *Client) LabDestroy(ctx context.Context, name string) (json.RawMessage, error) {
-	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/topologies/%s/destroy", name), nil)
+	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/destroy", name), nil)
 	return data, err
 }
 
-// LabProvision calls POST /newtlab/v1/topologies/{name}/provision. Synchronous.
+// LabProvision calls POST /newtlab/v1/labs/{name}/provision. Synchronous.
 // parallel=0 lets newtlab use its default (1).
 //
-// Verified: pkg/newtlab/api/topologies.go handleProvision
+// Verified: pkg/newtlab/api/labs.go handleProvision
 func (c *Client) LabProvision(ctx context.Context, name string, parallel int) (json.RawMessage, error) {
-	path := fmt.Sprintf("/topologies/%s/provision", name)
+	path := fmt.Sprintf("/"+newtlabLabsSegment+"/%s/provision", name)
 	if parallel > 0 {
 		path += fmt.Sprintf("?parallel=%d", parallel)
 	}
@@ -204,19 +211,19 @@ func (c *Client) LabProvision(ctx context.Context, name string, parallel int) (j
 	return data, err
 }
 
-// LabStartNode calls POST /newtlab/v1/topologies/{name}/nodes/{node}/start.
+// LabStartNode calls POST /newtlab/v1/labs/{name}/nodes/{node}/start.
 //
 // Verified: pkg/newtlab/api/nodes.go handleStartNode
 func (c *Client) LabStartNode(ctx context.Context, topology, node string) (json.RawMessage, error) {
-	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/topologies/%s/nodes/%s/start", topology, node), nil)
+	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/start", topology, node), nil)
 	return data, err
 }
 
-// LabStopNode calls POST /newtlab/v1/topologies/{name}/nodes/{node}/stop.
+// LabStopNode calls POST /newtlab/v1/labs/{name}/nodes/{node}/stop.
 //
 // Verified: pkg/newtlab/api/nodes.go handleStopNode
 func (c *Client) LabStopNode(ctx context.Context, topology, node string) (json.RawMessage, error) {
-	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/topologies/%s/nodes/%s/stop", topology, node), nil)
+	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/stop", topology, node), nil)
 	return data, err
 }
 
@@ -232,7 +239,7 @@ func (c *Client) LabStopNode(ctx context.Context, topology, node string) (json.R
 // Verified: pkg/newtlab/api/events.go handleEvents uses httputil.WriteSSEStream
 // which writes SSE frames with Content-Type text/event-stream.
 func (c *Client) LabEventsRequest(ctx context.Context, topology string) (*http.Response, error) {
-	url := c.newtlabBase() + fmt.Sprintf("/topologies/%s/events", topology)
+	url := c.newtlabBase() + fmt.Sprintf("/"+newtlabLabsSegment+"/%s/events", topology)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}

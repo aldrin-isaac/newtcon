@@ -43,7 +43,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	c := deps.Client
 
 	mux.Handle("GET /api/lab/topologies", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := c.LabListTopologies(r.Context())
+		data, err := c.LabListLabs(r.Context())
 		if err != nil {
 			writeLabError(w, cid(r.Context()), err, "GET /api/lab/topologies")
 			return
@@ -55,7 +55,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 
 	mux.Handle("GET /api/lab/topologies/{name}/status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		data, err := c.LabTopologyStatus(r.Context(), name)
+		data, err := c.LabStatus(r.Context(), name)
 		if err != nil {
 			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/lab/topologies/%s/status", name))
 			return
@@ -244,8 +244,8 @@ func writeLabValidation(w http.ResponseWriter, corrID, msg string) {
 // Compile-time assertion that *newtronc.Client has the lab methods this
 // handler uses. If the newtronc.Client API changes, the build breaks here.
 var _ interface {
-	LabListTopologies(context.Context) (json.RawMessage, error)
-	LabTopologyStatus(context.Context, string) (json.RawMessage, error)
+	LabListLabs(context.Context) (json.RawMessage, error)
+	LabStatus(context.Context, string) (json.RawMessage, error)
 	LabDeploy(context.Context, string, newtronc.LabDeployRequest) (int, json.RawMessage, error)
 	LabDestroy(context.Context, string) (json.RawMessage, error)
 	LabProvision(context.Context, string, int) (json.RawMessage, error)

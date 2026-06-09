@@ -15,7 +15,7 @@ import (
 // newtron create-<kind> verb and returns the decoded data field.
 func TestCreateSpec_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/create-service" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/create-service" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -82,7 +82,7 @@ func TestCreateSpec_Conflict(t *testing.T) {
 // newtron delete-<kind> verb with {"name": <name>}.
 func TestDeleteSpec_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/delete-service" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/delete-service" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -125,7 +125,7 @@ func TestDeleteSpec_NotFound(t *testing.T) {
 // TestAddQoSQueue_Success verifies that AddQoSQueue posts to add-qos-queue.
 func TestAddQoSQueue_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/add-qos-queue" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/add-qos-queue" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -155,7 +155,7 @@ func TestAddQoSQueue_Success(t *testing.T) {
 // remove-qos-queue with the correct body shape.
 func TestRemoveQoSQueue_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/remove-qos-queue" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/remove-qos-queue" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -181,7 +181,7 @@ func TestRemoveQoSQueue_Success(t *testing.T) {
 // TestAddFilterRule_Success verifies that AddFilterRule posts to add-filter-rule.
 func TestAddFilterRule_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/add-filter-rule" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/add-filter-rule" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -210,7 +210,7 @@ func TestAddFilterRule_Success(t *testing.T) {
 // TestAddPrefixListEntry_Success verifies add-prefix-list-entry posting.
 func TestAddPrefixListEntry_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/add-prefix-list-entry" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/add-prefix-list-entry" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -237,7 +237,7 @@ func TestAddPrefixListEntry_Success(t *testing.T) {
 // TestAddRoutePolicyRule_Success verifies add-route-policy-rule posting.
 func TestAddRoutePolicyRule_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/add-route-policy-rule" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/add-route-policy-rule" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return

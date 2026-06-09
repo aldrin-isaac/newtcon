@@ -11,11 +11,11 @@ import (
 	"github.com/aldrin-isaac/newtcon/internal/newtronc"
 )
 
-// TestLabListTopologies_Success verifies that LabListTopologies proxies the
-// newtlab GET /newtlab/v1/topologies envelope and returns the raw data array.
-func TestLabListTopologies_Success(t *testing.T) {
+// TestLabListLabs_Success verifies that LabListLabs proxies the
+// newtlab GET /newtlab/v1/labs envelope and returns the raw data array.
+func TestLabListLabs_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/newtlab/v1/topologies" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtlab/v1/labs" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -24,7 +24,7 @@ func TestLabListTopologies_Success(t *testing.T) {
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	raw, err := c.LabListTopologies(context.Background())
+	raw, err := c.LabListLabs(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -40,16 +40,16 @@ func TestLabListTopologies_Success(t *testing.T) {
 	}
 }
 
-// TestLabListTopologies_Unavailable verifies that a 503 yields a
+// TestLabListLabs_Unavailable verifies that a 503 yields a
 // *UnavailableError.
-func TestLabListTopologies_Unavailable(t *testing.T) {
+func TestLabListLabs_Unavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	_, err := c.LabListTopologies(context.Background())
+	_, err := c.LabListLabs(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -58,12 +58,12 @@ func TestLabListTopologies_Unavailable(t *testing.T) {
 	}
 }
 
-// TestLabTopologyStatus_Success verifies that LabTopologyStatus proxies the
+// TestLabStatus_Success verifies that LabStatus proxies the
 // correct path and returns the LabState data.
-func TestLabTopologyStatus_Success(t *testing.T) {
+func TestLabStatus_Success(t *testing.T) {
 	const topoName = "2node-vs-service"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/topologies/" + topoName + "/status"
+		expected := "/newtlab/v1/labs/" + topoName + "/status"
 		if r.URL.Path != expected {
 			t.Errorf("unexpected path: want %s, got %s", expected, r.URL.Path)
 		}
@@ -73,7 +73,7 @@ func TestLabTopologyStatus_Success(t *testing.T) {
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	raw, err := c.LabTopologyStatus(context.Background(), topoName)
+	raw, err := c.LabStatus(context.Background(), topoName)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -86,8 +86,8 @@ func TestLabTopologyStatus_Success(t *testing.T) {
 	}
 }
 
-// TestLabTopologyStatus_NotFound verifies that a 404 yields a *NotFoundError.
-func TestLabTopologyStatus_NotFound(t *testing.T) {
+// TestLabStatus_NotFound verifies that a 404 yields a *NotFoundError.
+func TestLabStatus_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -96,7 +96,7 @@ func TestLabTopologyStatus_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	_, err := c.LabTopologyStatus(context.Background(), "nonexistent")
+	_, err := c.LabStatus(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -110,7 +110,7 @@ func TestLabTopologyStatus_NotFound(t *testing.T) {
 func TestLabDeploy_Success(t *testing.T) {
 	const topoName = "1node-vs"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/topologies/" + topoName + "/deploy"
+		expected := "/newtlab/v1/labs/" + topoName + "/deploy"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -161,7 +161,7 @@ func TestLabDeploy_Conflict(t *testing.T) {
 // node-level path and returns the operation result.
 func TestLabStartNode_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/topologies/my-lab/nodes/switch1/start"
+		expected := "/newtlab/v1/labs/my-lab/nodes/switch1/start"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -187,7 +187,7 @@ func TestLabStartNode_Success(t *testing.T) {
 // TestLabStopNode_Success verifies that LabStopNode posts to the correct path.
 func TestLabStopNode_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/topologies/my-lab/nodes/switch1/stop"
+		expected := "/newtlab/v1/labs/my-lab/nodes/switch1/stop"
 		if r.Method != http.MethodPost || r.URL.Path != expected {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -214,7 +214,7 @@ func TestLabStopNode_Success(t *testing.T) {
 // *http.Response for an SSE stream (Content-Type: text/event-stream).
 func TestLabEventsRequest_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := "/newtlab/v1/topologies/my-lab/events"
+		expected := "/newtlab/v1/labs/my-lab/events"
 		if r.URL.Path != expected {
 			t.Errorf("unexpected path: want %s, got %s", expected, r.URL.Path)
 		}

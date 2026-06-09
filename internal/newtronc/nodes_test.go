@@ -15,7 +15,7 @@ import (
 // GET /network/{netID}/topology envelope and returns the raw data field.
 func TestClient_Topology_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network/default/topology" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/networks/default/topology" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -59,7 +59,7 @@ func TestClient_Topology_Unavailable(t *testing.T) {
 // and returns the decoded data field.
 func TestClient_NodeInfo_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/newtron/v1/network/default/node/switch1/info" {
+		if r.URL.Path != "/newtron/v1/networks/default/nodes/switch1/info" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -99,7 +99,7 @@ func TestClient_NodeInfo_NotFound(t *testing.T) {
 // the correct 3-segment URL.
 func TestClient_NodeConfigDBEntry_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/newtron/v1/network/default/node/switch1/configdb/PORT/Ethernet0" {
+		if r.URL.Path != "/newtron/v1/networks/default/nodes/switch1/configdb/PORT/Ethernet0" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -125,7 +125,7 @@ func TestClient_NodeConfigDBEntry_Success(t *testing.T) {
 // sends POST to the correct path with the JSON body and returns the data field.
 func TestClient_CreateTopologyDevice_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/topology/create-node" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/topology/create-node" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		if r.Header.Get("Content-Type") != "application/json" {
@@ -170,7 +170,7 @@ func TestClient_CreateTopologyDevice_ValidationError(t *testing.T) {
 // sends DELETE to the correct path and returns data.
 func TestClient_DeleteTopologyDevice_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/network/default/topology/node/spine1" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/networks/default/topology/nodes/spine1" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -211,7 +211,7 @@ func TestClient_DeleteTopologyDevice_Force(t *testing.T) {
 // sends PUT with a JSON body.
 func TestClient_UpdateTopologyDevice_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/newtron/v1/network/default/topology/node/spine1" {
+		if r.Method != http.MethodPut || r.URL.Path != "/newtron/v1/networks/default/topology/nodes/spine1" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -233,7 +233,7 @@ func TestClient_UpdateTopologyDevice_Success(t *testing.T) {
 // POST to create-link with the {a,z} body.
 func TestClient_CreateTopologyLink_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network/default/topology/create-link" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/topology/create-link" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -257,7 +257,7 @@ func TestClient_CreateTopologyLink_Success(t *testing.T) {
 // DELETE to the link/{device}/{interface} path.
 func TestClient_DeleteTopologyLink_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/network/default/topology/link/spine1/Ethernet0" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/networks/default/topology/links/spine1/Ethernet0" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -283,7 +283,7 @@ func TestClient_DeleteTopologyLink_Success(t *testing.T) {
 // the apply-service path with the JSON body.
 func TestClient_ApplyService_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wantPath := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/apply-service"
+		wantPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service"
 		if r.Method != http.MethodPost || r.URL.Path != wantPath {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -307,7 +307,7 @@ func TestClient_ApplyService_Success(t *testing.T) {
 // the remove-service path (no body).
 func TestClient_RemoveService_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wantPath := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/remove-service"
+		wantPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-service"
 		if r.Method != http.MethodPost || r.URL.Path != wantPath {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -330,7 +330,7 @@ func TestClient_RemoveService_Success(t *testing.T) {
 // the refresh-service path (no body).
 func TestClient_RefreshService_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wantPath := "/newtron/v1/network/default/node/switch1/interface/Ethernet0/refresh-service"
+		wantPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/refresh-service"
 		if r.Method != http.MethodPost || r.URL.Path != wantPath {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
