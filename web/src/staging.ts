@@ -15,6 +15,7 @@
 // already go through newtron's intent/save lifecycle in the device panel.
 
 import { ApiError, type ErrorEnvelope } from "./api/newtcon/services.js";
+import { apiPath } from "./api-path.js";
 
 // ---- Pending change shapes -----------------------------------------------
 
@@ -130,7 +131,7 @@ export async function applyDevice(device: string): Promise<ApplyResult> {
     (p.group === "interface" && (p as { device: string }).device === device));
   if (touched) {
     try {
-      await postJSON(`/api/nodes/${encodeURIComponent(device)}/rpc/intent/save${mode === "topology" ? "?mode=topology" : ""}`, {});
+      await postJSON(apiPath(`nodes/${encodeURIComponent(device)}/rpc/intent/save${mode === "topology" ? "?mode=topology" : ""}`), {});
     } catch (err) {
       // The actions landed (on device + in-memory) but the topology.json save
       // failed. Surface as a synthetic failed entry so the operator sees it.
@@ -153,7 +154,7 @@ async function probeOnline(device: string): Promise<boolean | undefined> {
   const cached = onlineCache.get(device);
   if (cached && Date.now() - cached.at < ONLINE_CACHE_MS) return cached.online;
   try {
-    const r = await fetch(`/api/nodes/${encodeURIComponent(device)}/info`, { cache: "no-store" });
+    const r = await fetch(apiPath(`nodes/${encodeURIComponent(device)}/info`), { cache: "no-store" });
     const online = r.ok;
     onlineCache.set(device, { at: Date.now(), online });
     return online;
@@ -235,7 +236,7 @@ export async function applyAll(): Promise<ApplyResult> {
   }
   for (const d of touchedDevices) {
     try {
-      await postJSON(`/api/nodes/${encodeURIComponent(d)}/rpc/intent/save`, {});
+      await postJSON(apiPath(`nodes/${encodeURIComponent(d)}/rpc/intent/save`), {});
     } catch (err) {
       result.failed.push({
         pending: { id: "intent-save", group: "device", op: "action", device: d, actionId: "intent/save", label: "persist to topology.json", body: {} } as Pending,
@@ -279,35 +280,35 @@ function groupOrder(p: Pending): number {
 async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void> {
   const modeQS = mode === "topology" ? "?mode=topology" : "";
   if (p.group === "spec" && p.op === "create") {
-    await postJSON(`/api/${p.kind}`, p.body);
+    await postJSON(apiPath(p.kind), p.body);
     return;
   }
   if (p.group === "spec" && p.op === "delete") {
-    await del(`/api/${p.kind}/${encodeURIComponent(p.name)}`);
+    await del(apiPath(`${p.kind}/${encodeURIComponent(p.name)}`));
     return;
   }
   if (p.group === "topology" && p.op === "add-device") {
-    await postJSON("/api/topology/nodes", { name: p.name, device: p.body });
+    await postJSON(apiPath("topology/nodes"), { name: p.name, device: p.body });
     return;
   }
   if (p.group === "topology" && p.op === "remove-device") {
-    await del(`/api/topology/nodes/${encodeURIComponent(p.name)}`);
+    await del(apiPath(`topology/nodes/${encodeURIComponent(p.name)}`));
     return;
   }
   if (p.group === "topology" && p.op === "add-link") {
-    await postJSON("/api/topology/links", { a: p.a, z: p.z });
+    await postJSON(apiPath("topology/links"), { a: p.a, z: p.z });
     return;
   }
   if (p.group === "topology" && p.op === "remove-link") {
-    await del(`/api/topology/links/${encodeURIComponent(p.device)}/${encodeURIComponent(p.iface)}`);
+    await del(apiPath(`topology/links/${encodeURIComponent(p.device)}/${encodeURIComponent(p.iface)}`));
     return;
   }
   if (p.group === "device" && p.op === "action") {
-    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}${modeQS}`, p.body);
+    await postJSON(apiPath(`nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}${modeQS}`), p.body);
     return;
   }
   if (p.group === "interface" && p.op === "action") {
-    await postJSON(`/api/nodes/${encodeURIComponent(p.device)}/interfaces/${encodeURIComponent(p.iface)}/rpc/${p.actionId}${modeQS}`, p.body);
+    await postJSON(apiPath(`nodes/${encodeURIComponent(p.device)}/interfaces/${encodeURIComponent(p.iface)}/rpc/${p.actionId}${modeQS}`), p.body);
     return;
   }
   throw new Error("unknown pending op");

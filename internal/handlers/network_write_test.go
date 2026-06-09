@@ -33,7 +33,7 @@ func TestCreateSpec_Handler_Success(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]string{"name": "transit", "type": "routed"})
-	req := httptest.NewRequest(http.MethodPost, "/api/services", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/services", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -57,7 +57,7 @@ func TestCreateSpec_Handler_ValidationFailure(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]string{})
-	req := httptest.NewRequest(http.MethodPost, "/api/ipvpns", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/ipvpns", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -104,7 +104,7 @@ func TestDeleteSpec_Handler_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/zones/zone-a", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/networks/default/zones/zone-a", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -126,7 +126,7 @@ func TestDeleteSpec_Handler_Conflict(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/services/transit", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/networks/default/services/transit", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -168,7 +168,7 @@ func TestAddQoSQueue_Handler_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"policy": "my-policy", "queue_id": 1, "name": "q1", "type": "strict",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/qos-policies/my-policy/queues", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/qos-policies/my-policy/queues", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -197,7 +197,7 @@ func TestRemoveQoSQueue_Handler_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/qos-policies/my-policy/queues/1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/networks/default/qos-policies/my-policy/queues/1", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -228,7 +228,7 @@ func TestAddFilterRule_Handler_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"filter": "my-filter", "seq": 10, "action": "permit",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/filters/my-filter/rules", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/filters/my-filter/rules", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -261,7 +261,7 @@ func TestAddPrefixListEntry_Handler_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{
 		"prefix_list": "my-list", "prefix": "10.0.0.0/8",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/prefix-lists/my-list/entries", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/prefix-lists/my-list/entries", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -294,7 +294,7 @@ func TestAddRoutePolicyRule_Handler_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"policy": "my-policy", "seq": 10, "action": "permit",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/route-policies/my-policy/rules", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/route-policies/my-policy/rules", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

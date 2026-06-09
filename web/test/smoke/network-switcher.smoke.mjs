@@ -50,15 +50,16 @@ try {
   const dropdownGone = await page.$(".network-switcher-dropdown");
   expect(!dropdownGone, "dropdown closes on outside click");
 
-  // Verify the fetch interceptor: did at least one /api/* request carry ?net=?
-  const netParamed = apiCalls.filter((u) => /\?(?:[^#]*&)?net=/.test(u));
-  const notNetParamed = apiCalls.filter((u) =>
-    u.includes("/api/") && !/\?(?:[^#]*&)?net=/.test(u));
-  expect(netParamed.length > 0,
-    `≥1 /api/* call had ?net= (got ${netParamed.length}/${apiCalls.length})`);
-  // Spot-check the network-agnostic exclusions.
-  const healthHits = notNetParamed.filter((u) => u.includes("/api/health"));
-  expect(healthHits.length > 0, `/api/health was NOT given ?net= (good — it's network-agnostic)`);
+  // Verify path-substitution: ≥1 /api/* request carried /networks/{active}/...
+  // and the network-agnostic paths (/api/health, /api/networks, /api/labs) were
+  // not given the prefix.
+  const networkScoped = apiCalls.filter((u) => /\/api\/networks\/[^/]+\//.test(u));
+  const agnostic = apiCalls.filter((u) =>
+    /\/api\/(health|labs)\b/.test(u) || /\/api\/networks$/.test(u) || /\/api\/networks\?/.test(u));
+  expect(networkScoped.length > 0,
+    `≥1 /api/networks/{netID}/... call observed (got ${networkScoped.length}/${apiCalls.length})`);
+  expect(agnostic.some((u) => u.includes("/api/health")),
+    `/api/health observed without /networks/ prefix (correctly network-agnostic)`);
 
   // Open the "New topology" modal — verify form fields present, then close.
   await page.click("#network-switcher-trigger");

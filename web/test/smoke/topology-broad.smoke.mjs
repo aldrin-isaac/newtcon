@@ -123,7 +123,7 @@ try {
   const saveResult = await page.evaluate(async () => {
     const btn = document.querySelector(".topo-action-panel-savebar .btn-primary");
     if (!btn) return "no-button";
-    // capture next /api/nodes POST → return its response status
+    // capture next /api/networks/default/nodes POST → return its response status
     const orig = window.fetch;
     let captured = null;
     window.fetch = async (...args) => {
@@ -174,15 +174,15 @@ try {
 
   // ─── Cleanup via API ──────────────────────────────────────────────
   console.log("→ cleanup");
-  await fetch(`${BASE}/api/nodes/switch1/rpc/delete-vrf`, {
+  await fetch(`${BASE}/api/networks/default/nodes/switch1/rpc/delete-vrf`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: vrfName }),
   });
-  await fetch(`${BASE}/api/nodes/switch1/rpc/delete-acl`, {
+  await fetch(`${BASE}/api/networks/default/nodes/switch1/rpc/delete-acl`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: aclName }),
   });
-  await fetch(`${BASE}/api/nodes/switch1/rpc/remove-bgp-evpn-peer`, {
+  await fetch(`${BASE}/api/networks/default/nodes/switch1/rpc/remove-bgp-evpn-peer`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ip: rndIP }),
   });

@@ -1,9 +1,15 @@
 // Typed client for newtcon-server's network-level spec list and write endpoints.
-// List calls return the names defined for that spec type in the configured
+// List calls return the names defined for that spec type in the selected
 // newtron network. Write calls forward JSON bodies to newtron's create/delete
 // RPC verbs and sub-rule verbs.
+//
+// All routes are network-scoped — newtcon mirrors newtron's geometry
+// /networks/{netID}/... at /api/networks/{netID}/... Every function below
+// targets the operator's active network by default; pass `network` to target
+// a specific network (cross-engine workflows).
 
 import { ApiError } from "./services.js";
+import { apiPath } from "../../api-path.js";
 
 export interface SpecListResponse {
   names: string[];
@@ -21,8 +27,12 @@ export type SpecKind =
   | "zones"
   | "platforms";
 
-export async function fetchSpecDetail(kind: SpecKind, name: string): Promise<unknown> {
-  const url = `/api/${kind}/${encodeURIComponent(name)}`;
+function pathFor(suffix: string, network?: string): string {
+  return network ? apiPath.network(network, suffix) : apiPath(suffix);
+}
+
+export async function fetchSpecDetail(kind: SpecKind, name: string, network?: string): Promise<unknown> {
+  const url = pathFor(`${kind}/${encodeURIComponent(name)}`, network);
   const response = await fetch(url, { cache: "no-store" });
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -106,48 +116,48 @@ async function apiDelete(url: string): Promise<unknown> {
   return response.json();
 }
 
-// createSpec calls POST /api/{kind} with the given body.
-export async function createSpec(kind: SpecKind, body: Record<string, unknown>): Promise<unknown> {
-  return apiPost(`/api/${kind}`, body);
+// createSpec calls POST /api/networks/{netID}/{kind} with the given body.
+export async function createSpec(kind: SpecKind, body: Record<string, unknown>, network?: string): Promise<unknown> {
+  return apiPost(pathFor(kind, network), body);
 }
 
-// deleteSpec calls DELETE /api/{kind}/{name}.
-export async function deleteSpec(kind: SpecKind, name: string): Promise<unknown> {
-  return apiDelete(`/api/${kind}/${encodeURIComponent(name)}`);
+// deleteSpec calls DELETE /api/networks/{netID}/{kind}/{name}.
+export async function deleteSpec(kind: SpecKind, name: string, network?: string): Promise<unknown> {
+  return apiDelete(pathFor(`${kind}/${encodeURIComponent(name)}`, network));
 }
 
-// addSubRule calls POST /api/{kind}/{name}/queues|rules|entries with the body.
+// addSubRule calls POST /api/networks/{netID}/{kind}/{name}/queues|rules|entries with the body.
 // endpoint is the sub-collection segment: "queues", "rules", or "entries".
-export async function addSubRule(kind: SpecKind, name: string, endpoint: string, body: Record<string, unknown>): Promise<unknown> {
-  return apiPost(`/api/${kind}/${encodeURIComponent(name)}/${endpoint}`, body);
+export async function addSubRule(kind: SpecKind, name: string, endpoint: string, body: Record<string, unknown>, network?: string): Promise<unknown> {
+  return apiPost(pathFor(`${kind}/${encodeURIComponent(name)}/${endpoint}`, network), body);
 }
 
-// removeQoSQueue calls DELETE /api/qos-policies/{name}/queues/{queueId}.
-export async function removeQoSQueue(name: string, queueId: number): Promise<unknown> {
-  return apiDelete(`/api/qos-policies/${encodeURIComponent(name)}/queues/${queueId}`);
+// removeQoSQueue calls DELETE /api/networks/{netID}/qos-policies/{name}/queues/{queueId}.
+export async function removeQoSQueue(name: string, queueId: number, network?: string): Promise<unknown> {
+  return apiDelete(pathFor(`qos-policies/${encodeURIComponent(name)}/queues/${queueId}`, network));
 }
 
-// removeFilterRule calls DELETE /api/filters/{name}/rules/{seq}.
-export async function removeFilterRule(name: string, seq: number): Promise<unknown> {
-  return apiDelete(`/api/filters/${encodeURIComponent(name)}/rules/${seq}`);
+// removeFilterRule calls DELETE /api/networks/{netID}/filters/{name}/rules/{seq}.
+export async function removeFilterRule(name: string, seq: number, network?: string): Promise<unknown> {
+  return apiDelete(pathFor(`filters/${encodeURIComponent(name)}/rules/${seq}`, network));
 }
 
-// removePrefixListEntry calls DELETE /api/prefix-lists/{name}/entries/{prefix}.
-export async function removePrefixListEntry(name: string, prefix: string): Promise<unknown> {
-  return apiDelete(`/api/prefix-lists/${encodeURIComponent(name)}/entries/${encodeURIComponent(prefix)}`);
+// removePrefixListEntry calls DELETE /api/networks/{netID}/prefix-lists/{name}/entries/{prefix}.
+export async function removePrefixListEntry(name: string, prefix: string, network?: string): Promise<unknown> {
+  return apiDelete(pathFor(`prefix-lists/${encodeURIComponent(name)}/entries/${encodeURIComponent(prefix)}`, network));
 }
 
-// removeRoutePolicyRule calls DELETE /api/route-policies/{name}/rules/{seq}.
-export async function removeRoutePolicyRule(name: string, seq: number): Promise<unknown> {
-  return apiDelete(`/api/route-policies/${encodeURIComponent(name)}/rules/${seq}`);
+// removeRoutePolicyRule calls DELETE /api/networks/{netID}/route-policies/{name}/rules/{seq}.
+export async function removeRoutePolicyRule(name: string, seq: number, network?: string): Promise<unknown> {
+  return apiDelete(pathFor(`route-policies/${encodeURIComponent(name)}/rules/${seq}`, network));
 }
 
 // ============================================================================
 // List endpoints
 // ============================================================================
 
-export async function fetchSpecList(kind: SpecKind): Promise<string[]> {
-  const url = kind === "services" ? "/api/services" : `/api/${kind}`;
+export async function fetchSpecList(kind: SpecKind, network?: string): Promise<string[]> {
+  const url = pathFor(kind, network);
   const response = await fetch(url, { cache: "no-store" });
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -171,8 +181,8 @@ export async function fetchSpecList(kind: SpecKind): Promise<string[]> {
 
   const body = (await response.json()) as { names?: string[] | null; services?: { name: string }[] };
 
-  // /api/services returns {services: [{name, type, ...}]}; everything else
-  // returns {names: [string]}.
+  // /api/networks/{netID}/services returns {services: [{name, type, ...}]};
+  // everything else returns {names: [string]}.
   if (kind === "services" && Array.isArray(body.services)) {
     return body.services.map((s) => s.name);
   }

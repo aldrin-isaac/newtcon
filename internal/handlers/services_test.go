@@ -99,7 +99,7 @@ func TestServices_Happy(t *testing.T) {
 	mux := http.NewServeMux()
 	handlers.RegisterServicesRoutes(mux, handlers.ServicesDeps{Client: nc})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/services", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/services", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -188,7 +188,7 @@ func TestServices_NewtronUnavailable(t *testing.T) {
 	// Wrap with correlation_id injection to verify it appears in the details.
 	handler := withCorrelationID(innerMux, "test-correlation-id-unavail")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/services", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/services", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -254,7 +254,7 @@ func TestServices_ShowServiceFails_OneService(t *testing.T) {
 	mux := http.NewServeMux()
 	handlers.RegisterServicesRoutes(mux, handlers.ServicesDeps{Client: nc})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/services", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/services", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -285,7 +285,7 @@ func TestServices_MethodNotAllowed(t *testing.T) {
 	mux := http.NewServeMux()
 	handlers.RegisterServicesRoutes(mux, handlers.ServicesDeps{Client: nc})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/services", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/services", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -312,7 +312,7 @@ func TestServices_Empty(t *testing.T) {
 	mux := http.NewServeMux()
 	handlers.RegisterServicesRoutes(mux, handlers.ServicesDeps{Client: nc})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/services", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/services", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 

@@ -13,6 +13,7 @@
 
 import { iconSVG } from "./icons.js";
 import { ApiError, ErrorEnvelope } from "./api/newtcon/services.js";
+import { apiPath } from "./api-path.js";
 import {
   NODE_ACTIONS,
   INTERFACE_ACTIONS,
@@ -53,7 +54,7 @@ async function jsonFetch(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 export async function postNodeRPC(device: string, subpath: string, body: Record<string, unknown>): Promise<unknown> {
-  return jsonFetch(`/api/nodes/${encodeURIComponent(device)}/rpc/${subpath}`, {
+  return jsonFetch(apiPath(`nodes/${encodeURIComponent(device)}/rpc/${subpath}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
@@ -62,7 +63,7 @@ export async function postNodeRPC(device: string, subpath: string, body: Record<
 
 export async function postInterfaceRPC(device: string, iface: string, subpath: string, body: Record<string, unknown>): Promise<unknown> {
   return jsonFetch(
-    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(iface)}/rpc/${subpath}`,
+    apiPath(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(iface)}/rpc/${subpath}`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -105,18 +106,18 @@ async function fetchSource(source: string): Promise<string[]> {
 
 function sourceURL(kind: string, scope: string): string | null {
   switch (kind) {
-    case "services":     return "/api/services";
-    case "ipvpns":       return "/api/ipvpns";
-    case "macvpns":      return "/api/macvpns";
-    case "qos-policies": return "/api/qos-policies";
-    case "filters":      return "/api/filters";
-    case "route-policies": return "/api/route-policies";
-    case "prefix-lists": return "/api/prefix-lists";
-    case "interfaces":   return scope ? `/api/nodes/${encodeURIComponent(scope)}/interfaces` : null;
-    case "vrfs":         return scope ? `/api/nodes/${encodeURIComponent(scope)}/vrfs` : null;
-    case "vlans":        return scope ? `/api/nodes/${encodeURIComponent(scope)}/vlans` : null;
-    case "acls":         return scope ? `/api/nodes/${encodeURIComponent(scope)}/acls` : null;
-    case "lags":         return scope ? `/api/nodes/${encodeURIComponent(scope)}/lags` : null;
+    case "services":     return apiPath("services");
+    case "ipvpns":       return apiPath("ipvpns");
+    case "macvpns":      return apiPath("macvpns");
+    case "qos-policies": return apiPath("qos-policies");
+    case "filters":      return apiPath("filters");
+    case "route-policies": return apiPath("route-policies");
+    case "prefix-lists": return apiPath("prefix-lists");
+    case "interfaces":   return scope ? apiPath(`nodes/${encodeURIComponent(scope)}/interfaces`) : null;
+    case "vrfs":         return scope ? apiPath(`nodes/${encodeURIComponent(scope)}/vrfs`) : null;
+    case "vlans":        return scope ? apiPath(`nodes/${encodeURIComponent(scope)}/vlans`) : null;
+    case "acls":         return scope ? apiPath(`nodes/${encodeURIComponent(scope)}/acls`) : null;
+    case "lags":         return scope ? apiPath(`nodes/${encodeURIComponent(scope)}/lags`) : null;
     default:             return null;
   }
 }
@@ -385,7 +386,7 @@ function renderLinkSection(a: string, z: string, deps: PanelDeps): HTMLElement {
     submit.disabled = true;
     submit.textContent = "Adding…";
     try {
-      await jsonFetch("/api/topology/links", {
+      await jsonFetch(apiPath("topology/links"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ a: `${a}:${aIface}`, z: `${z}:${zIface}` }),
