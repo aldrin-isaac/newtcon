@@ -80,6 +80,11 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Topology-switcher meta surface: list registered networks + register
+	// (with optional scaffold) so the operator can flip between networks
+	// without a server restart.
+	handlers.NewNetworksHandler(mux, nc, server.CorrelationIDFromContext)
+
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
 	// server.RegisterStaticAssets logs a warning and skips registration when

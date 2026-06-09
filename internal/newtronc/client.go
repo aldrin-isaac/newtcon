@@ -115,6 +115,54 @@ type networkEntry struct {
 	ID string `json:"id"`
 }
 
+// NetworkInfo mirrors newtron's per-network record returned by GET
+// /newtron/v1/networks. Exposed by Client.ListNetworksDetail and surfaced
+// by newtcon-server's GET /api/networks for the topology-switcher UI.
+type NetworkInfo struct {
+	ID          string   `json:"id"`
+	SpecDir     string   `json:"spec_dir"`
+	HasTopology bool     `json:"has_topology"`
+	Topology    string   `json:"topology"`
+	Nodes       []string `json:"nodes"`
+}
+
+// ListNetworksDetail returns the full per-network record for every registered
+// network. Use [Client.ListNetworks] when only the IDs are needed.
+func (c *Client) ListNetworksDetail(ctx context.Context) ([]NetworkInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtronBase()+"/networks", nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+	if resp.StatusCode >= 500 {
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	}
+	var env newtronAPIResponse
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if env.Error != "" {
+		return nil, &UnavailableError{Cause: env.Error}
+	}
+	var infos []NetworkInfo
+	if err := json.Unmarshal(env.Data, &infos); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding network list: %v", err)}
+	}
+	return infos, nil
+}
+
 // ListNetworks calls GET /newtron/v1/networks and returns the IDs of all
 // registered networks (pkg/newtron/api/handler.go — handleListNetworks).
 //

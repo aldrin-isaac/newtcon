@@ -24,7 +24,28 @@
 // creating an import dependency.
 package server
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/aldrin-isaac/newtcon/internal/newtronc"
+)
+
+// NetworkSelector reads ?net=<id> from each request and stashes the value into
+// the request context via newtronc.ContextWithNetwork. Downstream handlers
+// then resolve the active network via c.Network(ctx). Absent (or empty)
+// ?net= leaves the context untouched, so Network(ctx) falls back to
+// newtronc.DefaultNetworkID.
+//
+// Outermost-but-inside-RequestID: the netID has no effect on logging or
+// recovery and is purely a downstream-data concern.
+func NetworkSelector(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := r.URL.Query().Get("net"); id != "" {
+			r = r.WithContext(newtronc.ContextWithNetwork(r.Context(), id))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // NewMux returns a bare *http.ServeMux for route registration.
 //
@@ -49,5 +70,5 @@ func NewMux() *http.ServeMux {
 // directly for route registration. See package godoc for the import-cycle
 // rationale.
 func ApplyMiddleware(handler http.Handler) http.Handler {
-	return RequestID(Recovery(Logging(handler)))
+	return RequestID(Recovery(Logging(NetworkSelector(handler))))
 }

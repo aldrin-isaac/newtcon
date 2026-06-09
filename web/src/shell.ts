@@ -12,6 +12,11 @@ import {
   discardAll,
   applyAll,
 } from "./staging.js";
+import { installFetchInterceptor, setupNetworkSwitcher } from "./network-switcher.js";
+
+// Install the fetch interceptor before any other module runs a fetch.
+// It appends ?net=<activeNetwork> to every /api/* path that needs a network.
+installFetchInterceptor();
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -345,6 +350,7 @@ function boot(): void {
   setupSidebarActiveStates();
   setupPalette();
   setupPendingBar();
+  setupNetworkSwitcher();
   startStatusPolling();
 }
 

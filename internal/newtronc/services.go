@@ -58,13 +58,33 @@ type NewtronServiceDetail struct {
 	Raw json.RawMessage `json:"-"`
 }
 
-// Network returns the network ID newtcon-server uses for all service operations.
-//
-// v1 assumes single-network operation and returns "default". Multi-network
-// selection is a future Composer slice. Implemented as a method (not a constant)
-// so future multi-network support changes one implementation, not all call sites.
+// networkCtxKey is the private context-key type used to plumb the active
+// network ID through request handlers.
+type networkCtxKey struct{}
+
+// DefaultNetworkID is the fallback when no explicit selection is in context.
+// Matches the value newt-server auto-registers via --net-id.
+const DefaultNetworkID = "default"
+
+// ContextWithNetwork returns ctx with id set as the active network. Callers
+// (newtcon-server's middleware) inject the operator's selection here; every
+// downstream c.Network(ctx) call reads it back. Empty id is treated as
+// "no selection" — Network(ctx) then returns DefaultNetworkID.
+func ContextWithNetwork(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, networkCtxKey{}, id)
+}
+
+// Network returns the network ID newtcon-server uses for this request.
+// Reads the value stashed by ContextWithNetwork; falls back to
+// DefaultNetworkID.
 func (c *Client) Network(ctx context.Context) string {
-	return "default"
+	if v, ok := ctx.Value(networkCtxKey{}).(string); ok && v != "" {
+		return v
+	}
+	return DefaultNetworkID
 }
 
 // ListServices calls GET /newtron/v1/networks/{netID}/services and returns the
