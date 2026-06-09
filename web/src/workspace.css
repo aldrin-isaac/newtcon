@@ -729,6 +729,126 @@
 .lab-card li button:hover,
 .lab-node-row button:hover { background: var(--color-surface-hover); }
 
+/* ---- Network switcher (header) ---------------------------------------- */
+
+.network-switcher-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 2px var(--space-sm);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  margin-right: var(--space-sm);
+}
+.network-switcher-trigger:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.network-switcher-icon { display: inline-flex; color: var(--color-text-secondary); }
+.network-switcher-label { font-family: var(--font-mono); color: var(--color-text-primary); }
+.network-switcher-chevron { display: inline-flex; color: var(--color-text-muted); }
+
+.network-switcher-dropdown {
+  position: fixed;
+  z-index: 200;
+  min-width: 280px;
+  max-width: 420px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2xs);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.network-switcher-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-sm);
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.network-switcher-item:hover { background: var(--color-accent-bg); }
+.network-switcher-item--active { background: var(--color-accent-bg); }
+.network-switcher-item-icon { display: inline-flex; color: var(--color-text-secondary); }
+.network-switcher-item--active .network-switcher-item-icon { color: var(--color-accent); }
+.network-switcher-item-id { font-family: var(--font-mono); font-weight: var(--weight-medium); }
+.network-switcher-item-topology {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.network-switcher-item--action { color: var(--color-accent); }
+.network-switcher-item--action .network-switcher-item-icon { color: var(--color-accent); }
+.network-switcher-sep {
+  height: 1px;
+  background: var(--color-border-subtle);
+  margin: var(--space-2xs) 0;
+}
+
+/* ---- New-topology modal ----------------------------------------------- */
+
+.network-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 25, 23, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+.network-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-lg);
+  min-width: 460px;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.network-modal-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+.network-modal-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
+.network-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+.network-modal-error {
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  padding: var(--space-2xs);
+  background: var(--color-danger-bg);
+  border-radius: var(--radius-xs);
+}
+.network-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
 /* ---- Workspace pending-changes bar ------------------------------------ */
 
 .pending-bar {
