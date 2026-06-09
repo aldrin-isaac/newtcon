@@ -458,6 +458,34 @@
   cursor: pointer;
 }
 .topology-toolbar-btn:hover { background: var(--color-surface-hover); }
+.topology-toolbar-btn--primary {
+  background: var(--color-action-primary, var(--color-brand-500, #2563eb));
+  color: var(--color-action-primary-text, #fff);
+  border-color: transparent;
+  margin-left: auto;
+}
+.topology-toolbar-btn--primary:hover {
+  background: var(--color-action-primary-hover, var(--color-brand-600, #1d4ed8));
+}
+
+/* Deploy-as-lab modal log panel (reuses .network-modal chrome) */
+.deploy-modal {
+  width: min(720px, 90vw);
+}
+.deploy-modal-log {
+  margin: var(--space-md) 0;
+  padding: var(--space-sm);
+  background: var(--color-surface-recessed, #0b1220);
+  color: var(--color-text-on-recessed, #e6edf3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .topology-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-lg); text-align: center; }
 
 /* Interface action buttons */

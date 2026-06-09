@@ -52,6 +52,7 @@ import {
   postRefreshService,
 } from "./api/newtcon/nodes.js";
 import { apiPath } from "./api-path.js";
+import { activeNetwork } from "./network-switcher.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
 // queue introduced in staging.ts, those flows go through enqueue* + applyAll
@@ -1962,6 +1963,91 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
   });
 }
 
+// ---- Deploy-as-lab modal ----------------------------------------------------
+
+// openDeployModal posts the deploy and streams newtlab's SSE phase events into
+// an in-place log panel. Phase 1 of unifying lab + physical substrate: this is
+// invoked from the Topology toolbar; future phases will fold the resulting
+// per-device status back into the SVG diagram so the operator never has to
+// switch tabs to see "is it running".
+function openDeployModal(network: string): void {
+  const overlay = el("div", { className: "network-modal-overlay" });
+  const modal = el("div", { className: "network-modal deploy-modal" });
+
+  const title = el("h2", { className: "network-modal-title" }, `Bringing up "${network}" as a lab`);
+  const hint = el("p", { className: "network-modal-hint" },
+    "newtlab is booting one VM per device in the topology. Streaming progress below — close this window once the deploy completes.");
+  const logLines = el("pre", { className: "deploy-modal-log" });
+
+  // Always-enabled Close — the operator can dismiss whenever. Deploy continues
+  // at newtlab's pace regardless; phase 2 will surface running status back in
+  // the topology view, so losing the log stream isn't operationally fatal.
+  const closeBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Close");
+
+  const actions = el("div", { className: "network-modal-actions" });
+  actions.appendChild(closeBtn);
+
+  modal.appendChild(title);
+  modal.appendChild(hint);
+  modal.appendChild(logLines);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const append = (line: string): void => {
+    logLines.textContent += (logLines.textContent ? "\n" : "") + line;
+    logLines.scrollTop = logLines.scrollHeight;
+  };
+
+  const close = (): void => {
+    src?.close();
+    overlay.remove();
+  };
+  closeBtn.addEventListener("click", close);
+
+  let src: EventSource | null = null;
+
+  const start = async (): Promise<void> => {
+    try {
+      append(`POST deploy lab=${network}…`);
+      await postLabDeploy(network, {});
+      append("accepted; streaming events…");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      append(`[error] deploy request failed: ${msg}`);
+      return;
+    }
+
+    src = labEvents(
+      network,
+      (eventType, data) => {
+        try {
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          if (eventType === "phase") {
+            const phase = String(payload["phase"] ?? "");
+            const detail = payload["detail"] ? " — " + String(payload["detail"]) : "";
+            append(`${phase}${detail}`);
+          } else if (eventType === "complete") {
+            append("[done] deploy complete — devices are addressable through the topology view");
+            src?.close();
+          } else if (eventType === "error") {
+            append("[error] " + String(payload["message"] ?? data));
+            src?.close();
+          }
+        } catch {
+          append(data);
+        }
+      },
+      () => {
+        // Stream closed or errored. EventSource will normally try to reconnect
+        // on a clean close, so we don't auto-close the modal here — the
+        // operator stays in control via the always-enabled Close button.
+      },
+    );
+  };
+  void start();
+}
+
 // ---- Topology tab -----------------------------------------------------------
 
 async function mountTopologyTab(root: HTMLElement): Promise<void> {
@@ -2019,6 +2105,21 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
     });
     toolbar.appendChild(addLinkBtn);
+
+    // Bring up as lab: newtlab boots VMs named after this network's topology
+    // devices. Phase 1 of the unified-substrate direction — newtlab is plumbing,
+    // not a separate domain. Once VMs are up, they're addressable through the
+    // same per-device surface as physical hardware (future phase).
+    //
+    // Convention: lab name == active network ID (newtron#116 / PR #121 made
+    // this the default on newtlab's side, so identity is mechanical).
+    const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Bring up as lab");
+    bringUpBtn.addEventListener("click", () => {
+      const network = activeNetwork();
+      if (!window.confirm(`Bring up network "${network}" as a lab? VMs will boot for each device in the topology.`)) return;
+      openDeployModal(network);
+    });
+    toolbar.appendChild(bringUpBtn);
 
     root.appendChild(toolbar);
 
