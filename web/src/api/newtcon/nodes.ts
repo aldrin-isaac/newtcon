@@ -3,8 +3,16 @@
 // All calls pass through newtcon-server which proxies to newtron verbatim.
 // The data field is returned as-is (unknown) so callers can render with the
 // recursive renderValue helper in app.ts without coupling to a concrete type.
+//
+// Every function targets the operator's active network by default; pass
+// `network` to target a specific network (cross-engine workflows).
 
 import { ApiError } from "./services.js";
+import { apiPath } from "../../api-path.js";
+
+function pathFor(suffix: string, network?: string): string {
+  return network ? apiPath.network(network, suffix) : apiPath(suffix);
+}
 
 // fetchNodeRaw is the shared helper for all node-level GET endpoints.
 // Returns the raw JSON value of the newtron response (any JSON value — object,
@@ -46,134 +54,131 @@ async function fetchNodeRaw(url: string): Promise<unknown> {
   return response.json();
 }
 
-// fetchTopology returns the full topology payload from GET /api/topology.
-export async function fetchTopology(): Promise<unknown> {
-  return fetchNodeRaw("/api/topology");
+// fetchTopology returns the full topology payload from GET /api/networks/{netID}/topology.
+export async function fetchTopology(network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor("topology", network));
 }
 
-// fetchNodeInfo returns device overview from GET /api/nodes/{device}/info.
-export async function fetchNodeInfo(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/info`);
+// fetchNodeInfo returns device overview.
+export async function fetchNodeInfo(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/info`, network));
 }
 
-// fetchNodeHealth returns health data from GET /api/nodes/{device}/health.
-export async function fetchNodeHealth(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/health`);
+// fetchNodeHealth returns health data.
+export async function fetchNodeHealth(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/health`, network));
 }
 
-// fetchNodeInterfaces returns the interface list from GET /api/nodes/{device}/interfaces.
-export async function fetchNodeInterfaces(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/interfaces`);
+// fetchNodeInterfaces returns the interface list.
+export async function fetchNodeInterfaces(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/interfaces`, network));
 }
 
-// fetchNodeInterface returns detail for one interface from
-// GET /api/nodes/{device}/interfaces/{name}.
-export async function fetchNodeInterface(device: string, ifaceName: string): Promise<unknown> {
+// fetchNodeInterface returns detail for one interface.
+export async function fetchNodeInterface(device: string, ifaceName: string, network?: string): Promise<unknown> {
   // Encode "/" in interface names as %2F so the path segment is unambiguous.
   const encodedName = ifaceName.replace(/\//g, "%2F");
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedName}`);
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodedName}`, network));
 }
 
-// fetchNodeInterfaceBinding returns the service binding for one interface from
-// GET /api/nodes/{device}/interfaces/{name}/binding.
-export async function fetchNodeInterfaceBinding(device: string, ifaceName: string): Promise<unknown> {
+// fetchNodeInterfaceBinding returns the service binding for one interface.
+export async function fetchNodeInterfaceBinding(device: string, ifaceName: string, network?: string): Promise<unknown> {
   const encodedName = ifaceName.replace(/\//g, "%2F");
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedName}/binding`);
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodedName}/binding`, network));
 }
 
-// fetchNodeVLANs returns VLAN status from GET /api/nodes/{device}/vlans.
-export async function fetchNodeVLANs(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/vlans`);
+// fetchNodeVLANs returns VLAN status.
+export async function fetchNodeVLANs(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/vlans`, network));
 }
 
-// fetchNodeVRFs returns VRF list from GET /api/nodes/{device}/vrfs.
-export async function fetchNodeVRFs(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/vrfs`);
+// fetchNodeVRFs returns VRF list.
+export async function fetchNodeVRFs(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/vrfs`, network));
 }
 
-// fetchNodeACLs returns ACL list from GET /api/nodes/{device}/acls.
-export async function fetchNodeACLs(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/acls`);
+// fetchNodeACLs returns ACL list.
+export async function fetchNodeACLs(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/acls`, network));
 }
 
-// fetchNodeLAGs returns LAG list from GET /api/nodes/{device}/lags.
-export async function fetchNodeLAGs(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/lags`);
+// fetchNodeLAGs returns LAG list.
+export async function fetchNodeLAGs(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/lags`, network));
 }
 
-// fetchNodeNeighbors returns neighbors from GET /api/nodes/{device}/neighbors.
-export async function fetchNodeNeighbors(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/neighbors`);
+// fetchNodeNeighbors returns neighbors.
+export async function fetchNodeNeighbors(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/neighbors`, network));
 }
 
-// fetchNodeBGPStatus returns BGP status from GET /api/nodes/{device}/bgp/status.
-export async function fetchNodeBGPStatus(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/bgp/status`);
+// fetchNodeBGPStatus returns BGP status.
+export async function fetchNodeBGPStatus(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/bgp/status`, network));
 }
 
-// fetchNodeEVPNStatus returns EVPN status from GET /api/nodes/{device}/evpn/status.
-export async function fetchNodeEVPNStatus(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/evpn/status`);
+// fetchNodeEVPNStatus returns EVPN status.
+export async function fetchNodeEVPNStatus(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/evpn/status`, network));
 }
 
-// fetchNodeConfigDB returns the full CONFIG_DB snapshot from
-// GET /api/nodes/{device}/configdb.
-export async function fetchNodeConfigDB(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/configdb`);
+// fetchNodeConfigDB returns the full CONFIG_DB snapshot.
+export async function fetchNodeConfigDB(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/configdb`, network));
 }
 
-// fetchNodeConfigDBTable returns the key list for one CONFIG_DB table from
-// GET /api/nodes/{device}/configdb/{table}.
-export async function fetchNodeConfigDBTable(device: string, table: string): Promise<unknown> {
-  return fetchNodeRaw(
-    `/api/nodes/${encodeURIComponent(device)}/configdb/${encodeURIComponent(table)}`
-  );
+// fetchNodeConfigDBTable returns the key list for one CONFIG_DB table.
+export async function fetchNodeConfigDBTable(device: string, table: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/configdb/${encodeURIComponent(table)}`, network));
 }
 
-// fetchNodeConfigDBEntry returns one CONFIG_DB entry from
-// GET /api/nodes/{device}/configdb/{table}/{key}.
+// fetchNodeConfigDBEntry returns one CONFIG_DB entry.
 export async function fetchNodeConfigDBEntry(
   device: string,
   table: string,
-  key: string
+  key: string,
+  network?: string,
 ): Promise<unknown> {
-  return fetchNodeRaw(
-    `/api/nodes/${encodeURIComponent(device)}/configdb/${encodeURIComponent(table)}/${encodeURIComponent(key)}`
-  );
+  return fetchNodeRaw(pathFor(
+    `nodes/${encodeURIComponent(device)}/configdb/${encodeURIComponent(table)}/${encodeURIComponent(key)}`,
+    network,
+  ));
 }
 
-// GET /api/nodes/{device}/drift.
-export async function fetchNodeDrift(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/drift`);
+// fetchNodeDrift returns intent-vs-CONFIG_DB drift for a device.
+export async function fetchNodeDrift(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/drift`, network));
 }
 
-// GET /api/nodes/{device}/projection.
-export async function fetchNodeProjection(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/projection`);
+// fetchNodeProjection returns the projected intent state.
+export async function fetchNodeProjection(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/projection`, network));
 }
 
-// GET /api/nodes/{device}/intent-tree.
-export async function fetchNodeIntentTree(device: string): Promise<unknown> {
-  return fetchNodeRaw(`/api/nodes/${encodeURIComponent(device)}/intent-tree`);
+// fetchNodeIntentTree returns the structured intent record graph.
+export async function fetchNodeIntentTree(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/intent-tree`, network));
 }
 
-// POST /api/nodes/{device}/reconcile?dry_run=...&mode=...
+// postNodeReconcile triggers reconcile: dry_run=true returns drift preview;
+// dry_run=false executes corrective intent push.
 export async function postNodeReconcile(
   device: string,
-  opts: { dryRun: boolean; mode?: string } = { dryRun: true }
+  opts: { dryRun: boolean; mode?: string } = { dryRun: true },
+  network?: string,
 ): Promise<unknown> {
   const params = new URLSearchParams();
   if (opts.dryRun) params.set("dry_run", "true");
   if (opts.mode) params.set("mode", opts.mode);
   const qs = params.toString();
-  const url = `/api/nodes/${encodeURIComponent(device)}/reconcile${qs ? "?" + qs : ""}`;
+  const base = pathFor(`nodes/${encodeURIComponent(device)}/reconcile`, network);
+  const url = qs ? `${base}?${qs}` : base;
   const response = await fetch(url, { method: "POST", cache: "no-store" });
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.ok) {
     if (contentType.includes("application/json")) {
       const body = await response.json() as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
       if (body.error) {
-        const { ApiError } = await import("./services.js");
         throw new ApiError(response.status, {
           error: { kind: body.error.kind, message: body.error.message, details: body.error.details ?? {} },
         });
@@ -193,7 +198,7 @@ export async function postNodeReconcile(
 async function nodeWrite(
   url: string,
   method: "POST" | "PUT" | "DELETE",
-  body?: unknown
+  body?: unknown,
 ): Promise<unknown> {
   const init: RequestInit = { method, cache: "no-store" };
   if (body !== undefined) {
@@ -226,40 +231,36 @@ async function nodeWrite(
 
 // postTopologyDevice adds a device to the topology.
 // body: { name: string, device: { steps?: ..., ports?: ... } }
-// Forwards to POST /api/topology/nodes.
-export async function postTopologyDevice(body: Record<string, unknown>): Promise<unknown> {
-  return nodeWrite("/api/topology/nodes", "POST", body);
+export async function postTopologyDevice(body: Record<string, unknown>, network?: string): Promise<unknown> {
+  return nodeWrite(pathFor("topology/nodes", network), "POST", body);
 }
 
 // putTopologyDevice replaces a device entry (full replacement).
 // body: TopologyDevice — { steps?: ..., ports?: ... }
-// Forwards to PUT /api/topology/nodes/{name}.
-export async function putTopologyDevice(name: string, body: Record<string, unknown>): Promise<unknown> {
-  return nodeWrite(`/api/topology/nodes/${encodeURIComponent(name)}`, "PUT", body);
+export async function putTopologyDevice(name: string, body: Record<string, unknown>, network?: string): Promise<unknown> {
+  return nodeWrite(pathFor(`topology/nodes/${encodeURIComponent(name)}`, network), "PUT", body);
 }
 
 // deleteTopologyDevice removes a device from the topology.
 // force=true cascade-deletes referring links.
-// Forwards to DELETE /api/topology/nodes/{name}.
-export async function deleteTopologyDevice(name: string, force = false): Promise<unknown> {
-  const qs = force ? "?force=true" : "";
-  return nodeWrite(`/api/topology/nodes/${encodeURIComponent(name)}${qs}`, "DELETE");
+export async function deleteTopologyDevice(name: string, force = false, network?: string): Promise<unknown> {
+  const base = pathFor(`topology/nodes/${encodeURIComponent(name)}`, network);
+  const url = force ? `${base}?force=true` : base;
+  return nodeWrite(url, "DELETE");
 }
 
 // postTopologyLink adds a link between two interfaces.
 // body: { a: "device:interface", z: "device:interface" }
-// Forwards to POST /api/topology/links.
-export async function postTopologyLink(body: { a: string; z: string }): Promise<unknown> {
-  return nodeWrite("/api/topology/links", "POST", body);
+export async function postTopologyLink(body: { a: string; z: string }, network?: string): Promise<unknown> {
+  return nodeWrite(pathFor("topology/links", network), "POST", body);
 }
 
 // deleteTopologyLink removes the link that includes the given endpoint.
-// Forwards to DELETE /api/topology/links/{device}/{interface}.
-export async function deleteTopologyLink(device: string, ifaceName: string): Promise<unknown> {
+export async function deleteTopologyLink(device: string, ifaceName: string, network?: string): Promise<unknown> {
   const encodedIface = ifaceName.replace(/\//g, "%2F");
   return nodeWrite(
-    `/api/topology/links/${encodeURIComponent(device)}/${encodedIface}`,
-    "DELETE"
+    pathFor(`topology/links/${encodeURIComponent(device)}/${encodedIface}`, network),
+    "DELETE",
   );
 }
 
@@ -267,50 +268,48 @@ export async function deleteTopologyLink(device: string, ifaceName: string): Pro
 
 // postBindService binds a service to an interface.
 // body: { service: string, ip_address?: string, vlan?: number, peer_as?: number, params?: object }
-// service is required; all others optional.
-// Forwards to POST /api/nodes/{device}/interfaces/{name}/bind-service.
 export async function postBindService(
   device: string,
   ifaceName: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  network?: string,
 ): Promise<unknown> {
   const encodedIface = ifaceName.replace(/\//g, "%2F");
   return nodeWrite(
-    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/bind-service`,
+    pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/bind-service`, network),
     "POST",
-    body
+    body,
   );
 }
 
 // postUnbindService removes the service binding from an interface (no body).
-// Forwards to POST /api/nodes/{device}/interfaces/{name}/unbind-service.
-export async function postUnbindService(device: string, ifaceName: string): Promise<unknown> {
+export async function postUnbindService(device: string, ifaceName: string, network?: string): Promise<unknown> {
   const encodedIface = ifaceName.replace(/\//g, "%2F");
   return nodeWrite(
-    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/unbind-service`,
-    "POST"
+    pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/unbind-service`, network),
+    "POST",
   );
 }
 
 // postRefreshService re-applies the bound service on an interface (no body).
-// Forwards to POST /api/nodes/{device}/interfaces/{name}/refresh-service.
-export async function postRefreshService(device: string, ifaceName: string): Promise<unknown> {
+export async function postRefreshService(device: string, ifaceName: string, network?: string): Promise<unknown> {
   const encodedIface = ifaceName.replace(/\//g, "%2F");
   return nodeWrite(
-    `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/refresh-service`,
-    "POST"
+    pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodedIface}/refresh-service`, network),
+    "POST",
   );
 }
 
 // postNodeRPC POSTs to any node-level newtron action via the generic
-// /api/nodes/{device}/rpc/{subpath} proxy. body may be null/empty for
-// actions that take no params.
+// /api/networks/{netID}/nodes/{device}/rpc/{subpath} proxy. body may be
+// null/empty for actions that take no params.
 export async function postNodeRPC(
   device: string,
   subpath: string,
   body: Record<string, unknown> | null = null,
+  network?: string,
 ): Promise<unknown> {
-  const url = `/api/nodes/${encodeURIComponent(device)}/rpc/${subpath}`;
+  const url = pathFor(`nodes/${encodeURIComponent(device)}/rpc/${subpath}`, network);
   const init: RequestInit = { method: "POST", cache: "no-store" };
   if (body && Object.keys(body).length > 0) {
     init.headers = { "Content-Type": "application/json" };
@@ -322,7 +321,6 @@ export async function postNodeRPC(
     if (contentType.includes("application/json")) {
       const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
       if (errBody.error) {
-        const { ApiError } = await import("./services.js");
         throw new ApiError(response.status, {
           error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
         });
@@ -339,9 +337,10 @@ export async function postInterfaceRPC(
   iface: string,
   subpath: string,
   body: Record<string, unknown> | null = null,
+  network?: string,
 ): Promise<unknown> {
   const ifaceEnc = iface.replace(/\//g, "%2F");
-  const url = `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(ifaceEnc)}/rpc/${subpath}`;
+  const url = pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(ifaceEnc)}/rpc/${subpath}`, network);
   const init: RequestInit = { method: "POST", cache: "no-store" };
   if (body && Object.keys(body).length > 0) {
     init.headers = { "Content-Type": "application/json" };
@@ -353,7 +352,6 @@ export async function postInterfaceRPC(
     if (contentType.includes("application/json")) {
       const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
       if (errBody.error) {
-        const { ApiError } = await import("./services.js");
         throw new ApiError(response.status, {
           error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
         });

@@ -77,7 +77,7 @@ describe("fetchTopology()", () => {
   test("calls /api/topology", async () => {
     stubFetch(mockResponse(200, JSON.stringify({})));
     await fetchTopology();
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology");
   });
 
   test("passes cache: 'no-store'", async () => {
@@ -127,13 +127,13 @@ describe("fetchNodeInfo()", () => {
   test("calls /api/nodes/{device}/info", async () => {
     stubFetch(mockResponse(200, JSON.stringify({ hostname: "switch1" })));
     await fetchNodeInfo("switch1");
-    assert.equal(globalThis.fetch._lastUrl(), "/api/nodes/switch1/info");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/nodes/switch1/info");
   });
 
   test("URL-encodes device name with special chars", async () => {
     stubFetch(mockResponse(200, JSON.stringify({})));
     await fetchNodeInfo("my device");
-    assert.equal(globalThis.fetch._lastUrl(), "/api/nodes/my%20device/info");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/nodes/my%20device/info");
   });
 
   test("throws ApiError on 404", async () => {
@@ -161,7 +161,7 @@ describe("fetchNodeConfigDBEntry()", () => {
     await fetchNodeConfigDBEntry("switch1", "PORT", "Ethernet0");
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/switch1/configdb/PORT/Ethernet0"
+      "/api/networks/default/nodes/switch1/configdb/PORT/Ethernet0"
     );
   });
 
@@ -170,7 +170,7 @@ describe("fetchNodeConfigDBEntry()", () => {
     await fetchNodeConfigDBEntry("sw", "MY TABLE", "key/with/slash");
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/sw/configdb/MY%20TABLE/key%2Fwith%2Fslash"
+      "/api/networks/default/nodes/sw/configdb/MY%20TABLE/key%2Fwith%2Fslash"
     );
   });
 });
@@ -182,7 +182,7 @@ describe("postTopologyDevice()", () => {
     stubFetch(mockResponse(201, JSON.stringify({ steps: [], ports: {} })));
     const body = { name: "spine1", device: { steps: [], ports: {} } };
     await postTopologyDevice(body);
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/nodes");
     assert.equal(globalThis.fetch._lastInit()?.method, "POST");
     assert.equal(globalThis.fetch._lastInit()?.headers?.["Content-Type"], "application/json");
   });
@@ -209,14 +209,14 @@ describe("deleteTopologyDevice()", () => {
   test("DELETEs /api/topology/nodes/{name}", async () => {
     stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1" })));
     await deleteTopologyDevice("spine1");
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes/spine1");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/nodes/spine1");
     assert.equal(globalThis.fetch._lastInit()?.method, "DELETE");
   });
 
   test("appends ?force=true when force=true", async () => {
     stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1" })));
     await deleteTopologyDevice("spine1", true);
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/nodes/spine1?force=true");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/nodes/spine1?force=true");
   });
 });
 
@@ -226,7 +226,7 @@ describe("postTopologyLink()", () => {
   test("POSTs to /api/topology/links with {a,z} body", async () => {
     stubFetch(mockResponse(201, JSON.stringify({ a: "spine1:Ethernet0", z: "leaf1:Ethernet0" })));
     await postTopologyLink({ a: "spine1:Ethernet0", z: "leaf1:Ethernet0" });
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/links");
     assert.equal(globalThis.fetch._lastInit()?.method, "POST");
     const sent = JSON.parse(globalThis.fetch._lastInit()?.body);
     assert.equal(sent.a, "spine1:Ethernet0");
@@ -240,14 +240,14 @@ describe("deleteTopologyLink()", () => {
   test("DELETEs /api/topology/links/{device}/{interface}", async () => {
     stubFetch(mockResponse(200, JSON.stringify({ deleted: "spine1:Ethernet0" })));
     await deleteTopologyLink("spine1", "Ethernet0");
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links/spine1/Ethernet0");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/links/spine1/Ethernet0");
     assert.equal(globalThis.fetch._lastInit()?.method, "DELETE");
   });
 
   test("encodes slash in interface name as %2F", async () => {
     stubFetch(mockResponse(200, JSON.stringify({ deleted: "sw:Eth0/1" })));
     await deleteTopologyLink("sw", "Eth0/1");
-    assert.equal(globalThis.fetch._lastUrl(), "/api/topology/links/sw/Eth0%2F1");
+    assert.equal(globalThis.fetch._lastUrl(), "/api/networks/default/topology/links/sw/Eth0%2F1");
   });
 });
 
@@ -259,7 +259,7 @@ describe("postBindService()", () => {
     await postBindService("switch1", "Ethernet0", { service: "transit", vlan: 100 });
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/switch1/interfaces/Ethernet0/bind-service"
+      "/api/networks/default/nodes/switch1/interfaces/Ethernet0/bind-service"
     );
     assert.equal(globalThis.fetch._lastInit()?.method, "POST");
   });
@@ -269,7 +269,7 @@ describe("postBindService()", () => {
     await postBindService("sw", "Eth0/1", { service: "transit" });
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/sw/interfaces/Eth0%2F1/bind-service"
+      "/api/networks/default/nodes/sw/interfaces/Eth0%2F1/bind-service"
     );
   });
 });
@@ -282,7 +282,7 @@ describe("postUnbindService()", () => {
     await postUnbindService("switch1", "Ethernet0");
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/switch1/interfaces/Ethernet0/unbind-service"
+      "/api/networks/default/nodes/switch1/interfaces/Ethernet0/unbind-service"
     );
     assert.equal(globalThis.fetch._lastInit()?.method, "POST");
   });
@@ -296,7 +296,7 @@ describe("postRefreshService()", () => {
     await postRefreshService("switch1", "Ethernet0");
     assert.equal(
       globalThis.fetch._lastUrl(),
-      "/api/nodes/switch1/interfaces/Ethernet0/refresh-service"
+      "/api/networks/default/nodes/switch1/interfaces/Ethernet0/refresh-service"
     );
     assert.equal(globalThis.fetch._lastInit()?.method, "POST");
   });

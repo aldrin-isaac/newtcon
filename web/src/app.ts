@@ -51,6 +51,7 @@ import {
   postUnbindService,
   postRefreshService,
 } from "./api/newtcon/nodes.js";
+import { apiPath } from "./api-path.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
 // queue introduced in staging.ts, those flows go through enqueue* + applyAll
@@ -1314,7 +1315,7 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
             const bindBtn = el("button", { type: "button", className: "iface-action-btn" }, "Bind service");
             bindBtn.addEventListener("click", () => {
               // Fetch service names for the dropdown, then open the drawer.
-              fetch("/api/services", { cache: "no-store" })
+              fetch(apiPath("services"), { cache: "no-store" })
                 .then((r) => (r.ok ? r.json() : { services: [] }))
                 .then((d: unknown) => {
                   const body = d as { services?: { name: string }[] };

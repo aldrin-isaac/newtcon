@@ -4,7 +4,7 @@
 //
 // This file implements the Service Composer read endpoint:
 //
-//	GET /api/services
+//	GET /api/networks/{netID}/services
 //
 // Contract reference: API_CONTRACT.md §GET /api/services lines 1356–1379.
 //
@@ -37,7 +37,6 @@ import (
 // All methods are called only from the handler; the interface is local to this
 // file per CLAUDE.md §File Ownership Map ("one file per resource family").
 type servicesNewtronClient interface {
-	Network(ctx context.Context) string
 	ListServices(ctx context.Context, network string) ([]newtronc.NewtronService, error)
 	ShowService(ctx context.Context, network, name string) (*newtronc.NewtronServiceDetail, error)
 }
@@ -66,7 +65,7 @@ type ServicesDeps struct {
 //
 // Routes registered (Slice 2/4 scope only):
 //
-//	GET /api/services
+//	GET /api/networks/{netID}/services
 //
 // Called from cmd/newtcon-server/main.go at boot time per CLAUDE.md §File
 // Ownership Map: main.go is responsible for server boot and route wiring.
@@ -79,7 +78,7 @@ func RegisterServicesRoutes(mux *http.ServeMux, deps ServicesDeps) {
 	}
 	h := &servicesHandler{client: deps.Client, correlationID: correlationID}
 
-	mux.Handle("GET /api/services", http.HandlerFunc(h.handleListServices))
+	mux.Handle("GET /api/networks/{netID}/services", http.HandlerFunc(h.handleListServices))
 }
 
 // servicesHandler holds the shared state for the services handler family.
@@ -111,7 +110,7 @@ type servicesHandler struct {
 func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	correlationID := h.correlationID(ctx)
-	network := h.client.Network(ctx)
+	network := r.PathValue("netID")
 
 	services, err := h.client.ListServices(ctx, network)
 	if err != nil {
@@ -211,6 +210,6 @@ func writeServicesUnavailable(w http.ResponseWriter, correlationID string, err e
 }
 
 // Compile-time assertion: *newtronc.Client satisfies servicesNewtronClient.
-// If newtronc.Client's Network/ListServices/ShowService signatures change,
-// this line fails at build time — catching the mismatch before runtime.
+// If newtronc.Client's ListServices/ShowService signatures change, this line
+// fails at build time — catching the mismatch before runtime.
 var _ servicesNewtronClient = (*newtronc.Client)(nil)

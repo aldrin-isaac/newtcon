@@ -12,11 +12,7 @@ import {
   discardAll,
   applyAll,
 } from "./staging.js";
-import { installFetchInterceptor, setupNetworkSwitcher } from "./network-switcher.js";
-
-// Install the fetch interceptor before any other module runs a fetch.
-// It appends ?net=<activeNetwork> to every /api/* path that needs a network.
-installFetchInterceptor();
+import { setupNetworkSwitcher } from "./network-switcher.js";
 
 // ---- Icon hydration -------------------------------------------------------
 

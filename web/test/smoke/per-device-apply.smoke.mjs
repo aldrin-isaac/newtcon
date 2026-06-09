@@ -150,7 +150,7 @@ try {
 
   // ─── Cleanup ────────────────────────────────────────────────────
   console.log("→ cleanup via direct API");
-  await fetch(`${BASE}/api/nodes/switch1/rpc/delete-vlan`, {
+  await fetch(`${BASE}/api/networks/default/nodes/switch1/rpc/delete-vlan`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: vlanID }),
   });

@@ -29,7 +29,7 @@ func TestTopology_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/topology", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/topology", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -59,7 +59,7 @@ func TestTopology_Unavailable(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/topology", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/topology", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -96,7 +96,7 @@ func TestNodeInfo_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/switch1/info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/nodes/switch1/info", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -127,7 +127,7 @@ func TestNodeInfo_NotFound(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/nodevice/info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/nodes/nodevice/info", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -153,7 +153,7 @@ func TestNodeConfigDBEntry_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/switch1/configdb/PORT/Ethernet0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/nodes/switch1/configdb/PORT/Ethernet0", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -179,7 +179,7 @@ func TestNodeInterfaces_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nodes/switch1/interfaces", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/nodes/switch1/interfaces", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -213,7 +213,7 @@ func TestCreateTopologyDevice_Success(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]any{"name": "spine1", "device": map[string]any{}})
-	req := httptest.NewRequest(http.MethodPost, "/api/topology/nodes", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/topology/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -237,7 +237,7 @@ func TestCreateTopologyDevice_ValidationError(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]any{})
-	req := httptest.NewRequest(http.MethodPost, "/api/topology/nodes", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/topology/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -275,7 +275,7 @@ func TestDeleteTopologyDevice_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/topology/nodes/spine1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/networks/default/topology/nodes/spine1", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -302,7 +302,7 @@ func TestUpdateTopologyDevice_Success(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]any{"steps": []any{}})
-	req := httptest.NewRequest(http.MethodPut, "/api/topology/nodes/spine1", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/networks/default/topology/nodes/spine1", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -331,7 +331,7 @@ func TestCreateTopologyLink_Success(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]string{"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"})
-	req := httptest.NewRequest(http.MethodPost, "/api/topology/links", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/topology/links", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -358,7 +358,7 @@ func TestDeleteTopologyLink_Success(t *testing.T) {
 		Client: newtronc.New(upstream.URL),
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/topology/links/spine1/Ethernet0", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/networks/default/topology/links/spine1/Ethernet0", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -391,7 +391,7 @@ func TestBindService_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"service": "transit", "vlan": 100})
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
+		"/api/networks/default/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -420,7 +420,7 @@ func TestUnbindService_Success(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/nodes/switch1/interfaces/Ethernet0/unbind-service", nil)
+		"/api/networks/default/nodes/switch1/interfaces/Ethernet0/unbind-service", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -448,7 +448,7 @@ func TestRefreshService_Success(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/nodes/switch1/interfaces/Ethernet0/refresh-service", nil)
+		"/api/networks/default/nodes/switch1/interfaces/Ethernet0/refresh-service", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -472,7 +472,7 @@ func TestBindService_Unavailable(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"service": "transit"})
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
+		"/api/networks/default/nodes/switch1/interfaces/Ethernet0/bind-service", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

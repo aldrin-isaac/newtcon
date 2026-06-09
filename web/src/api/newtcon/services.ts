@@ -14,6 +14,8 @@
 // Import paths use .js extensions per the Node16 moduleResolution rule
 // documented in web/README.md.
 
+import { apiPath } from "../../api-path.js";
+
 /** ServiceHealth mirrors internal/types/services.go ServiceHealth. */
 export interface ServiceHealth {
   healthy: number;
@@ -79,19 +81,22 @@ export class ApiError extends Error {
 }
 
 /**
- * fetchServices calls GET /api/services and returns the decoded response.
+ * fetchServices calls GET /api/networks/{netID}/services and returns the
+ * decoded response. By default targets the operator's active network; pass
+ * `network` to target a specific network (cross-engine workflows).
  *
  * Throws ApiError when newtcon-server returns a non-2xx status with a
  * structured error envelope. Throws a plain Error for network failures
  * (fetch rejected, non-JSON body on error response).
  */
-export async function fetchServices(): Promise<ServiceListResponse> {
+export async function fetchServices(network?: string): Promise<ServiceListResponse> {
+  const url = network ? apiPath.network(network, "services") : apiPath("services");
   let response: Response;
   try {
     // cache: "no-store" — no client-side caching per newtcon#105 criterion.
     // The services list reflects live newtron state; a stale cached copy
     // would silently hide additions or removals (invariant #9).
-    response = await fetch("/api/services", { cache: "no-store" });
+    response = await fetch(url, { cache: "no-store" });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error("network error reaching newtcon-server: " + msg);

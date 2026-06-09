@@ -1,26 +1,17 @@
 // network-switcher.ts — workspace header dropdown for picking the active
-// newtron network. Plus the small `fetch` interceptor that appends
-// `?net=<activeID>` to every API call that needs a network.
+// newtron network. The active-network ID is read by api-path.ts's apiPath()
+// helper, which writes it positionally into /api/networks/{netID}/... URLs.
 //
 // Storage: localStorage key "newtcon.activeNetwork" (default "default").
 // Reload-on-switch is intentional — every mounted view re-fetches under the
 // new netID rather than reasoning about cross-network state coherence.
 //
-// Backend: /api/networks (GET list, POST register) + server.NetworkSelector
-// middleware reading ?net=<id>.
+// Backend: GET /api/networks (list) + POST /api/networks (register).
 
 import { iconSVG } from "./icons.js";
 
 const STORAGE_KEY = "newtcon.activeNetwork";
 const DEFAULT_NET = "default";
-
-// API paths that are NOT scoped to a network — the fetch interceptor must
-// not append ?net= to these or newtron will reject the request.
-const NETWORK_AGNOSTIC = [
-  "/api/health",
-  "/api/networks",          // GET list / POST register operate on the registry
-  "/api/labs",              // newtlab — separate engine, lab names are global
-];
 
 interface NetworkInfo {
   id: string;
@@ -47,44 +38,6 @@ function setActiveNetwork(id: string): void {
     // localStorage blocked — fall back to URL-driven mode would need page-state plumbing.
     // For now the in-memory selection persists for this session only.
   }
-}
-
-// ---- Fetch interceptor --------------------------------------------------
-
-function needsNetworkParam(url: string): boolean {
-  if (!url.startsWith("/api/")) return false;
-  for (const prefix of NETWORK_AGNOSTIC) {
-    if (url === prefix || url.startsWith(prefix)) return false;
-  }
-  return true;
-}
-
-function appendNet(url: string, net: string): string {
-  // Preserve existing query string if any.
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}net=${encodeURIComponent(net)}`;
-}
-
-// installFetchInterceptor replaces window.fetch with a wrapper that appends
-// ?net=<active> to every /api/* URL that isn't on the network-agnostic list.
-// Called once, at module load.
-export function installFetchInterceptor(): void {
-  const origFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    let url: string;
-    if (typeof input === "string") url = input;
-    else if (input instanceof URL) url = input.toString();
-    else url = input.url;
-
-    if (needsNetworkParam(url)) {
-      const patched = appendNet(url, activeNetwork());
-      if (typeof input === "string") return origFetch(patched, init);
-      if (input instanceof URL) return origFetch(new URL(patched, window.location.href), init);
-      // Request object — clone with the new URL.
-      return origFetch(new Request(patched, input), init);
-    }
-    return origFetch(input, init);
-  };
 }
 
 // ---- Dropdown UI --------------------------------------------------------
@@ -152,11 +105,15 @@ function closeDropdown(): void {
   if (dropdownEl) { dropdownEl.remove(); dropdownEl = null; }
 }
 
-document.addEventListener("click", (e) => {
-  if (!dropdownEl) return;
-  if (e.target instanceof Node && (dropdownEl.contains(e.target) || document.getElementById("network-switcher-trigger")?.contains(e.target))) return;
-  closeDropdown();
-});
+// Guard for non-browser test contexts (node:test imports api-path.ts which
+// pulls activeNetwork() through this module).
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (e) => {
+    if (!dropdownEl) return;
+    if (e.target instanceof Node && (dropdownEl.contains(e.target) || document.getElementById("network-switcher-trigger")?.contains(e.target))) return;
+    closeDropdown();
+  });
+}
 
 async function toggleDropdown(trigger: HTMLElement): Promise<void> {
   if (dropdownEl) { closeDropdown(); return; }
