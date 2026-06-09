@@ -490,3 +490,73 @@ func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, er
 	}
 	return apiResp.Data, nil
 }
+
+// NodeRPC POSTs an arbitrary node-level newtron action with an optional JSON
+// body. subpath is the path segment after /nodes/{device}/ (for example
+// "create-vlan", "save-config", "add-static-route"). The full URL is
+//   /newtron/v1/networks/{network}/nodes/{device}/{subpath}?{rawQuery}
+// rawQuery is forwarded verbatim so caller-supplied options like
+// ?mode=topology and ?execute=false reach newtron unchanged.
+func (c *Client) NodeRPC(ctx context.Context, network, device, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
+	path := fmt.Sprintf("/networks/%s/nodes/%s/%s", network, device, subpath)
+	if rawQuery != "" {
+		path = path + "?" + rawQuery
+	}
+	return c.nodePostRaw(ctx, path, body)
+}
+
+// InterfaceRPC POSTs an arbitrary per-interface newtron action. The full URL is
+//   /newtron/v1/networks/{network}/nodes/{device}/interfaces/{iface}/{subpath}?{rawQuery}
+// rawQuery is forwarded verbatim (see NodeRPC).
+func (c *Client) InterfaceRPC(ctx context.Context, network, device, iface, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
+	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/%s", network, device, iface, subpath)
+	if rawQuery != "" {
+		path = path + "?" + rawQuery
+	}
+	return c.nodePostRaw(ctx, path, body)
+}
+
+// nodePostRaw is the underlying POST helper used by *RPC methods. The path
+// argument must begin with "/" and be relative to the newtron engine base
+// — e.g. "/networks/default/nodes/switch1/create-vlan".
+func (c *Client) nodePostRaw(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
+	url := c.newtronBase() + path
+	var bodyReader io.Reader
+	if len(body) > 0 {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bodyReader)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response: %v", err)}
+	}
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode >= 500:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	case resp.StatusCode >= 400:
+		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	}
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &UnavailableError{Cause: apiResp.Error}
+	}
+	return apiResp.Data, nil
+}

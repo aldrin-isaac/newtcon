@@ -3,6 +3,15 @@
 // Runs once on module load; reuses elements from index.html.
 
 import { iconSVG } from "./icons.js";
+import {
+  subscribe as subscribePending,
+  getQueue,
+  pendingCount,
+  describePending,
+  removeFromQueue,
+  discardAll,
+  applyAll,
+} from "./staging.js";
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -257,12 +266,85 @@ function escapeHtml(s: string): string {
 
 // ---- Boot ----------------------------------------------------------------
 
+// ---- Pending-bar (workspace-level staging) -------------------------------
+
+function setupPendingBar(): void {
+  const bar = document.getElementById("pending-bar");
+  const list = document.getElementById("pending-bar-list");
+  const countEl = bar?.querySelector(".pending-bar-count");
+  const toggle = document.getElementById("pending-bar-toggle");
+  const discardBtn = document.getElementById("pending-bar-discard");
+  const saveBtn = document.getElementById("pending-bar-save");
+  if (!bar || !list || !countEl || !toggle || !discardBtn || !saveBtn) return;
+
+  const render = (): void => {
+    const n = pendingCount();
+    bar.hidden = n === 0;
+    countEl.textContent = String(n);
+    if (n === 0) list.hidden = true;
+    if (!list.hidden) renderList();
+  };
+  const renderList = (): void => {
+    list.textContent = "";
+    for (const p of getQueue()) {
+      const row = document.createElement("div");
+      row.className = "pending-bar-item " +
+        (p.op.startsWith("add") || p.op === "create" ? "pending-bar-item--add" : "pending-bar-item--del");
+      const label = document.createElement("span");
+      label.className = "pending-bar-item-label";
+      label.textContent = describePending(p);
+      row.appendChild(label);
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "pending-bar-item-drop";
+      drop.title = "Drop this pending change";
+      drop.textContent = "×";
+      drop.addEventListener("click", (e) => { e.stopPropagation(); removeFromQueue(p.id); });
+      row.appendChild(drop);
+      list.appendChild(row);
+    }
+  };
+
+  toggle.addEventListener("click", () => {
+    list.hidden = !list.hidden;
+    if (!list.hidden) renderList();
+  });
+
+  discardBtn.addEventListener("click", () => {
+    const n = pendingCount();
+    if (n === 0) return;
+    if (!window.confirm(`Discard ${n} pending change${n === 1 ? "" : "s"}? Nothing will be applied.`)) return;
+    discardAll();
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    const n = pendingCount();
+    if (n === 0) return;
+    if (!window.confirm(`Apply ${n} pending change${n === 1 ? "" : "s"} now?`)) return;
+    saveBtn.setAttribute("disabled", "");
+    saveBtn.textContent = "Saving…";
+    const r = await applyAll();
+    saveBtn.removeAttribute("disabled");
+    saveBtn.textContent = "Save";
+    if (r.failed.length > 0) {
+      const lines = r.failed.map((f) => `${describePending(f.pending)}: ${f.error}`).join("\n");
+      alert(`Applied ${r.applied.length}, failed ${r.failed.length}.\n\n${lines}`);
+    }
+    // Re-mount whichever view is visible so the (now-applied) changes refresh.
+    document.querySelector(".nav-item--active")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+
+  subscribePending(render);
+  render();
+}
+
 function boot(): void {
   hydrateIcons();
   watchForNewIcons();
   setupBreadcrumb();
   setupSidebarActiveStates();
   setupPalette();
+  setupPendingBar();
   startStatusPolling();
 }
 

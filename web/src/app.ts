@@ -6,8 +6,6 @@
 import {
   fetchSpecList,
   fetchSpecDetail,
-  createSpec,
-  deleteSpec,
   addSubRule,
   removeQoSQueue,
   removeFilterRule,
@@ -48,14 +46,32 @@ import {
   fetchNodeProjection,
   fetchNodeIntentTree,
   postNodeReconcile,
-  postTopologyDevice,
-  deleteTopologyDevice,
-  postTopologyLink,
   deleteTopologyLink,
   postBindService,
   postUnbindService,
   postRefreshService,
 } from "./api/newtcon/nodes.js";
+// Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
+// were previously called directly from the topology view. With the staging
+// queue introduced in staging.ts, those flows go through enqueue* + applyAll
+// instead, so we don't import them here.
+import { NODE_ACTIONS } from "./topology-actions.js";
+import { showContextMenu } from "./topology-actions-ui.js";
+import { renderActionPanel } from "./topology-action-panel.js";
+import {
+  enqueueSpecCreate,
+  enqueueSpecDelete,
+  enqueueTopologyAddDevice,
+  enqueueTopologyRemoveDevice,
+  enqueueTopologyAddLink,
+  pendingSpecCreates,
+  isSpecPendingDelete,
+  pendingTopologyDeviceAdds,
+  isDevicePendingRemove,
+  pendingTopologyLinkAdds,
+  subscribe as subscribePending,
+  type SpecKind as StagingSpecKind,
+} from "./staging.js";
 
 // ---- DOM helper -------------------------------------------------------------
 
@@ -324,19 +340,17 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Create");
   content.appendChild(submitBtn);
 
-  submitBtn.addEventListener("click", async () => {
+  submitBtn.addEventListener("click", () => {
     errorOut.textContent = "";
     submitBtn.disabled = true;
-    submitBtn.textContent = "Creating…";
-
+    submitBtn.textContent = "Queued";
     try {
       const values = getValues();
-      await createSpec(kind, values);
-      submitBtn.textContent = "Created";
-      const ok = el("p", { className: "form-success" }, "Created successfully.");
+      const name = String(values["name"] ?? values["id"] ?? "(unnamed)");
+      enqueueSpecCreate(kind as StagingSpecKind, name, values);
+      const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, submitBtn);
       onSuccess();
-      // Close drawer after short delay.
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
         drawer.classList.remove("open");
@@ -344,12 +358,7 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Create";
-      if (err instanceof ApiError) {
-        const kindLabel = translateErrorKind(err.kind);
-        errorOut.appendChild(el("p", { className: "panel-error" }, kindLabel + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -394,45 +403,49 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
 
     container.appendChild(header);
 
-    if (items.length === 0) {
+    // Combine server-side items with pending creates (overlay so the operator
+    // sees both committed and queued items in one list, with color).
+    const queuedAdds = pendingSpecCreates(panel.kind as StagingSpecKind);
+    type SpecRow = { name: string; pending: "none" | "create" };
+    const allRows: SpecRow[] = items.map((n) => ({ name: n, pending: "none" as const }));
+    for (const n of queuedAdds) {
+      if (!items.includes(n)) allRows.push({ name: n, pending: "create" });
+    }
+
+    if (allRows.length === 0) {
       container.appendChild(el("p", { className: "panel-empty" }, "none defined"));
     } else {
       const list = el("ul", { className: "panel-list" });
-      for (const name of items) {
-        const row = el("li", { className: "panel-list-row" });
-        const item = el("span", { className: "panel-list-item", tabIndex: 0 }, name);
-        item.addEventListener("click", () => openDetail(panel.kind, panel.title, name));
+      for (const r of allRows) {
+        const isPendingCreate = r.pending === "create";
+        const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
+        const row = el("li", {
+          className: "panel-list-row"
+            + (isPendingCreate ? " panel-list-row--pending-add" : "")
+            + (isPendingDelete ? " panel-list-row--pending-del" : ""),
+        });
+        const item = el("span", { className: "panel-list-item", tabIndex: 0 }, r.name);
+        item.addEventListener("click", () => openDetail(panel.kind, panel.title, r.name));
         item.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            openDetail(panel.kind, panel.title, name);
+            openDetail(panel.kind, panel.title, r.name);
           }
         });
         row.appendChild(item);
 
         // Delete affordance — × button shown on hover.
-        if (specForms[panel.kind]) {
+        if (specForms[panel.kind] && !isPendingCreate) {
           const delBtn = el("button", {
             type: "button",
             className: "panel-delete-btn",
-            title: "Delete " + name,
-            ariaLabel: "Delete " + name,
-          }, "×");
+            title: isPendingDelete ? "Cancel delete" : "Delete " + r.name,
+            ariaLabel: isPendingDelete ? "Cancel delete of " + r.name : "Delete " + r.name,
+          }, isPendingDelete ? "↺" : "×");
           delBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (!window.confirm(`Delete ${panel.title.replace(/s$/, "").toLowerCase()} "${name}"? This cannot be undone.`)) return;
-            delBtn.disabled = true;
-            delBtn.textContent = "…";
-            deleteSpec(panel.kind, name)
-              .then(() => refreshPanel(panel, container))
-              .catch((err) => {
-                delBtn.disabled = false;
-                delBtn.textContent = "×";
-                const msg = err instanceof ApiError
-                  ? translateErrorKind(err.kind) + ": " + err.message
-                  : String(err);
-                alert("Delete failed: " + msg);
-              });
+            enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
+            refreshPanel(panel, container);
           });
           row.appendChild(delBtn);
         }
@@ -812,18 +825,25 @@ const H_GAP = 80;
 const V_GAP = 60;
 
 // layoutNodes assigns (cx, cy) to each node in a deterministic grid.
-// Up to 4 nodes per row; rows stacked with V_GAP spacing.
-function layoutNodes(nodes: TopoNode[]): Map<string, { cx: number; cy: number }> {
+// Up to 4 nodes per row; rows stacked with V_GAP spacing. cellW lets the
+// caller widen the column when interface bands are expanded.
+function layoutNodes(nodes: TopoNode[], cellW: number, perRowExtraH: number[]): Map<string, { cx: number; cy: number }> {
   const cols = Math.min(nodes.length, 4);
   const positions = new Map<string, { cx: number; cy: number }>();
-  nodes.forEach((n, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    positions.set(n.name, {
-      cx: (NODE_W + H_GAP) * col + NODE_W / 2 + H_GAP / 2,
-      cy: (NODE_H + V_GAP) * row + NODE_H / 2 + V_GAP / 2,
-    });
-  });
+  // Track the cumulative y-offset added by each row's tallest expansion band.
+  let yCursor = V_GAP / 2;
+  for (let r = 0; r * cols < nodes.length; r++) {
+    const rowExtra = perRowExtraH[r] ?? 0;
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (i >= nodes.length) break;
+      positions.set(nodes[i].name, {
+        cx: (cellW + H_GAP) * c + cellW / 2 + H_GAP / 2,
+        cy: yCursor + NODE_H / 2,
+      });
+    }
+    yCursor += NODE_H + rowExtra + V_GAP;
+  }
   return positions;
 }
 
@@ -839,19 +859,43 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
+interface TopologyRenderOpts {
+  onNodeClick: (name: string, ev: MouseEvent) => void;
+  onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
+  driftByDevice?: Map<string, number>;
+  onlineByDevice?: Map<string, boolean>;
+  onNodeDelete?: (name: string) => void;
+  selected?: Set<string>;
+  pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
+  // Staging overlays — render device cards in green/red according to queue state.
+  isPendingAdd?: (name: string) => boolean;
+  isPendingRemove?: (name: string) => boolean;
+}
+
+interface TopologyRenderResult {
+  svg: SVGSVGElement;
+  // Per-device pixel position of the centre of the device card, relative to
+  // the SVG's origin. Used by the HTML overlay (interface pills + selection
+  // glow) so it can align with each device without going through SVG layout.
+  positions: Map<string, { cx: number; cy: number }>;
+  width: number;
+  height: number;
+}
+
 function renderTopologySVG(
   data: TopologyData,
-  onNodeClick: (name: string) => void,
-  driftByDevice?: Map<string, number>,
-  onNodeDelete?: (name: string) => void
-): SVGSVGElement {
+  opts: TopologyRenderOpts,
+): TopologyRenderResult {
   const nodes: TopoNode[] = Array.isArray(data.nodes) ? data.nodes : [];
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
+  const selected = opts.selected ?? new Set<string>();
 
   const cols = Math.min(nodes.length || 1, 4);
-  const rows = nodes.length === 0 ? 1 : Math.ceil(nodes.length / cols);
-  const svgW = (NODE_W + H_GAP) * cols + H_GAP;
-  const svgH = (NODE_H + V_GAP) * rows + V_GAP;
+  const rowCount = nodes.length === 0 ? 1 : Math.ceil(nodes.length / cols);
+  const perRowExtraH: number[] = new Array(rowCount).fill(0);
+  const cellW = NODE_W;
+  const svgW = (cellW + H_GAP) * cols + H_GAP;
+  const svgH = (NODE_H + V_GAP) * rowCount + V_GAP;
 
   const svg = svgEl("svg", {
     width: String(svgW),
@@ -862,7 +906,7 @@ function renderTopologySVG(
     "aria-label": "Network topology diagram",
   });
 
-  const positions = layoutNodes(nodes);
+  const positions = layoutNodes(nodes, cellW, perRowExtraH);
 
   // Draw links first (under nodes).
   for (const link of links) {
@@ -883,13 +927,39 @@ function renderTopologySVG(
   for (const node of nodes) {
     const pos = positions.get(node.name);
     if (!pos) continue;
+    const isSelected = selected.has(node.name);
+    const pendingCount = opts.pendingByDevice?.get(node.name) ?? 0;
+    const isPendingAdd = opts.isPendingAdd?.(node.name) ?? false;
+    const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
+    const onlineState = opts.onlineByDevice?.get(node.name);
+    // unknown (probe still in flight or not run) → no class; online → green; offline → grey
+    const onlineClass = onlineState === true ? " topo-node--online"
+                      : onlineState === false ? " topo-node--offline"
+                      : "";
 
     const g = svgEl("g", {
-      "class": "topo-node",
+      "class": "topo-node"
+        + (isSelected ? " topo-node--selected" : "")
+        + (pendingCount > 0 ? " topo-node--pending" : "")
+        + (isPendingAdd ? " topo-node--pending-add" : "")
+        + (isPendingRemove ? " topo-node--pending-del" : "")
+        + onlineClass,
       role: "button",
       tabindex: "0",
       "aria-label": `Device ${node.name}`,
     });
+
+    if (isSelected) {
+      // Selection ring drawn behind the node rect.
+      g.appendChild(svgEl("rect", {
+        "class": "topo-node-selection-ring",
+        x: String(pos.cx - NODE_W / 2 - 5),
+        y: String(pos.cy - NODE_H / 2 - 5),
+        width: String(NODE_W + 10),
+        height: String(NODE_H + 10),
+        rx: "8",
+      }));
+    }
 
     const rect = svgEl("rect", {
       x: String(pos.cx - NODE_W / 2),
@@ -917,16 +987,61 @@ function renderTopologySVG(
       g.appendChild(typeLabel);
     }
 
-    g.addEventListener("click", () => onNodeClick(node.name));
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      opts.onNodeClick(node.name, e);
+    });
+    g.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      opts.onNodeContextMenu?.(node.name, e);
+    });
     g.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        onNodeClick(node.name);
+        opts.onNodeClick(node.name, new MouseEvent("click", {
+          clientX: pos.cx,
+          clientY: pos.cy,
+        }));
       }
     });
 
+    // Online/offline indicator — small status dot in the bottom-left.
+    if (onlineState !== undefined) {
+      const sx = pos.cx - NODE_W / 2 + 8;
+      const sy = pos.cy + NODE_H / 2 - 8;
+      const dot = svgEl("g", { "class": "topo-online-badge" });
+      dot.appendChild(svgEl("circle", {
+        cx: String(sx), cy: String(sy), r: "5",
+        "class": onlineState ? "topo-online-dot topo-online-dot--ok" : "topo-online-dot topo-online-dot--off",
+      }));
+      const t = svgEl("title");
+      t.textContent = onlineState ? `${node.name} is online` : `${node.name} is offline`;
+      dot.appendChild(t);
+      g.appendChild(dot);
+    }
+
+    // Pending-changes badge (small dot in the bottom-right; drift is top-right,
+    // delete is top-left, so we avoid overlap.)
+    if (pendingCount > 0) {
+      const pBadge = svgEl("g", { "class": "topo-pending-badge" });
+      const pcx = pos.cx + NODE_W / 2 - 8;
+      const pcy = pos.cy + NODE_H / 2 - 8;
+      pBadge.appendChild(svgEl("circle", { cx: String(pcx), cy: String(pcy), r: "7" }));
+      const pcount = svgEl("text", {
+        x: String(pcx), y: String(pcy),
+        "text-anchor": "middle", "dominant-baseline": "central",
+      });
+      pcount.textContent = String(pendingCount);
+      pBadge.appendChild(pcount);
+      const ptitle = svgEl("title");
+      ptitle.textContent = `${pendingCount} pending change${pendingCount === 1 ? "" : "s"}`;
+      pBadge.appendChild(ptitle);
+      g.appendChild(pBadge);
+    }
+
     // Drift badge: small dot in the top-right when the device has drift.
-    const driftCount = driftByDevice?.get(node.name) ?? 0;
+    const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
     if (driftCount > 0) {
       const badge = svgEl("g", { "class": "topo-drift-badge" });
       const cx = pos.cx + NODE_W / 2 - 8;
@@ -947,7 +1062,8 @@ function renderTopologySVG(
     }
 
     // Delete button: × shown on node hover (top-left corner).
-    if (onNodeDelete) {
+    if (opts.onNodeDelete) {
+      const onNodeDelete = opts.onNodeDelete;
       const delBtn = svgEl("g", { "class": "topo-node-delete", "aria-label": `Remove ${node.name}` });
       const bx = pos.cx - NODE_W / 2;
       const by = pos.cy - NODE_H / 2;
@@ -995,7 +1111,7 @@ function renderTopologySVG(
     svg.appendChild(msg);
   }
 
-  return svg;
+  return { svg, positions, width: svgW, height: svgH };
 }
 
 // ---- Node inspector drawer --------------------------------------------------
@@ -1733,7 +1849,7 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
   submitBtn.addEventListener("click", async () => {
     errorOut.textContent = "";
     submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
+    submitBtn.textContent = "Queued";
     try {
       const values = getValues();
       const name = values["name"] as string;
@@ -1743,10 +1859,9 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
         submitBtn.textContent = "Add device";
         return;
       }
-      // Minimal device body — steps and ports may be added later via update.
-      await postTopologyDevice({ name, device: { steps: [], ports: {} } });
-      submitBtn.textContent = "Added";
-      content.insertBefore(el("p", { className: "form-success" }, "Device added."), submitBtn);
+      // Stage rather than POST. Final body is materialised on Save.
+      enqueueTopologyAddDevice(name, { steps: [], ports: {} });
+      content.insertBefore(el("p", { className: "form-success" }, "Device queued (green). Click Save in the header to apply."), submitBtn);
       onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
@@ -1755,12 +1870,7 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Add device";
-      if (err instanceof ApiError) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -1834,11 +1944,10 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     }
 
     submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
+    submitBtn.textContent = "Queued";
     try {
-      await postTopologyLink({ a: `${aDevice}:${aIface}`, z: `${zDevice}:${zIface}` });
-      submitBtn.textContent = "Added";
-      content.insertBefore(el("p", { className: "form-success" }, "Link added."), submitBtn);
+      enqueueTopologyAddLink(`${aDevice}:${aIface}`, `${zDevice}:${zIface}`);
+      content.insertBefore(el("p", { className: "form-success" }, "Link queued (green). Click Save in the header to apply."), submitBtn);
       onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
@@ -1847,12 +1956,7 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Add link";
-      if (err instanceof ApiError) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-      }
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
 }
@@ -1868,19 +1972,36 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     root.textContent = "";
     const topoData = adaptTopology(data);
 
-    // Fetch drift for each device in parallel; render badges where present.
+    // Per-device probes: online (does newtron reach the device?) and drift
+    // (does the device's CONFIG_DB diverge from the projected intent?).
+    // Both probe in parallel; both tolerate failure (a device that is offline
+    // is rendered with the offline badge; drift is only meaningful if online).
     const deviceNames = Array.isArray(topoData.nodes)
       ? topoData.nodes.map((n) => n.name).filter((n) => typeof n === "string")
       : [];
+
+    const onlineByDevice = new Map<string, boolean>();
     const driftByDevice = new Map<string, number>();
-    const driftResults = await Promise.allSettled(
-      deviceNames.map((name) => fetchNodeDrift(name))
+    const probeResults = await Promise.allSettled(
+      deviceNames.map(async (name) => {
+        // Hit /info as the cheapest available liveness probe. Success → online.
+        // Failure → offline (we don't distinguish reasons in v1; newtron#75
+        // tracks a dedicated /status endpoint).
+        try {
+          await fetchNodeInfo(name);
+          onlineByDevice.set(name, true);
+        } catch {
+          onlineByDevice.set(name, false);
+          return;
+        }
+        // Drift only makes sense for online devices.
+        try {
+          const drift = await fetchNodeDrift(name);
+          if (Array.isArray(drift)) driftByDevice.set(name, drift.length);
+        } catch { /* drift unavailable; leave count undefined */ }
+      })
     );
-    driftResults.forEach((r, i) => {
-      if (r.status === "fulfilled" && Array.isArray(r.value)) {
-        driftByDevice.set(deviceNames[i], r.value.length);
-      }
-    });
+    void probeResults;
 
     // Build toolbar with Add device and Add link buttons.
     const toolbar = el("div", { className: "topology-toolbar" });
@@ -1900,24 +2021,132 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     root.appendChild(toolbar);
 
-    const svg = renderTopologySVG(
-      topoData,
-      (deviceName) => { openNodeDrawer(deviceName); },
-      driftByDevice,
-      (deviceName) => {
-        // Delete device callback from the SVG × button.
-        if (!window.confirm(`Remove device "${deviceName}" from the topology? This cannot be undone.`)) return;
-        deleteTopologyDevice(deviceName)
-          .then(() => mountTopologyTab(root))
-          .catch((err) => {
-            const msg = err instanceof ApiError
-              ? translateErrorKind(err.kind) + ": " + err.message
-              : String(err);
-            alert("Remove device failed: " + msg);
-          });
+    // Persistent UI state: which nodes are selected; the docked panel reads
+    // this and renders the action set + Save/Discard for the selection.
+    const selected: Set<string> = new Set();
+
+    // Topology view: layout is a split — left = SVG diagram, right = docked
+    // action panel. Both stay in sync via re-renders driven by `selected`.
+    const split = el("div", { className: "topology-split" });
+    const graphSlot = el("div", { className: "topology-graph-slot" });
+    const panelRoot = el("aside", { className: "topo-action-panel" });
+    split.appendChild(graphSlot);
+    split.appendChild(panelRoot);
+    root.appendChild(split);
+
+    // Interface lists pulled from the topology declaration (works offline);
+    // live-fetched lists merge in via the panel module's source cache.
+    const interfacesByDevice: Map<string, string[]> = new Map();
+    const rawData = (data ?? {}) as { devices?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
+    const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.devices ?? {}) };
+    // Overlay pending topology additions so the diagram shows them in green.
+    const pendingDeviceAdds = pendingTopologyDeviceAdds();
+    for (const p of pendingDeviceAdds) {
+      if (!(p.name in rawDevices)) rawDevices[p.name] = (p.body as { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> });
+    }
+    // Merge pending-link adds into topoData.links so the graph draws them.
+    for (const ln of pendingTopologyLinkAdds()) {
+      topoData.links = topoData.links ?? [];
+      const [aDev, aIf] = ln.a.split(":");
+      const [zDev, zIf] = ln.z.split(":");
+      topoData.links.push({
+        local_device: aDev, local_interface: aIf,
+        remote_device: zDev, remote_interface: zIf,
+      });
+    }
+    // Add pending-device nodes (green) to topoData.nodes.
+    topoData.nodes = topoData.nodes ?? [];
+    for (const p of pendingDeviceAdds) {
+      if (!topoData.nodes.some((n) => n.name === p.name)) {
+        topoData.nodes.push({ name: p.name, type: "queued" });
       }
-    );
-    root.appendChild(svg);
+    }
+    for (const [name, dev] of Object.entries(rawDevices)) {
+      interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort());
+    }
+    const deviceTypeOf = (name: string): string => {
+      const steps = (rawDevices[name] as { steps?: Array<{ params?: { fields?: { type?: string } } }> })?.steps ?? [];
+      for (const s of steps) {
+        const t = s.params?.fields?.type;
+        if (typeof t === "string" && t !== "") return t;
+      }
+      return "device";
+    };
+
+    const renderGraph = (): void => {
+      graphSlot.textContent = "";
+      const result = renderTopologySVG(topoData, {
+        onNodeClick: (deviceName, ev) => {
+          if (ev.shiftKey) {
+            if (selected.has(deviceName)) selected.delete(deviceName);
+            else selected.add(deviceName);
+          } else {
+            selected.clear();
+            selected.add(deviceName);
+          }
+          renderGraph();
+          renderPanel();
+        },
+        onNodeContextMenu: (deviceName, ev) => {
+          // Right-click keeps the floating menu as a quick power-user gesture.
+          showContextMenu(NODE_ACTIONS, {
+            kind: "node",
+            device: deviceName,
+            anchorX: ev.clientX,
+            anchorY: ev.clientY,
+            onComplete: () => mountTopologyTab(root),
+            onInspect: () => openNodeDrawer(deviceName),
+          });
+        },
+        driftByDevice,
+        onlineByDevice,
+        onNodeDelete: (deviceName) => {
+          // Stage the remove rather than fire immediately; toggles if already queued.
+          enqueueTopologyRemoveDevice(deviceName);
+          mountTopologyTab(root);
+        },
+        selected,
+        isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
+        isPendingRemove: (n) => isDevicePendingRemove(n),
+      });
+      graphSlot.appendChild(result.svg);
+    };
+
+    // Re-render the graph + panel when the pending queue changes — but do
+    // NOT remount: that would clear the current selection. The panel reads
+    // the queue and shows per-device queued items + Apply/Discard buttons.
+    const unsub = subscribePending(() => { renderGraph(); renderPanel(); });
+    if ((root as unknown as { _topoUnsub?: () => void })._topoUnsub) {
+      (root as unknown as { _topoUnsub?: () => void })._topoUnsub!();
+    }
+    (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
+
+    const renderPanel = (): void => {
+      renderActionPanel(
+        { devices: Array.from(selected) },
+        {
+          panelRoot,
+          topology: {
+            interfacesFor: (d) => interfacesByDevice.get(d) ?? [],
+            deviceType: deviceTypeOf,
+          },
+          onChange: () => { renderGraph(); renderPanel(); },
+          onLinkRequest: () => { selected.clear(); mountTopologyTab(root); },
+        },
+      );
+    };
+
+    // Background-dismiss menu on outside graph clicks.
+    graphSlot.addEventListener("click", (e) => {
+      if (e.target === graphSlot || (e.target as Element).tagName?.toLowerCase() === "svg") {
+        selected.clear();
+        renderGraph();
+        renderPanel();
+      }
+    });
+
+    renderGraph();
+    renderPanel();
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
     const summary = el(
@@ -2366,6 +2595,14 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
 
   renderSubnav();
   await renderActiveFacet();
+
+  // Subscribe to the staging queue so pending creates/deletes re-render the
+  // active facet immediately (green/red overlays + after-Save refresh).
+  if ((root as unknown as { _specsUnsub?: () => void })._specsUnsub) {
+    (root as unknown as { _specsUnsub?: () => void })._specsUnsub!();
+  }
+  const unsub = subscribePending(() => { void renderActiveFacet(); });
+  (root as unknown as { _specsUnsub?: () => void })._specsUnsub = unsub;
 }
 
 async function mount(): Promise<void> {

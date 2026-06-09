@@ -262,6 +262,31 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		}, "/api/nodes/"+device+"/reconcile")
 	}))
 
+	// Generic RPC: forward any node-level newtron action by subpath.
+	// Query string is forwarded verbatim so callers can pass newtron options
+	// like ?mode=topology and ?execute=false.
+	mux.Handle("POST /api/nodes/{device}/rpc/{subpath...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		subpath := r.PathValue("subpath")
+		rawQuery := r.URL.RawQuery
+		body, _ := io.ReadAll(r.Body)
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeRPC(ctx, c.Network(ctx), device, subpath, rawQuery, body)
+		}, "/api/nodes/"+device+"/rpc/"+subpath)
+	}))
+
+	// Generic per-interface RPC.
+	mux.Handle("POST /api/nodes/{device}/interfaces/{iface}/rpc/{subpath...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := r.PathValue("device")
+		iface := normalizeIfaceName(r.PathValue("iface"))
+		subpath := r.PathValue("subpath")
+		rawQuery := r.URL.RawQuery
+		body, _ := io.ReadAll(r.Body)
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.InterfaceRPC(ctx, c.Network(ctx), device, iface, subpath, rawQuery, body)
+		}, "/api/nodes/"+device+"/interfaces/"+iface+"/rpc/"+subpath)
+	}))
+
 	// ============================================================================
 	// Topology write endpoints
 	// ============================================================================

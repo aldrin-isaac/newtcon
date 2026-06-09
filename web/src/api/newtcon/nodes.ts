@@ -301,3 +301,65 @@ export async function postRefreshService(device: string, ifaceName: string): Pro
     "POST"
   );
 }
+
+// postNodeRPC POSTs to any node-level newtron action via the generic
+// /api/nodes/{device}/rpc/{subpath} proxy. body may be null/empty for
+// actions that take no params.
+export async function postNodeRPC(
+  device: string,
+  subpath: string,
+  body: Record<string, unknown> | null = null,
+): Promise<unknown> {
+  const url = `/api/nodes/${encodeURIComponent(device)}/rpc/${subpath}`;
+  const init: RequestInit = { method: "POST", cache: "no-store" };
+  if (body && Object.keys(body).length > 0) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, init);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok) {
+    if (contentType.includes("application/json")) {
+      const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
+      if (errBody.error) {
+        const { ApiError } = await import("./services.js");
+        throw new ApiError(response.status, {
+          error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
+        });
+      }
+    }
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+// postInterfaceRPC POSTs to any per-interface newtron action.
+export async function postInterfaceRPC(
+  device: string,
+  iface: string,
+  subpath: string,
+  body: Record<string, unknown> | null = null,
+): Promise<unknown> {
+  const ifaceEnc = iface.replace(/\//g, "%2F");
+  const url = `/api/nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(ifaceEnc)}/rpc/${subpath}`;
+  const init: RequestInit = { method: "POST", cache: "no-store" };
+  if (body && Object.keys(body).length > 0) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, init);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok) {
+    if (contentType.includes("application/json")) {
+      const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
+      if (errBody.error) {
+        const { ApiError } = await import("./services.js");
+        throw new ApiError(response.status, {
+          error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
+        });
+      }
+    }
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
