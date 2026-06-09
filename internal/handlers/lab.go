@@ -1,19 +1,19 @@
 // Lab lifecycle handlers. Each handler forwards one newtlab-server call via
-// internal/newtronc/newtlab.go. URL pattern: /api/lab/topologies/...
+// internal/newtronc/newtlab.go. URL pattern: /api/labs/...
 //
 // All newtlab HTTP traffic is mediated by internal/newtronc (CLAUDE.md §1).
 // No newtlab or newtron Go package is imported here.
 //
 // Routes registered by RegisterLabRoutes:
 //
-//	GET  /api/lab/topologies
-//	GET  /api/lab/topologies/{name}/status
-//	POST /api/lab/topologies/{name}/deploy
-//	POST /api/lab/topologies/{name}/destroy
-//	POST /api/lab/topologies/{name}/provision
-//	GET  /api/lab/topologies/{name}/events      ← SSE passthrough
-//	POST /api/lab/topologies/{name}/nodes/{node}/start
-//	POST /api/lab/topologies/{name}/nodes/{node}/stop
+//	GET  /api/labs
+//	GET  /api/labs/{name}/status
+//	POST /api/labs/{name}/deploy
+//	POST /api/labs/{name}/destroy
+//	POST /api/labs/{name}/provision
+//	GET  /api/labs/{name}/events      ← SSE passthrough
+//	POST /api/labs/{name}/nodes/{node}/start
+//	POST /api/labs/{name}/nodes/{node}/stop
 package handlers
 
 import (
@@ -42,10 +42,10 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	}
 	c := deps.Client
 
-	mux.Handle("GET /api/lab/topologies", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/labs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := c.LabListLabs(r.Context())
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, "GET /api/lab/topologies")
+			writeLabError(w, cid(r.Context()), err, "GET /api/labs")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -53,11 +53,11 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		_, _ = w.Write(data)
 	}))
 
-	mux.Handle("GET /api/lab/topologies/{name}/status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/labs/{name}/status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		data, err := c.LabStatus(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/lab/topologies/%s/status", name))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/status", name))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -65,7 +65,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		_, _ = w.Write(data)
 	}))
 
-	mux.Handle("POST /api/lab/topologies/{name}/deploy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/labs/{name}/deploy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 
 		var req newtronc.LabDeployRequest
@@ -91,7 +91,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 
 		status, data, err := c.LabDeploy(r.Context(), name, req)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/lab/topologies/%s/deploy", name))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/deploy", name))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -99,11 +99,11 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		_, _ = w.Write(data)
 	}))
 
-	mux.Handle("POST /api/lab/topologies/{name}/destroy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/labs/{name}/destroy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		data, err := c.LabDestroy(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/lab/topologies/%s/destroy", name))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/destroy", name))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -111,7 +111,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		_, _ = w.Write(data)
 	}))
 
-	mux.Handle("POST /api/lab/topologies/{name}/provision", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/labs/{name}/provision", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		parallel := 0
 		if v := r.URL.Query().Get("parallel"); v != "" {
@@ -121,7 +121,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		}
 		data, err := c.LabProvision(r.Context(), name, parallel)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/lab/topologies/%s/provision", name))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/provision", name))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -132,8 +132,8 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	// SSE passthrough: open a connection to newtlab's events stream and forward
 	// each line verbatim to the browser client. The proxy strategy:
 	//
-	//  1. Open GET /newtlab/v1/topologies/{name}/events on newtlab-server with
-	//     no timeout (long-lived stream).
+	//  1. Open the upstream events stream on newtlab-server with no timeout
+	//     (long-lived).
 	//  2. Set response headers (text/event-stream, no-cache, no-transform).
 	//  3. Flush immediately to send the HTTP headers and open the browser SSE
 	//     connection.
@@ -143,7 +143,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	//
 	// This is a transparent byte-level pass-through of the SSE frames
 	// newtlab already produces (event:/data:/id: lines). No re-encoding.
-	mux.Handle("GET /api/lab/topologies/{name}/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /api/labs/{name}/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 
 		flusher, ok := w.(http.Flusher)
@@ -154,7 +154,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 
 		upstream, err := c.LabEventsRequest(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/lab/topologies/%s/events", name))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/events", name))
 			return
 		}
 		defer upstream.Body.Close()
@@ -181,12 +181,12 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		}
 	}))
 
-	mux.Handle("POST /api/lab/topologies/{name}/nodes/{node}/start", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/labs/{name}/nodes/{node}/start", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		node := r.PathValue("node")
 		data, err := c.LabStartNode(r.Context(), name, node)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/lab/topologies/%s/nodes/%s/start", name, node))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/start", name, node))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -194,12 +194,12 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		_, _ = w.Write(data)
 	}))
 
-	mux.Handle("POST /api/lab/topologies/{name}/nodes/{node}/stop", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/labs/{name}/nodes/{node}/stop", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		node := r.PathValue("node")
 		data, err := c.LabStopNode(r.Context(), name, node)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/lab/topologies/%s/nodes/%s/stop", name, node))
+			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/stop", name, node))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

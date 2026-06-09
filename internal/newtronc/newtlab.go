@@ -214,16 +214,16 @@ func (c *Client) LabProvision(ctx context.Context, name string, parallel int) (j
 // LabStartNode calls POST /newtlab/v1/labs/{name}/nodes/{node}/start.
 //
 // Verified: pkg/newtlab/api/nodes.go handleStartNode
-func (c *Client) LabStartNode(ctx context.Context, topology, node string) (json.RawMessage, error) {
-	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/start", topology, node), nil)
+func (c *Client) LabStartNode(ctx context.Context, lab, node string) (json.RawMessage, error) {
+	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/start", lab, node), nil)
 	return data, err
 }
 
 // LabStopNode calls POST /newtlab/v1/labs/{name}/nodes/{node}/stop.
 //
 // Verified: pkg/newtlab/api/nodes.go handleStopNode
-func (c *Client) LabStopNode(ctx context.Context, topology, node string) (json.RawMessage, error) {
-	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/stop", topology, node), nil)
+func (c *Client) LabStopNode(ctx context.Context, lab, node string) (json.RawMessage, error) {
+	_, data, err := c.newtlabPost(ctx, fmt.Sprintf("/"+newtlabLabsSegment+"/%s/nodes/%s/stop", lab, node), nil)
 	return data, err
 }
 
@@ -238,8 +238,8 @@ func (c *Client) LabStopNode(ctx context.Context, topology, node string) (json.R
 //
 // Verified: pkg/newtlab/api/events.go handleEvents uses httputil.WriteSSEStream
 // which writes SSE frames with Content-Type text/event-stream.
-func (c *Client) LabEventsRequest(ctx context.Context, topology string) (*http.Response, error) {
-	url := c.newtlabBase() + fmt.Sprintf("/"+newtlabLabsSegment+"/%s/events", topology)
+func (c *Client) LabEventsRequest(ctx context.Context, lab string) (*http.Response, error) {
+	url := c.newtlabBase() + fmt.Sprintf("/"+newtlabLabsSegment+"/%s/events", lab)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
