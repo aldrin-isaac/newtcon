@@ -1,7 +1,8 @@
 // Network-level list and write endpoints. List endpoints proxy newtron's
-// GET /network/{netID}/{kind} reads. Write endpoints proxy newtron's RPC-style
-// POST /network/{netID}/create-<kind> and POST /network/{netID}/delete-<kind>
-// (handler.go lines 67-93), plus sub-rule verbs for the four spec types that
+// GET /networks/{netID}/{kind} reads (plural per docs/newtron/api.md
+// §URL Path Style, PR #113). Write endpoints proxy newtron's RPC-style
+// POST /networks/{netID}/create-<kind> and POST /networks/{netID}/delete-<kind>
+// (verbs stay singular), plus sub-rule verbs for the four spec types that
 // support child rules.
 package newtronc
 
@@ -12,12 +13,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 )
 
 // listNames is the shared helper for every network-level list endpoint.
 // Newtron returns {"data":["name1","name2"],"error":""} for all of them.
 func (c *Client) listNames(ctx context.Context, network, kind string) ([]string, error) {
-	url := fmt.Sprintf("%s/network/%s/%s", c.newtronBase(), network, kind)
+	url := fmt.Sprintf("%s/networks/%s/%s", c.newtronBase(), network, kind)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -53,54 +55,70 @@ func (c *Client) listNames(ctx context.Context, network, kind string) ([]string,
 		return nil, &UnavailableError{Cause: apiResp.Error}
 	}
 
+	// Newtron's list shape varies across kinds: services / zones / profiles return
+	// ["name", ...], while ipvpns / macvpns return {"name": {...}} (or {} when
+	// empty). Try array first, fall back to extracting object keys (sorted).
 	var names []string
-	if err := json.Unmarshal(apiResp.Data, &names); err != nil {
-		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding name list for %s: %v", kind, err)}
+	if err := json.Unmarshal(apiResp.Data, &names); err == nil {
+		return names, nil
 	}
-	return names, nil
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(apiResp.Data, &obj); err == nil {
+		out := make([]string, 0, len(obj))
+		for k := range obj {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	return nil, &UnavailableError{Cause: fmt.Sprintf("decoding name list for %s: unrecognised shape", kind)}
 }
 
+// Per newtron docs/newtron/api.md §URL Path Style, all collection-noun paths
+// are plural (PR #113). The kind argument is the URL segment, not a Go type
+// name — it must match the live route in pkg/newtron/api/handler.go.
+
 func (c *Client) ListIPVPNs(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "ipvpn")
+	return c.listNames(ctx, network, "ipvpns")
 }
 
 func (c *Client) ListMACVPNs(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "macvpn")
+	return c.listNames(ctx, network, "macvpns")
 }
 
 func (c *Client) ListQoSPolicies(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "qos-policy")
+	return c.listNames(ctx, network, "qos-policies")
 }
 
 func (c *Client) ListFilters(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "filter")
+	return c.listNames(ctx, network, "filters")
 }
 
 func (c *Client) ListPrefixLists(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "prefix-list")
+	return c.listNames(ctx, network, "prefix-lists")
 }
 
 func (c *Client) ListRoutePolicies(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "route-policy")
+	return c.listNames(ctx, network, "route-policies")
 }
 
 func (c *Client) ListProfiles(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "profile")
+	return c.listNames(ctx, network, "profiles")
 }
 
 func (c *Client) ListZones(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "zone")
+	return c.listNames(ctx, network, "zones")
 }
 
 func (c *Client) ListPlatforms(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "platform")
+	return c.listNames(ctx, network, "platforms")
 }
 
 // ============================================================================
 // Write helpers
 // ============================================================================
 
-// networkPost sends POST /newtron/v1/network/{netID}/{verb} with the given
+// networkPost sends POST /newtron/v1/networks/{netID}/{verb} with the given
 // JSON body. On 200/201 it returns the decoded "data" field as RawMessage.
 //
 // Error mapping mirrors newtron's RPC conventions:
@@ -113,7 +131,7 @@ func (c *Client) networkPost(ctx context.Context, network, verb string, body any
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
 	}
-	url := fmt.Sprintf("%s/network/%s/%s", c.newtronBase(), network, verb)
+	url := fmt.Sprintf("%s/networks/%s/%s", c.newtronBase(), network, verb)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -259,7 +277,7 @@ func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy stri
 // Returns the decoded "data" field as RawMessage — callers forward it
 // verbatim to keep the substrate honest (no field stripping, no rename).
 func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json.RawMessage, error) {
-	url := fmt.Sprintf("%s/network/%s/%s/%s", c.newtronBase(), network, kind, name)
+	url := fmt.Sprintf("%s/networks/%s/%s/%s", c.newtronBase(), network, kind, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}

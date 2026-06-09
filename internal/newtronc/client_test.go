@@ -21,7 +21,7 @@ import (
 // newt-server alongside /newtrun/v1/ and /newtlab/v1/).
 func TestClient_ListNetworks_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/networks" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -170,7 +170,7 @@ func asUnavailableError(err error, target **newtronc.UnavailableError) bool {
 func TestClient_RegisterNetwork_RegisterExisting(t *testing.T) {
 	var seenBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/network" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		body, _ := io.ReadAll(r.Body)

@@ -101,28 +101,28 @@ type newtronAPIResponse struct {
 // NOT concatenate "/newtron/v1" themselves.
 //
 // There is no newtrunBase(): newtrun's /newtrun/v1/topologies has been removed
-// (spec-scaffolding moved to POST /newtron/v1/network {scaffold:true}; see
+// (spec-scaffolding moved to POST /newtron/v1/networks {scaffold:true}; see
 // [Client.RegisterNetwork]). Add a newtrunBase() helper if and when a real
 // newtrun endpoint surfaces.
 
 func (c *Client) newtronBase() string    { return c.baseURL + "/newtron/v1" }
 func (c *Client) newtServerBase() string { return c.baseURL + "/newt-server/v1" }
 
-// networkEntry is the minimal shape we decode from GET /network responses.
+// networkEntry is the minimal shape we decode from GET /networks responses.
 // Newtron returns an array of network objects; we only need the ID field for
 // the health probe.
 type networkEntry struct {
 	ID string `json:"id"`
 }
 
-// ListNetworks calls GET /newtron/v1/network and returns the IDs of all
-// registered networks (pkg/newtron/api/handler.go:24 — handleListNetworks).
+// ListNetworks calls GET /newtron/v1/networks and returns the IDs of all
+// registered networks (pkg/newtron/api/handler.go — handleListNetworks).
 //
 // On any non-200 response, ListNetworks returns a *UnavailableError (5xx) or
 // the appropriate typed error. On transport failure, it returns a
 // *UnavailableError wrapping the original error.
 func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtronBase()+"/network", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtronBase()+"/networks", nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
 	}
@@ -231,7 +231,7 @@ func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
 }
 
 // RegisterNetwork registers a network with newtron. Mirrors the wire shape
-// documented in newtron's docs/newtron/api.md §POST /newtron/v1/network:
+// documented in newtron's docs/newtron/api.md §POST /newtron/v1/networks:
 //
 //	{"id":..., "spec_dir":..., "scaffold":..., "description":...}
 //
@@ -267,7 +267,7 @@ func (c *Client) RegisterNetwork(ctx context.Context, id, specDir string, scaffo
 	if err != nil {
 		return "", &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.newtronBase()+"/network", bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.newtronBase()+"/networks", bytes.NewReader(b))
 	if err != nil {
 		return "", &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
 	}

@@ -25,7 +25,7 @@ func fakeNewtronServiceServer(t *testing.T, services map[string]string, failName
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GET /network/default/service → list of names
-		if r.URL.Path == "/newtron/v1/network/default/service" {
+		if r.URL.Path == "/newtron/v1/networks/default/services" {
 			names := make([]string, 0, len(services))
 			for name := range services {
 				names = append(names, name)
@@ -37,7 +37,7 @@ func fakeNewtronServiceServer(t *testing.T, services map[string]string, failName
 		}
 
 		// GET /network/default/service/{name} → detail
-		const prefix = "/newtron/v1/network/default/service/"
+		const prefix = "/newtron/v1/networks/default/services/"
 		if len(r.URL.Path) > len(prefix) {
 			name := r.URL.Path[len(prefix):]
 
@@ -298,7 +298,7 @@ func TestServices_MethodNotAllowed(t *testing.T) {
 // (empty array, not null) when newtron has no registered services.
 func TestServices_Empty(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/newtron/v1/network/default/service" {
+		if r.URL.Path == "/newtron/v1/networks/default/services" {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintln(w, `{"data":[],"error":""}`)
 			return

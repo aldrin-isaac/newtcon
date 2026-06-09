@@ -28,7 +28,7 @@ import (
 // request, and returns the decoded "data" field as RawMessage.
 //
 // The path argument must begin with "/" and be relative to the newtron engine
-// base — e.g. "/network/default/node/switch1/info". nodeGet prefixes
+// base — e.g. "/networks/default/nodes/switch1/info". nodeGet prefixes
 // /newtron/v1 internally via Client.newtronBase().
 func (c *Client) nodeGet(ctx context.Context, path string) (json.RawMessage, error) {
 	url := c.newtronBase() + path
@@ -74,135 +74,135 @@ func (c *Client) nodeGet(ctx context.Context, path string) (json.RawMessage, err
 //
 // Substrate: pkg/newtron/api/handler.go line 47.
 func (c *Client) Topology(ctx context.Context, network string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/topology", network))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/topology", network))
 }
 
-// NodeInfo calls GET /network/{netID}/node/{device}/info.
+// NodeInfo calls GET /networks/{netID}/nodes/{device}/info.
 //
 // Substrate: pkg/newtron/api/handler.go line 102.
 func (c *Client) NodeInfo(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/info", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/info", network, device))
 }
 
-// NodeHealth calls GET /network/{netID}/node/{device}/health.
+// NodeHealth calls GET /networks/{netID}/nodes/{device}/health.
 //
 // Substrate: pkg/newtron/api/handler.go line 114.
 func (c *Client) NodeHealth(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/health", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/health", network, device))
 }
 
-// NodeInterfaces calls GET /network/{netID}/node/{device}/interface.
+// NodeInterfaces calls GET /networks/{netID}/nodes/{device}/interface.
 //
 // Substrate: pkg/newtron/api/handler.go line 103.
 func (c *Client) NodeInterfaces(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/interface", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/interfaces", network, device))
 }
 
-// NodeInterface calls GET /network/{netID}/node/{device}/interface/{name}.
+// NodeInterface calls GET /networks/{netID}/nodes/{device}/interfaces/{name}.
 //
 // Substrate: pkg/newtron/api/handler.go line 104.
 func (c *Client) NodeInterface(ctx context.Context, network, device, name string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/interface/%s", network, device, name))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s", network, device, name))
 }
 
-// NodeInterfaceBinding calls GET /network/{netID}/node/{device}/interface/{name}/binding.
+// NodeInterfaceBinding calls GET /networks/{netID}/nodes/{device}/interfaces/{name}/binding.
 //
 // Substrate: pkg/newtron/api/handler.go line 105.
 func (c *Client) NodeInterfaceBinding(ctx context.Context, network, device, name string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/interface/%s/binding", network, device, name))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/binding", network, device, name))
 }
 
-// NodeVLANs calls GET /network/{netID}/node/{device}/vlan.
+// NodeVLANs calls GET /networks/{netID}/nodes/{device}/vlan.
 //
 // Substrate: pkg/newtron/api/handler.go line 106.
 func (c *Client) NodeVLANs(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/vlan", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/vlans", network, device))
 }
 
-// NodeVRFs calls GET /network/{netID}/node/{device}/vrf.
+// NodeVRFs calls GET /networks/{netID}/nodes/{device}/vrf.
 //
 // Substrate: pkg/newtron/api/handler.go line 108.
 func (c *Client) NodeVRFs(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/vrf", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/vrfs", network, device))
 }
 
-// NodeACLs calls GET /network/{netID}/node/{device}/acl.
+// NodeACLs calls GET /networks/{netID}/nodes/{device}/acl.
 //
 // Substrate: pkg/newtron/api/handler.go line 110.
 func (c *Client) NodeACLs(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/acl", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/acls", network, device))
 }
 
-// NodeLAGs calls GET /network/{netID}/node/{device}/lag.
+// NodeLAGs calls GET /networks/{netID}/nodes/{device}/lag.
 //
 // Substrate: pkg/newtron/api/handler.go line 115.
 func (c *Client) NodeLAGs(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/lag", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/lags", network, device))
 }
 
-// NodeNeighbors calls GET /network/{netID}/node/{device}/neighbor.
+// NodeNeighbors calls GET /networks/{netID}/nodes/{device}/neighbor.
 //
 // Substrate: pkg/newtron/api/handler.go line 116.
 func (c *Client) NodeNeighbors(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/neighbor", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/neighbors", network, device))
 }
 
-// NodeBGPStatus calls GET /network/{netID}/node/{device}/bgp/status.
+// NodeBGPStatus calls GET /networks/{netID}/nodes/{device}/bgp/status.
 //
 // Substrate: pkg/newtron/api/handler.go line 112.
 func (c *Client) NodeBGPStatus(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/bgp/status", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/bgp/status", network, device))
 }
 
-// NodeEVPNStatus calls GET /network/{netID}/node/{device}/evpn/status.
+// NodeEVPNStatus calls GET /networks/{netID}/nodes/{device}/evpn/status.
 //
 // Substrate: pkg/newtron/api/handler.go line 113.
 func (c *Client) NodeEVPNStatus(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/evpn/status", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/evpn/status", network, device))
 }
 
-// NodeConfigDB calls GET /network/{netID}/node/{device}/configdb.
+// NodeConfigDB calls GET /networks/{netID}/nodes/{device}/configdb.
 //
 // Substrate: pkg/newtron/api/handler.go line 150.
 func (c *Client) NodeConfigDB(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/configdb", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/configdb", network, device))
 }
 
-// NodeConfigDBTable calls GET /network/{netID}/node/{device}/configdb/{table}.
+// NodeConfigDBTable calls GET /networks/{netID}/nodes/{device}/configdb/{table}.
 //
 // Substrate: pkg/newtron/api/handler.go line 151.
 func (c *Client) NodeConfigDBTable(ctx context.Context, network, device, table string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/configdb/%s", network, device, table))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/configdb/%s", network, device, table))
 }
 
-// NodeConfigDBEntry calls GET /network/{netID}/node/{device}/configdb/{table}/{key}.
+// NodeConfigDBEntry calls GET /networks/{netID}/nodes/{device}/configdb/{table}/{key}.
 //
 // Substrate: pkg/newtron/api/handler.go line 152.
 func (c *Client) NodeConfigDBEntry(ctx context.Context, network, device, table, key string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/configdb/%s/%s", network, device, table, key))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/configdb/%s/%s", network, device, table, key))
 }
 
-// NodeDrift calls GET /network/{netID}/node/{device}/intent/drift.
+// NodeDrift calls GET /networks/{netID}/nodes/{device}/intent/drift.
 // Returns the per-device drift report comparing intent vs CONFIG_DB reality.
 func (c *Client) NodeDrift(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/drift", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/intent/drift", network, device))
 }
 
-// NodeProjection calls GET /network/{netID}/node/{device}/intent/projection.
+// NodeProjection calls GET /networks/{netID}/nodes/{device}/intent/projection.
 func (c *Client) NodeProjection(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/projection", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/intent/projection", network, device))
 }
 
-// NodeIntentTree calls GET /network/{netID}/node/{device}/intent/tree.
+// NodeIntentTree calls GET /networks/{netID}/nodes/{device}/intent/tree.
 func (c *Client) NodeIntentTree(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/network/%s/node/%s/intent/tree", network, device))
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/intent/tree", network, device))
 }
 
-// NodeReconcile calls POST /network/{netID}/node/{device}/intent/reconcile.
+// NodeReconcile calls POST /networks/{netID}/nodes/{device}/intent/reconcile.
 // dryRun=true returns the drift as a preview; dryRun=false executes.
 // mode is one of "topology" or "" (defaults to delta).
 func (c *Client) NodeReconcile(ctx context.Context, network, device string, dryRun bool, mode string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/intent/reconcile", network, device)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/intent/reconcile", network, device)
 	q := []string{}
 	if dryRun {
 		q = append(q, "dry_run=true")
@@ -223,13 +223,13 @@ func (c *Client) NodeReconcile(ctx context.Context, network, device string, dryR
 // nodePostBody is the shared helper for POST requests with a JSON body. It
 // follows the same error mapping as networkPost in network.go.
 //
-// Newtron topology write endpoints:
+// Newtron topology write endpoints (PR #113 pluralization):
 //
-//	handler.go line 50: POST /network/{netID}/topology/create-node
-//	handler.go line 51: DELETE /network/{netID}/topology/node/{name}
-//	handler.go line 52: PUT /network/{netID}/topology/node/{name}
-//	handler.go line 53: POST /network/{netID}/topology/create-link
-//	handler.go line 54: DELETE /network/{netID}/topology/link/{device}/{interface}
+//	POST   /networks/{netID}/topology/create-node           (verb-noun, singular)
+//	DELETE /networks/{netID}/topology/nodes/{name}          (collection, plural)
+//	PUT    /networks/{netID}/topology/nodes/{name}
+//	POST   /networks/{netID}/topology/create-link           (verb-noun, singular)
+//	DELETE /networks/{netID}/topology/links/{device}/{interface}
 func (c *Client) nodePostBody(ctx context.Context, path string, body any) (json.RawMessage, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -382,14 +382,14 @@ func (c *Client) nodeDelete(ctx context.Context, path string) (json.RawMessage, 
 // where TopologyDevice is { "steps": [...], "ports": {...} }.
 // Substrate: handler.go line 50.
 func (c *Client) CreateTopologyDevice(ctx context.Context, network string, body any) (json.RawMessage, error) {
-	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-node", network), body)
+	return c.nodePostBody(ctx, fmt.Sprintf("/networks/%s/topology/create-node", network), body)
 }
 
 // DeleteTopologyDevice removes a device from the topology by name.
 // force=true cascade-deletes referring links (handler_network.go:413-429).
 // Substrate: handler.go line 51.
 func (c *Client) DeleteTopologyDevice(ctx context.Context, network, name string, force bool) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/topology/node/%s", network, name)
+	path := fmt.Sprintf("/networks/%s/topology/nodes/%s", network, name)
 	if force {
 		path += "?force=true"
 	}
@@ -400,7 +400,7 @@ func (c *Client) DeleteTopologyDevice(ctx context.Context, network, name string,
 // Body is a complete TopologyDevice (handler_network.go:435-455, spec.TopologyDevice).
 // Substrate: handler.go line 52.
 func (c *Client) UpdateTopologyDevice(ctx context.Context, network, name string, body any) (json.RawMessage, error) {
-	return c.nodePutBody(ctx, fmt.Sprintf("/network/%s/topology/node/%s", network, name), body)
+	return c.nodePutBody(ctx, fmt.Sprintf("/networks/%s/topology/nodes/%s", network, name), body)
 }
 
 // CreateTopologyLink adds a link between two interfaces.
@@ -411,15 +411,14 @@ func (c *Client) UpdateTopologyDevice(ctx context.Context, network, name string,
 //
 // Substrate: handler.go line 53.
 func (c *Client) CreateTopologyLink(ctx context.Context, network string, body any) (json.RawMessage, error) {
-	return c.nodePostBody(ctx, fmt.Sprintf("/network/%s/topology/create-link", network), body)
+	return c.nodePostBody(ctx, fmt.Sprintf("/networks/%s/topology/create-link", network), body)
 }
 
 // DeleteTopologyLink removes the link containing the given endpoint.
 // Endpoint is "device:interface" — one endpoint uniquely identifies the link
-// (handler_network.go:484-504). URL path: /topology/link/{device}/{interface}.
-// Substrate: handler.go line 54.
+// (handler_network.go). URL path: /topology/links/{device}/{interface}.
 func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/topology/link/%s/%s", network, device, iface)
+	path := fmt.Sprintf("/networks/%s/topology/links/%s/%s", network, device, iface)
 	return c.nodeDelete(ctx, path)
 }
 
@@ -436,7 +435,7 @@ func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface 
 // service is required; all others optional.
 // Substrate: handler.go line 174.
 func (c *Client) ApplyService(ctx context.Context, network, device, ifaceName string, body any) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/apply-service", network, device, ifaceName)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/apply-service", network, device, ifaceName)
 	return c.nodePostBody(ctx, path, body)
 }
 
@@ -444,7 +443,7 @@ func (c *Client) ApplyService(ctx context.Context, network, device, ifaceName st
 // No request body required (handler_interface.go:50-69).
 // Substrate: handler.go line 175.
 func (c *Client) RemoveService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/remove-service", network, device, ifaceName)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/remove-service", network, device, ifaceName)
 	return c.nodePost(ctx, path)
 }
 
@@ -452,7 +451,7 @@ func (c *Client) RemoveService(ctx context.Context, network, device, ifaceName s
 // No request body required (handler_interface.go:71-90).
 // Substrate: handler.go line 176.
 func (c *Client) RefreshService(ctx context.Context, network, device, ifaceName string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/network/%s/node/%s/interface/%s/refresh-service", network, device, ifaceName)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/refresh-service", network, device, ifaceName)
 	return c.nodePost(ctx, path)
 }
 

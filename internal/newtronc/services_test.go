@@ -18,7 +18,7 @@ import (
 // pkg/newtron/api/handler.go:30.
 func TestListServices_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network/default/service" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/networks/default/services" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
@@ -86,12 +86,12 @@ func TestListServices_Unavailable(t *testing.T) {
 // ServiceDetail envelope correctly, including the "service_type" JSON field
 // that newtron uses (not "type").
 //
-// Substrate: GET /network/{netID}/service/{name} confirmed at
+// Substrate: GET /network/{netID}/services/{name} confirmed at
 // pkg/newtron/api/handler.go:31.
 // JSON field: pkg/newtron/types.go:476 ServiceDetail.ServiceType json:"service_type".
 func TestShowService_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/network/default/service/transit" {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/networks/default/services/transit" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
 			return
