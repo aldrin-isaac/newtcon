@@ -492,32 +492,35 @@ func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, er
 }
 
 // NodeRPC POSTs an arbitrary node-level newtron action with an optional JSON
-// body. subpath is the path segment after /node/{device}/ (for example
+// body. subpath is the path segment after /nodes/{device}/ (for example
 // "create-vlan", "save-config", "add-static-route"). The full URL is
-//   /newtron/v1/network/{network}/node/{device}/{subpath}?{rawQuery}
+//   /newtron/v1/networks/{network}/nodes/{device}/{subpath}?{rawQuery}
 // rawQuery is forwarded verbatim so caller-supplied options like
 // ?mode=topology and ?execute=false reach newtron unchanged.
 func (c *Client) NodeRPC(ctx context.Context, network, device, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
-	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/%s", network, device, subpath)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/%s", network, device, subpath)
 	if rawQuery != "" {
 		path = path + "?" + rawQuery
 	}
 	return c.nodePostRaw(ctx, path, body)
 }
 
-// InterfaceRPC POSTs an arbitrary per-interface newtron action. rawQuery is
-// forwarded verbatim (see NodeRPC).
+// InterfaceRPC POSTs an arbitrary per-interface newtron action. The full URL is
+//   /newtron/v1/networks/{network}/nodes/{device}/interfaces/{iface}/{subpath}?{rawQuery}
+// rawQuery is forwarded verbatim (see NodeRPC).
 func (c *Client) InterfaceRPC(ctx context.Context, network, device, iface, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
-	path := fmt.Sprintf("/newtron/v1/network/%s/node/%s/interface/%s/%s", network, device, iface, subpath)
+	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/%s", network, device, iface, subpath)
 	if rawQuery != "" {
 		path = path + "?" + rawQuery
 	}
 	return c.nodePostRaw(ctx, path, body)
 }
 
-// nodePostRaw is the underlying POST helper used by *RPC methods.
+// nodePostRaw is the underlying POST helper used by *RPC methods. The path
+// argument must begin with "/" and be relative to the newtron engine base
+// — e.g. "/networks/default/nodes/switch1/create-vlan".
 func (c *Client) nodePostRaw(ctx context.Context, path string, body []byte) (json.RawMessage, error) {
-	url := c.baseURL + path
+	url := c.newtronBase() + path
 	var bodyReader io.Reader
 	if len(body) > 0 {
 		bodyReader = bytes.NewReader(body)

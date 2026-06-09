@@ -1,7 +1,7 @@
 // Newtron action schemas for the topology context menus + side panel.
 //
-// Each action's `id` is the newtron subpath (POST /node/{d}/{id} for node-level,
-// POST /node/{d}/interface/{i}/{id} for interface-level). Field `name`s MUST
+// Each action's `id` is the newtron subpath (POST /nodes/{d}/{id} for node-level,
+// POST /nodes/{d}/interfaces/{i}/{id} for interface-level). Field `name`s MUST
 // match the JSON keys newtron's handler expects — every field below has been
 // verified against pkg/newtron/api/handler_node.go,
 // pkg/newtron/api/handler_interface.go, pkg/newtron/api/types.go and
