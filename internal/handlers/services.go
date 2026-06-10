@@ -114,7 +114,7 @@ func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Requ
 
 	services, err := h.client.ListServices(ctx, network)
 	if err != nil {
-		writeServicesUnavailable(w, correlationID, err, "listing services")
+		writeUpstreamError(w, correlationID, err, "listing services", servicesListExtras())
 		return
 	}
 
@@ -124,8 +124,8 @@ func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			// Fail-fast: partial data without a Confidence object is dishonest
 			// per CLAUDE.md §No Hidden State. See handler godoc.
-			writeServicesUnavailable(w, correlationID, err,
-				"fetching service detail for "+svc.Name)
+			writeUpstreamError(w, correlationID, err,
+				"fetching service detail for "+svc.Name, servicesListExtras())
 			return
 		}
 		result = append(result, types.Service{
@@ -155,58 +155,36 @@ func (h *servicesHandler) handleListServices(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// writeServicesUnavailable writes a 503 newtron_unavailable error per
-// API_CONTRACT.md §details for kind: "newtron_unavailable" (lines 547–655).
-//
-// It exists because the same 503 shape must be written on ListServices failure
-// and ShowService partial failure — two call sites with identical structure.
-// Without this helper they would be the second instance of the same pattern;
-// ai-instructions directive 7 ("second instance = stop and question") requires
-// extraction.
-func writeServicesUnavailable(w http.ResponseWriter, correlationID string, err error, operation string) {
-	// Classify the underlying error kind for the bounded "underlying_error"
-	// field per API_CONTRACT.md §newtron_unavailable lines 566–568.
-	underlyingKind := "http_5xx"
-	if unavail, ok := err.(*newtronc.UnavailableError); ok {
-		if unavail.StatusCode == 0 {
-			underlyingKind = "connection_refused"
-		}
-	}
-
-	types.WriteError(w, http.StatusServiceUnavailable,
-		types.KindNewtronUnavailable,
-		"newtron-server unreachable during "+operation+": "+err.Error(),
-		map[string]any{
-			"correlation_id":           correlationID,
-			"newtron_url":              "",
-			"last_reachable_at":        nil,
-			"last_attempt_at":          nil,
-			"underlying_error":         underlyingKind,
-			"underlying_error_message": err.Error(),
-			// affected_nodes is null: /api/services is not Node-scoped.
-			// API_CONTRACT.md §newtron_unavailable line 616: "null for endpoints
-			// that are not Node-scoped (e.g., /api/services listing)."
-			"affected_nodes": nil,
-			"last_known": map[string]any{
-				// kind: "none" — /api/services 503 has no prior payload cache.
-				// API_CONTRACT.md §newtron_unavailable line 635: "All other
-				// endpoints → kind: 'none', payload is null."
-				"kind":        "none",
-				"captured_at": nil,
-				"payload":     nil,
-			},
-			"next_action_hint": map[string]any{
-				"verb":            "check_newtron_health",
-				"endpoint":        "/api/health",
-				"suggested_after": nil,
-				"rationale":       "check /api/health to see current newtron-server reachability status",
-			},
-			"rationale_ref": map[string]any{
-				"substrate": "CLAUDE.md#newtron-api-consumption-rule",
-				"principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit",
-			},
+// servicesListExtras returns the per-endpoint extras the /api/services route
+// supplies on top of writeUpstreamError's defaults. Per API_CONTRACT.md
+// §details for kind: "newtron_unavailable" (lines 547–655). Fields that are
+// honestly null for this endpoint (no Node scope, no prior-payload cache, no
+// reachable_at timestamp tracking yet) are emitted explicitly per the
+// no-hidden-state invariant.
+func servicesListExtras() map[string]any {
+	return map[string]any{
+		"newtron_url":       "",
+		"last_reachable_at": nil,
+		"last_attempt_at":   nil,
+		// affected_nodes is null: /api/services is not Node-scoped.
+		// API_CONTRACT.md §newtron_unavailable line 616.
+		"affected_nodes": nil,
+		"last_known": map[string]any{
+			"kind":        "none",
+			"captured_at": nil,
+			"payload":     nil,
 		},
-	)
+		"next_action_hint": map[string]any{
+			"verb":            "check_newtron_health",
+			"endpoint":        "/api/health",
+			"suggested_after": nil,
+			"rationale":       "check /api/health to see current newtron-server reachability status",
+		},
+		"rationale_ref": map[string]any{
+			"substrate": "CLAUDE.md#newtron-api-consumption-rule",
+			"principle": "docs/operator-philosophy.md#9-confidence-and-limits-are-explicit",
+		},
+	}
 }
 
 // Compile-time assertion: *newtronc.Client satisfies servicesNewtronClient.

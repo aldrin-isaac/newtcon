@@ -52,7 +52,7 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 			netID := r.PathValue("netID")
 			names, err := fn(ctx, netID)
 			if err != nil {
-				writeNetworkListUnavailable(w, cid(ctx), err, path)
+				writeUpstreamError(w, cid(ctx), err, path, nil)
 				return
 			}
 			sort.Strings(names)
@@ -95,12 +95,8 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 			name := r.PathValue("name")
 			payload, err := c.ShowSpec(ctx, netID, k.newtronKind, name)
 			if err != nil {
-				if _, ok := err.(*newtronc.NotFoundError); ok {
-					types.WriteError(w, http.StatusNotFound, types.KindInternal,
-						k.newtronKind+" not found: "+name, map[string]any{"correlation_id": cid(ctx)})
-					return
-				}
-				writeNetworkListUnavailable(w, cid(ctx), err, "/api/networks/"+netID+"/"+k.url+"/"+name)
+				writeUpstreamError(w, cid(ctx), err,
+					k.newtronKind+" "+name+" at /api/networks/"+netID+"/"+k.url+"/"+name, nil)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -159,7 +155,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			}
 			result, err := c.CreateSpec(ctx, netID, nk, decoded)
 			if err != nil {
-				writeNetworkWriteError(w, cid(ctx), err, "POST /api/networks/"+netID+"/"+uk)
+				writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/"+uk, nil)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -173,7 +169,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			netID := r.PathValue("netID")
 			name := r.PathValue("name")
 			if err := c.DeleteSpec(ctx, netID, nk, name); err != nil {
-				writeNetworkWriteError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/"+uk+"/"+name)
+				writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/"+uk+"/"+name, nil)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -203,7 +199,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		}
 		result, err := c.AddQoSQueue(ctx, netID, decoded)
 		if err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "POST /api/networks/"+netID+"/qos-policies/…/queues")
+			writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/qos-policies/…/queues", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -223,7 +219,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			return
 		}
 		if err := c.RemoveQoSQueue(ctx, netID, policy, qid); err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/qos-policies/"+policy+"/queues/"+qidStr)
+			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/qos-policies/"+policy+"/queues/"+qidStr, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -252,7 +248,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		}
 		result, err := c.AddFilterRule(ctx, netID, decoded)
 		if err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "POST /api/networks/"+netID+"/filters/…/rules")
+			writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/filters/…/rules", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -272,7 +268,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			return
 		}
 		if err := c.RemoveFilterRule(ctx, netID, filter, seq); err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/filters/"+filter+"/rules/"+seqStr)
+			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/filters/"+filter+"/rules/"+seqStr, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -301,7 +297,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		}
 		result, err := c.AddPrefixListEntry(ctx, netID, decoded)
 		if err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "POST /api/networks/"+netID+"/prefix-lists/…/entries")
+			writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/prefix-lists/…/entries", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -315,7 +311,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		list := r.PathValue("name")
 		prefix := r.PathValue("prefix")
 		if err := c.RemovePrefixListEntry(ctx, netID, list, prefix); err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/prefix-lists/"+list+"/entries/"+prefix)
+			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/prefix-lists/"+list+"/entries/"+prefix, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -344,7 +340,7 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		}
 		result, err := c.AddRoutePolicyRule(ctx, netID, decoded)
 		if err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "POST /api/networks/"+netID+"/route-policies/…/rules")
+			writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/route-policies/…/rules", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -364,64 +360,11 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			return
 		}
 		if err := c.RemoveRoutePolicyRule(ctx, netID, policy, seq); err != nil {
-			writeNetworkWriteError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/route-policies/"+policy+"/rules/"+seqStr)
+			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/route-policies/"+policy+"/rules/"+seqStr, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 	}))
-}
-
-func writeNetworkListUnavailable(w http.ResponseWriter, correlationID string, err error, path string) {
-	underlyingKind := "http_5xx"
-	if unavail, ok := err.(*newtronc.UnavailableError); ok && unavail.StatusCode == 0 {
-		underlyingKind = "connection_refused"
-	}
-	types.WriteError(w, http.StatusServiceUnavailable,
-		types.KindNewtronUnavailable,
-		"newtron-server unreachable for "+path+": "+err.Error(),
-		map[string]any{
-			"correlation_id":           correlationID,
-			"underlying_error":         underlyingKind,
-			"underlying_error_message": err.Error(),
-			"next_action_hint": map[string]any{
-				"verb":      "check_newtron_health",
-				"endpoint":  "/api/health",
-				"rationale": "newtron-server is unreachable; verify the daemon is running on the configured --newtron-url",
-			},
-		},
-	)
-}
-
-// writeNetworkWriteError translates newtronc write errors into operator-honest
-// HTTP responses. Validation failures from newtron become 400; conflict/drift
-// become 409; unavailability becomes 503.
-func writeNetworkWriteError(w http.ResponseWriter, correlationID string, err error, path string) {
-	switch e := err.(type) {
-	case *newtronc.ValidationError:
-		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-			"validation failed: "+err.Error(),
-			map[string]any{"correlation_id": correlationID, "newtron_body": string(e.Body)})
-	case *newtronc.NotFoundError:
-		types.WriteError(w, http.StatusNotFound, types.KindInternal,
-			"not found: "+err.Error(),
-			map[string]any{"correlation_id": correlationID})
-	case *newtronc.ConflictError:
-		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
-			"conflict: "+err.Error(),
-			map[string]any{"correlation_id": correlationID, "newtron_body": string(e.Body)})
-	default:
-		underlyingKind := "http_5xx"
-		if unavail, ok := err.(*newtronc.UnavailableError); ok && unavail.StatusCode == 0 {
-			underlyingKind = "connection_refused"
-		}
-		types.WriteError(w, http.StatusServiceUnavailable, types.KindNewtronUnavailable,
-			"newtron-server unreachable for "+path+": "+err.Error(),
-			map[string]any{
-				"correlation_id":           correlationID,
-				"underlying_error":         underlyingKind,
-				"underlying_error_message": err.Error(),
-			})
-	}
 }

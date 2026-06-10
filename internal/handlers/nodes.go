@@ -84,13 +84,7 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		ctx := r.Context()
 		payload, err := fetchFn(ctx)
 		if err != nil {
-			if _, ok := err.(*newtronc.NotFoundError); ok {
-				types.WriteError(w, http.StatusNotFound, types.KindInternal,
-					"not found: "+endpoint,
-					map[string]any{"correlation_id": cid(ctx)})
-				return
-			}
-			writeNodeUnavailable(w, cid(ctx), err, endpoint)
+			writeUpstreamError(w, cid(ctx), err, endpoint, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -333,7 +327,7 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		ctx := r.Context()
 		payload, err := writeFn(ctx)
 		if err != nil {
-			writeNodeWriteError(w, cid(ctx), err, endpoint)
+			writeUpstreamError(w, cid(ctx), err, endpoint, nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -465,47 +459,3 @@ func normalizeIfaceName(name string) string {
 	return strings.ReplaceAll(name, "%2F", "/")
 }
 
-// writeNodeUnavailable writes the standard newtron_unavailable error envelope
-// for node-level proxy failures.
-func writeNodeUnavailable(w http.ResponseWriter, correlationID string, err error, endpoint string) {
-	underlyingKind := "http_5xx"
-	if unavail, ok := err.(*newtronc.UnavailableError); ok && unavail.StatusCode == 0 {
-		underlyingKind = "connection_refused"
-	}
-	types.WriteError(w, http.StatusServiceUnavailable,
-		types.KindNewtronUnavailable,
-		"newtron-server unreachable for "+endpoint+": "+err.Error(),
-		map[string]any{
-			"correlation_id":           correlationID,
-			"underlying_error":         underlyingKind,
-			"underlying_error_message": err.Error(),
-			"next_action_hint": map[string]any{
-				"verb":      "check_newtron_health",
-				"endpoint":  "/api/health",
-				"rationale": "newtron-server is unreachable; verify the daemon is running on the configured --newtron-url",
-			},
-		},
-	)
-}
-
-// writeNodeWriteError maps newtronc write errors to the standard newtcon error
-// envelope. Validation failures and conflicts surface operator-domain errors;
-// transport failures become newtron_unavailable.
-func writeNodeWriteError(w http.ResponseWriter, correlationID string, err error, endpoint string) {
-	switch e := err.(type) {
-	case *newtronc.ValidationError:
-		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-			"validation failed for "+endpoint+": "+e.Error(),
-			map[string]any{"correlation_id": correlationID})
-	case *newtronc.NotFoundError:
-		types.WriteError(w, http.StatusNotFound, types.KindInternal,
-			"not found: "+endpoint,
-			map[string]any{"correlation_id": correlationID})
-	case *newtronc.ConflictError:
-		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
-			"conflict for "+endpoint+": "+e.Error(),
-			map[string]any{"correlation_id": correlationID})
-	default:
-		writeNodeUnavailable(w, correlationID, err, endpoint)
-	}
-}
