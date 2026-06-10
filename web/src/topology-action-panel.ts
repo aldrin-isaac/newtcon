@@ -213,7 +213,7 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
       ));
     } else {
       root.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
-        "Services bind at the interface level. Click an interface on one of the selected devices to bind a service."));
+        "Port mode and service binding are per-interface. Click an interface on one of the selected devices to configure it."));
     }
     appendSaveDiscardRow(root, sel, deps);
     return;
@@ -233,7 +233,7 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
     ));
   } else {
     root.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
-      "Click an interface above to bind a service. Compose new services in the Specs tab."));
+      "Click an interface above to set its port mode (access / trunk / routed) and bind services. Compose new services in the Specs tab."));
   }
   appendQueuedForDevice(root, device);
   appendSaveDiscardRow(root, sel, deps);

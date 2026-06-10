@@ -1,9 +1,13 @@
-// Headless smoke for the topology-tab scope contraction.
+// Headless smoke for the Topology-tab scope.
 //
-// Verifies that the per-device + per-interface action surface in the Topology
-// tab is restricted to "apply a pre-composed service" — no VLAN/VRF/ACL/etc
-// primitives. Service composition lives in the Specs tab; the Topology tab
-// only binds/unbinds/refreshes services on interfaces.
+// The per-device action surface stays empty (NODE_ACTIONS = []). The
+// per-interface surface has two layers, matching newtron's substrate:
+//   1. Port-mode configuration (configure-interface RPC): set the port to
+//      access / trunk / routed.
+//   2. Service binding (apply-service RPC): layer a composed service on top.
+// What stays OUT of the Topology tab: primitive composition — VLAN/VRF/ACL
+// creation, prefix-lists, route-policies, BGP peers, QoS, IPVPN/MACVPN
+// definition. Those live in the Specs tab.
 
 import puppeteer from "puppeteer-core";
 
@@ -13,7 +17,8 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
 
-// IDs that MUST be gone from the Topology action panel.
+// IDs that MUST be gone from the Topology action panel (primitive
+// composition that lives in the Specs tab now).
 const FORBIDDEN_ACTION_IDS = [
   "create-vlan", "delete-vlan",
   "create-vrf",  "delete-vrf",
@@ -25,15 +30,17 @@ const FORBIDDEN_ACTION_IDS = [
   "create-acl", "delete-acl", "add-acl-rule", "remove-acl-rule",
   "create-portchannel", "delete-portchannel", "add-portchannel-member", "remove-portchannel-member",
   "reload-config", "restart-daemon", "ssh-command",
-  "configure-interface", "unconfigure-interface",
   "set-property", "clear-property",
   "bind-acl", "unbind-acl",
   "add-bgp-peer", "remove-bgp-peer",
   "apply-qos", "remove-qos",
 ];
 
-// IDs that MUST remain (the service-application set).
-const ALLOWED_ACTION_IDS = ["apply-service", "remove-service", "refresh-service"];
+// IDs that MUST be reachable on an interface — port-mode + service binding.
+const ALLOWED_ACTION_IDS = [
+  "set-access", "add-trunk-vlan", "set-routed", "unconfigure-interface",
+  "apply-service", "remove-service", "refresh-service",
+];
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -72,36 +79,40 @@ try {
     };
   });
   expect(singleDeviceState.hasHint,
-    `single-device selection shows the guiding hint pointing at Specs tab: "${singleDeviceState.hintText}"`);
+    `single-device selection shows guiding hint mentioning Specs tab: "${singleDeviceState.hintText}"`);
+  expect(singleDeviceState.hintText?.includes("port mode") || singleDeviceState.hintText?.includes("access / trunk / routed"),
+    `hint mentions port mode: "${singleDeviceState.hintText}"`);
   expect(singleDeviceState.actionGroups.length === 0,
     `no per-device action groups rendered (got: ${JSON.stringify(singleDeviceState.actionGroups)})`);
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-scope-01-single.png" });
 
-  // ── 2. Interface selection: action panel shows ONLY the Service group ────
-  // Click on an interface pill. The interface list is rendered by
-  // renderInterfacesTab inside the panel; find a clickable interface label.
+  // ── 2. Interface selection: action panel shows Port mode + Service groups ──
   const ifaceClicked = await page.evaluate(() => {
-    // Find first interface link/button in the panel-rendered interfaces list.
-    const panel = document.querySelector(".topo-action-panel");
-    if (!panel) return null;
-    const ifaceItems = panel.querySelectorAll(".topo-iface-item, .topo-iface, [data-iface]");
-    const first = ifaceItems[0];
-    if (first instanceof HTMLElement) {
-      first.click();
-      return first.getAttribute("data-iface") || first.textContent?.trim() || "unknown";
+    const chip = document.querySelector(".topo-action-panel .topo-iface-chip");
+    if (chip instanceof HTMLElement) {
+      const name = chip.textContent?.trim() || "unknown";
+      chip.click();
+      return name;
     }
     return null;
   });
   await new Promise((r) => setTimeout(r, 400));
 
   if (ifaceClicked === null) {
-    // No clickable interface in the rendered panel — log this so we know,
-    // but the surface scope assertion below still runs against whatever the
-    // panel did render.
-    console.log("  note: no interface item was clickable in the action panel; checking node-level surface only");
+    console.log("  note: no interface chip rendered; per-interface assertions skipped");
   } else {
     console.log(`  → clicked interface: ${ifaceClicked}`);
+
+    const ifaceGroups = await page.evaluate(() => {
+      const panel = document.querySelector(".topo-action-panel");
+      return Array.from(panel?.querySelectorAll(".topo-action-group-summary") ?? [])
+        .map((s) => s.textContent?.trim());
+    });
+    expect(ifaceGroups.includes("Port mode"),
+      `interface panel exposes "Port mode" group: ${JSON.stringify(ifaceGroups)}`);
+    expect(ifaceGroups.includes("Service"),
+      `interface panel exposes "Service" group: ${JSON.stringify(ifaceGroups)}`);
   }
 
   // Read every action ID actually exposed in the panel right now. The
@@ -132,12 +143,28 @@ try {
   expect(stragglers.length === 0,
     `no banned action labels appear in the panel; stragglers: ${JSON.stringify(stragglers)}`);
 
-  // ── 3. Allowed service-application labels are present (after clicking an iface) ─
+  // ── 3. Allowed action labels are present (after clicking an iface). Service
+  //      group lives in collapsed <details>; expanding shows the items.
   if (ifaceClicked !== null) {
+    await page.evaluate(() => {
+      for (const d of document.querySelectorAll(".topo-action-panel details")) {
+        d.setAttribute("open", "");
+      }
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const expandedLabels = await page.evaluate(() =>
+      Array.from(document.querySelectorAll(".topo-action-panel button"))
+        .map((b) => b.textContent?.trim()).filter(Boolean));
     const serviceLabelsFound = ["Bind service", "Unbind service", "Refresh service"]
-      .filter((wanted) => panelActions.labels.includes(wanted));
+      .filter((wanted) => expandedLabels.includes(wanted));
     expect(serviceLabelsFound.length >= 1,
-      `interface selection exposes service actions: ${JSON.stringify(serviceLabelsFound)} / labels=${JSON.stringify(panelActions.labels)}`);
+      `service binding actions reachable: ${JSON.stringify(serviceLabelsFound)}`);
+
+    const portModeLabelsFound = expandedLabels
+      .filter((l) => /Set to access|Add tagged VLAN|Set to routed|Clear port configuration/.test(l));
+    expect(portModeLabelsFound.length >= 3,
+      `port-mode actions reachable (≥3): ${JSON.stringify(portModeLabelsFound)}`);
   }
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-scope-02-iface.png" });

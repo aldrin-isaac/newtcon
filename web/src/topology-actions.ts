@@ -39,16 +39,24 @@ export interface ActionGroup {
 // Per-device actions
 // ============================================================================
 //
-// Scope contracted: per-device write actions (create VLAN, create VRF, add
-// ACL, bind IPVPN, add BGP peer, …) are no longer exposed here. Service
-// composition — including the prefix-lists, route-policies, ACLs, VLANs,
-// VRFs that build up a service — happens in the Specs tab. The Topology
-// tab is restricted to *applying* pre-composed services to devices
-// (interface-level, via apply-service / remove-service / refresh-service
-// in INTERFACE_ACTIONS below).
+// Scope: no per-device write actions are exposed here. Service composition
+// (prefix-lists, route-policies, ACLs, VLAN/VRF/IRB creation, IPVPN/MACVPN
+// definitions, BGP peer templates, QoS policies, filters) lives in the
+// Specs tab.
 //
-// Substrate operations (Start/Stop VM, Console, SSH) live in the device-
-// inspector Lifecycle section (phase 3 of the unified-substrate work).
+// Substrate operations (Start/Stop VM, Console, SSH access) live in the
+// device-inspector Lifecycle section.
+//
+// The Topology tab's per-port action surface lives in INTERFACE_ACTIONS
+// below. It has two layers, matching newtron's substrate:
+//
+//   1. Port-mode configuration (configure-interface RPC): set the port to
+//      bridged access / bridged trunk member / routed mode. This is
+//      substrate-level setup — services have nothing to bind to until the
+//      port has a mode.
+//
+//   2. Service binding (apply-service RPC): layer a pre-composed service on
+//      top of a configured port. Services are composed in the Specs tab.
 
 export const NODE_ACTIONS: ActionGroup[] = [];
 
@@ -57,6 +65,42 @@ export const NODE_ACTIONS: ActionGroup[] = [];
 // ============================================================================
 
 export const INTERFACE_ACTIONS: ActionGroup[] = [
+  {
+    group: "Port mode",
+    items: [
+      {
+        // POST /configure-interface { vlan_id, tagged: false } — access mode
+        id: "set-access", label: "Set to access (single untagged VLAN)", icon: "settings",
+        fields: [
+          { name: "vlan_id", label: "VLAN ID", type: "number", required: true, hint: "1–4094" },
+        ],
+        confirm: "Configure this port as access (single untagged VLAN)? Any existing port-mode config is replaced.",
+      },
+      {
+        // POST /configure-interface { vlan_id, tagged: true } — trunk member
+        // Each call adds one tagged VLAN. Multi-VLAN trunk = repeat per VLAN.
+        id: "add-trunk-vlan", label: "Add tagged VLAN (trunk)", icon: "plus",
+        fields: [
+          { name: "vlan_id", label: "VLAN ID", type: "number", required: true, hint: "1–4094 (call repeatedly for multiple)" },
+        ],
+        confirm: "Add this VLAN as a tagged member of the port? Existing tagged VLANs are preserved.",
+      },
+      {
+        // POST /configure-interface { vrf, ip } — routed mode
+        id: "set-routed", label: "Set to routed (VRF + IP)", icon: "settings",
+        fields: [
+          { name: "vrf", label: "VRF",       type: "text", required: true, hint: "'default' for global; otherwise a VRF derived from an IPVPN spec" },
+          { name: "ip",  label: "IP (CIDR)", type: "text", required: true, hint: "e.g. 10.1.0.1/24" },
+        ],
+        confirm: "Configure this port as routed (VRF + IP)? Any existing port-mode config is replaced.",
+      },
+      {
+        // POST /unconfigure-interface (no body)
+        id: "unconfigure-interface", label: "Clear port configuration", icon: "trash", danger: true,
+        confirm: "Clear all port-mode configuration? Bound services are not removed by this action.",
+      },
+    ],
+  },
   {
     group: "Service",
     items: [
@@ -75,8 +119,4 @@ export const INTERFACE_ACTIONS: ActionGroup[] = [
       { id: "refresh-service", label: "Refresh service", icon: "refresh", confirm: "Re-apply the bound service?" },
     ],
   },
-  // Other interface-level write actions (configure-interface, set/clear
-  // property, bind-acl, BGP peers, apply-qos) are intentionally not exposed
-  // here. Those primitives compose into services in the Specs tab; the
-  // Topology tab only applies the composed service.
 ];
