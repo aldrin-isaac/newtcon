@@ -213,20 +213,28 @@ export function renderActionPanel(sel: PanelSelection, deps: PanelDeps): void {
       ));
     } else {
       root.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
-        "No common actions for the selected device types."));
+        "Services bind at the interface level. Click an interface on one of the selected devices to bind a service."));
     }
     appendSaveDiscardRow(root, sel, deps);
     return;
   }
 
-  // Single-device action set.
+  // Single-device action set. Per the "services only" scope, NODE_ACTIONS is
+  // empty by design — service composition happens in the Specs tab, and
+  // services apply at the interface level. Surface a hint pointing at the
+  // interface list above instead of an empty "Actions" header.
   const device = sel.devices[0];
   root.appendChild(renderInterfacesTab(device, deps));
-  root.appendChild(renderActionSection(
-    NODE_ACTIONS,
-    { kind: "node", device },
-    deps,
-  ));
+  if (NODE_ACTIONS.length > 0) {
+    root.appendChild(renderActionSection(
+      NODE_ACTIONS,
+      { kind: "node", device },
+      deps,
+    ));
+  } else {
+    root.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
+      "Click an interface above to bind a service. Compose new services in the Specs tab."));
+  }
   appendQueuedForDevice(root, device);
   appendSaveDiscardRow(root, sel, deps);
 }
