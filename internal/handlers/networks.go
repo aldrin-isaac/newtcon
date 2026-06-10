@@ -37,7 +37,7 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 	mux.Handle("GET /api/networks", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		infos, err := c.ListNetworksDetail(r.Context())
 		if err != nil {
-			writeNetworkWriteError(w, correlationID(r.Context()), err, "GET /api/networks")
+			writeUpstreamError(w, correlationID(r.Context()), err, "GET /api/networks", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -54,20 +54,20 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 			Description string `json:"description,omitempty"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeNetworkWriteError(w, correlationID(r.Context()),
+			writeUpstreamError(w, correlationID(r.Context()),
 				&newtronc.ValidationError{Body: []byte("invalid JSON: " + err.Error())},
-				"POST /api/networks")
+				"POST /api/networks", nil)
 			return
 		}
 		if req.ID == "" || req.SpecDir == "" {
-			writeNetworkWriteError(w, correlationID(r.Context()),
+			writeUpstreamError(w, correlationID(r.Context()),
 				&newtronc.ValidationError{Body: []byte("id and spec_dir are required")},
-				"POST /api/networks")
+				"POST /api/networks", nil)
 			return
 		}
 		id, err := c.RegisterNetwork(r.Context(), req.ID, req.SpecDir, req.Scaffold, req.Description)
 		if err != nil {
-			writeNetworkWriteError(w, correlationID(r.Context()), err, "POST /api/networks")
+			writeUpstreamError(w, correlationID(r.Context()), err, "POST /api/networks", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

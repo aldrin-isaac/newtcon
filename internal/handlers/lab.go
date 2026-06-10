@@ -45,7 +45,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	mux.Handle("GET /api/labs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := c.LabListLabs(r.Context())
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, "GET /api/labs")
+			writeLabEngineError(w, cid(r.Context()), err, "GET /api/labs", nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -57,7 +57,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		name := r.PathValue("name")
 		data, err := c.LabStatus(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/status", name))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/status", name), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 
 		status, data, err := c.LabDeploy(r.Context(), name, req)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/deploy", name))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/deploy", name), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -103,7 +103,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		name := r.PathValue("name")
 		data, err := c.LabDestroy(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/destroy", name))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/destroy", name), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -121,7 +121,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		}
 		data, err := c.LabProvision(r.Context(), name, parallel)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/provision", name))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/provision", name), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -154,7 +154,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 
 		upstream, err := c.LabEventsRequest(r.Context(), name)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/events", name))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("GET /api/labs/%s/events", name), nil)
 			return
 		}
 		defer upstream.Body.Close()
@@ -186,7 +186,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		node := r.PathValue("node")
 		data, err := c.LabStartNode(r.Context(), name, node)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/start", name, node))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/start", name, node), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -199,7 +199,7 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 		node := r.PathValue("node")
 		data, err := c.LabStopNode(r.Context(), name, node)
 		if err != nil {
-			writeLabError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/stop", name, node))
+			writeLabEngineError(w, cid(r.Context()), err, fmt.Sprintf("POST /api/labs/%s/nodes/%s/stop", name, node), nil)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -208,32 +208,6 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	}))
 }
 
-// writeLabError translates newtronc error types to the newtcon error envelope.
-// Mirrors the error-mapping pattern in nodes.go and network.go.
-func writeLabError(w http.ResponseWriter, corrID string, err error, endpoint string) {
-	switch e := err.(type) {
-	case *newtronc.NotFoundError:
-		types.WriteError(w, http.StatusNotFound, types.KindPreconditionFailure,
-			fmt.Sprintf("%s: not found", endpoint),
-			map[string]any{"correlation_id": corrID, "underlying_error_message": string(e.Body)})
-	case *newtronc.ConflictError:
-		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
-			fmt.Sprintf("%s: conflict", endpoint),
-			map[string]any{"correlation_id": corrID, "underlying_error_message": string(e.Body)})
-	case *newtronc.ValidationError:
-		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-			fmt.Sprintf("%s: validation failed", endpoint),
-			map[string]any{"correlation_id": corrID, "underlying_error_message": string(e.Body)})
-	case *newtronc.UnavailableError:
-		types.WriteError(w, http.StatusBadGateway, types.KindNewtronUnavailable,
-			fmt.Sprintf("%s: newtlab unreachable", endpoint),
-			map[string]any{"correlation_id": corrID, "underlying_error_message": e.Cause})
-	default:
-		types.WriteError(w, http.StatusInternalServerError, types.KindInternal,
-			fmt.Sprintf("%s: internal error", endpoint),
-			map[string]any{"correlation_id": corrID, "underlying_error_message": err.Error()})
-	}
-}
 
 // writeLabValidation writes a 400 validation-failure error envelope.
 func writeLabValidation(w http.ResponseWriter, corrID, msg string) {
