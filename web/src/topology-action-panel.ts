@@ -502,7 +502,7 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
   // No-fields path: confirm + queue (do not POST). Apply changes runs the queue.
   if ((action.fields ?? []).length === 0) {
     if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
     if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
     queueActionFromForm(action, target, {});
     flash(anchor, "Queued");
@@ -553,7 +553,7 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
       body[field.name] = coerceFieldValue(field, raw);
     }
     if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
     if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
     try {
       queueActionFromForm(action, target, body);
