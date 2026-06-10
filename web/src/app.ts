@@ -53,6 +53,7 @@ import {
 } from "./api/newtcon/nodes.js";
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
+import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
 // queue introduced in staging.ts, those flows go through enqueue* + applyAll
@@ -865,7 +866,7 @@ interface TopologyRenderOpts {
   onNodeClick: (name: string, ev: MouseEvent) => void;
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
-  onlineByDevice?: Map<string, boolean>;
+  statusByDevice?: Map<string, DeviceStatus>;
   onNodeDelete?: (name: string) => void;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
@@ -933,11 +934,9 @@ function renderTopologySVG(
     const pendingCount = opts.pendingByDevice?.get(node.name) ?? 0;
     const isPendingAdd = opts.isPendingAdd?.(node.name) ?? false;
     const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
-    const onlineState = opts.onlineByDevice?.get(node.name);
-    // unknown (probe still in flight or not run) → no class; online → green; offline → grey
-    const onlineClass = onlineState === true ? " topo-node--online"
-                      : onlineState === false ? " topo-node--offline"
-                      : "";
+    const status = opts.statusByDevice?.get(node.name);
+    // Phase 2: substrate-agnostic state class. Tooltip carries the detail.
+    const stateClass = status ? ` topo-node--${status.state}` : "";
 
     const g = svgEl("g", {
       "class": "topo-node"
@@ -945,10 +944,11 @@ function renderTopologySVG(
         + (pendingCount > 0 ? " topo-node--pending" : "")
         + (isPendingAdd ? " topo-node--pending-add" : "")
         + (isPendingRemove ? " topo-node--pending-del" : "")
-        + onlineClass,
+        + stateClass,
       role: "button",
       tabindex: "0",
-      "aria-label": `Device ${node.name}`,
+      "aria-label": `Device ${node.name} — ${status?.state ?? "unknown"}`,
+      "data-device": node.name,
     });
 
     if (isSelected) {
@@ -1008,17 +1008,18 @@ function renderTopologySVG(
       }
     });
 
-    // Online/offline indicator — small status dot in the bottom-left.
-    if (onlineState !== undefined) {
+    // Phase 2: substrate-agnostic status badge. Color matches state via CSS
+    // (topo-status-dot--{state}); tooltip carries substrate detail.
+    if (status) {
       const sx = pos.cx - NODE_W / 2 + 8;
       const sy = pos.cy + NODE_H / 2 - 8;
-      const dot = svgEl("g", { "class": "topo-online-badge" });
+      const dot = svgEl("g", { "class": "topo-status-badge", "data-status-badge": node.name });
       dot.appendChild(svgEl("circle", {
         cx: String(sx), cy: String(sy), r: "5",
-        "class": onlineState ? "topo-online-dot topo-online-dot--ok" : "topo-online-dot topo-online-dot--off",
+        "class": `topo-status-dot topo-status-dot--${status.state}`,
       }));
       const t = svgEl("title");
-      t.textContent = onlineState ? `${node.name} is online` : `${node.name} is offline`;
+      t.textContent = `${node.name}: ${status.state} — ${status.detail}`;
       dot.appendChild(t);
       g.appendChild(dot);
     }
@@ -2050,6 +2051,59 @@ function openDeployModal(network: string): void {
 
 // ---- Topology tab -----------------------------------------------------------
 
+// 5s newtlab-status poll while the Topology tab is active. Cheap (one HTTP
+// call) and only re-renders the per-device status badges in place — the full
+// topology + /info + drift fetch only runs on tab mount.
+let topologyPollTimer: number | null = null;
+
+function stopTopologyPoll(): void {
+  if (topologyPollTimer !== null) {
+    window.clearInterval(topologyPollTimer);
+    topologyPollTimer = null;
+  }
+}
+
+interface PollArgs {
+  network: string;
+  graphSlot: HTMLElement;
+  deviceNames: string[];
+  onlineByDevice: Map<string, boolean>;
+}
+
+function startTopologyPoll(args: PollArgs): void {
+  stopTopologyPoll();
+  topologyPollTimer = window.setInterval(async () => {
+    let labState: LabState | null = null;
+    try { labState = await fetchLabStatus(args.network); } catch { /* lab unknown — fall back */ }
+    const fresh = new Map<string, DeviceStatus>();
+    for (const name of args.deviceNames) {
+      fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name)));
+    }
+    const svg = args.graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
+    if (svg) patchDeviceStatuses(svg, fresh);
+  }, 5000);
+}
+
+const STATUS_CLASSES = ["running", "booting", "down", "unrealized"] as const;
+
+function patchDeviceStatuses(svg: SVGSVGElement, statuses: Map<string, DeviceStatus>): void {
+  for (const [device, status] of statuses) {
+    const sel = `g.topo-node[data-device="${CSS.escape(device)}"]`;
+    const g = svg.querySelector(sel);
+    if (!g) continue;
+    for (const c of STATUS_CLASSES) g.classList.remove(`topo-node--${c}`);
+    g.classList.add(`topo-node--${status.state}`);
+    g.setAttribute("aria-label", `Device ${device} — ${status.state}`);
+    const dot = g.querySelector("circle.topo-status-dot");
+    if (dot) {
+      for (const c of STATUS_CLASSES) dot.classList.remove(`topo-status-dot--${c}`);
+      dot.classList.add(`topo-status-dot--${status.state}`);
+    }
+    const title = g.querySelector("g.topo-status-badge > title");
+    if (title) title.textContent = `${device}: ${status.state} — ${status.detail}`;
+  }
+}
+
 async function mountTopologyTab(root: HTMLElement): Promise<void> {
   root.textContent = "";
   root.appendChild(el("p", { className: "status-loading" }, "Loading topology…"));
@@ -2089,6 +2143,19 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       })
     );
     void probeResults;
+
+    // Phase 2: unify lab + /info into one per-device status. Lab name == active
+    // network ID by convention (newtron#116). If newtlab doesn't know about
+    // the network/lab yet, labState stays null and resolveDeviceStatus falls
+    // back to the /info probe alone (today's behaviour).
+    let labState: LabState | null = null;
+    try {
+      labState = await fetchLabStatus(activeNetwork());
+    } catch { /* lab unknown — fall back to probe-only resolution */ }
+    const statusByDevice = new Map<string, DeviceStatus>();
+    for (const name of deviceNames) {
+      statusByDevice.set(name, resolveDeviceStatus(name, labState, onlineByDevice.get(name)));
+    }
 
     // Build toolbar with Add device and Add link buttons.
     const toolbar = el("div", { className: "topology-toolbar" });
@@ -2201,7 +2268,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           });
         },
         driftByDevice,
-        onlineByDevice,
+        statusByDevice,
         onNodeDelete: (deviceName) => {
           // Stage the remove rather than fire immediately; toggles if already queued.
           enqueueTopologyRemoveDevice(deviceName);
@@ -2249,6 +2316,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     renderGraph();
     renderPanel();
+
+    // Phase 2: live-update device badges on a 5s tick. Patches in place — the
+    // operator can keep interacting with the panel + drawers while statuses
+    // refresh. Restart on every mount so re-renders don't accumulate timers.
+    startTopologyPoll({ network: activeNetwork(), graphSlot, deviceNames, onlineByDevice });
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
     const summary = el(
@@ -2592,6 +2664,10 @@ function setupTabs(): void {
     if (isTopology && !topologyMounted) {
       topologyMounted = true;
       mountTopologyTab(panelTopology as HTMLElement);
+    }
+    if (!isTopology) {
+      // Stop polling newtlab status when leaving the Topology tab.
+      stopTopologyPoll();
     }
 
     if (isLab) {

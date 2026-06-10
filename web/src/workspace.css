@@ -1005,20 +1005,38 @@
   cursor: not-allowed;
 }
 
-/* ---- Topology online/offline indicators ------------------------------ */
+/* ---- Topology device-status indicators (phase 2 unified-substrate) ----- */
+/*
+ * State classes on the device <g> + a corresponding dot color. The state is
+ * substrate-agnostic; tooltip carries the lab-vm / probe-success detail.
+ */
 
-.topo-online-dot {
+.topo-status-dot {
   stroke: var(--color-surface);
   stroke-width: 1.5;
 }
-.topo-online-dot--ok  { fill: var(--color-success); }
-.topo-online-dot--off { fill: var(--color-text-muted); }
+.topo-status-dot--running    { fill: var(--color-success); }
+.topo-status-dot--booting    { fill: var(--color-warning, #d97706); }
+.topo-status-dot--down       { fill: var(--color-danger, #dc2626); }
+.topo-status-dot--unrealized { fill: var(--color-text-muted); }
 
-.topo-node--offline rect:not(.topo-node-selection-ring) {
+/* Booting devices: pulse to signal "in motion" while we wait for newtlab. */
+.topo-status-dot--booting {
+  animation: topo-booting-pulse 1.4s ease-in-out infinite;
+}
+@keyframes topo-booting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* "down" and "unrealized" devices look subdued to draw the eye to live ones. */
+.topo-node--down rect:not(.topo-node-selection-ring),
+.topo-node--unrealized rect:not(.topo-node-selection-ring) {
   stroke-dasharray: 4 3;
   opacity: 0.7;
 }
-.topo-node--offline text {
+.topo-node--down text,
+.topo-node--unrealized text {
   opacity: 0.7;
 }
 
