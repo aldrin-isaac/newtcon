@@ -106,19 +106,6 @@
 .topology-drift-summary--present { color: var(--color-warning); font-weight: var(--weight-medium); }
 .topology-error { color: var(--color-danger); font-size: var(--text-sm); }
 
-/* Lab */
-.lab-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--space-md); }
-.lab-card-header { display: flex; align-items: center; gap: var(--space-sm); }
-.lab-card-name { font-family: var(--font-mono); font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--color-text-primary); margin: 0; flex: 1; }
-.lab-card-state { font-size: var(--text-xs); }
-.lab-card-actions { display: flex; gap: var(--space-2xs); padding: var(--space-sm) var(--space-md); border-top: 1px solid var(--color-border-subtle); flex-wrap: wrap; }
-.lab-card-nodes { padding: 0 var(--space-md) var(--space-sm); }
-.lab-card-nodes summary { font-size: var(--text-xs); color: var(--color-text-secondary); cursor: pointer; padding: var(--space-xs) 0; }
-.lab-node-row { display: flex; align-items: center; gap: var(--space-sm); font-family: var(--font-mono); font-size: var(--text-xs); padding: var(--space-2xs) 0; }
-.lab-node-name { flex: 1; }
-.lab-event-log { margin-top: var(--space-sm); padding: var(--space-sm) var(--space-md); background: var(--color-surface-sunken); border-top: 1px solid var(--color-border-subtle); font-family: var(--font-mono); font-size: var(--text-xs); max-height: 240px; overflow-y: auto; }
-.lab-event-line { padding: 2px 0; color: var(--color-text-secondary); }
-.lab-event-line--error { color: var(--color-danger); }
 
 /* Drawer */
 .drawer { position: fixed; top: 0; right: 0; width: min(640px, 92vw); height: 100vh; background: var(--color-surface); border-left: 1px solid var(--color-border-subtle); box-shadow: var(--shadow-overlay); transform: translateX(100%); transition: transform var(--duration-base) var(--ease-standard); z-index: 20; display: flex; flex-direction: column; }
@@ -657,118 +644,6 @@
   display: block;
 }
 
-/* ---------- Lab view styling ---------- */
-
-#panel-lab {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-  max-width: 100%;
-}
-
-.lab-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-xs);
-  display: flex;
-  flex-direction: column;
-}
-
-.lab-card h2,
-.lab-card-name,
-.lab-card-header {
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-  padding: var(--space-md) var(--space-md) var(--space-xs);
-}
-
-.lab-card-state,
-.lab-card-status {
-  padding: 0 var(--space-md) var(--space-xs);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
-.lab-card ul,
-.lab-card-nodes {
-  list-style: none;
-  margin: 0;
-  padding: var(--space-2xs) var(--space-md) var(--space-sm);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-}
-
-.lab-card li,
-.lab-node-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: 4px var(--space-xs);
-  border-radius: var(--radius-xs);
-  background: var(--color-surface-sunken);
-}
-
-.lab-card li .lab-node-name,
-.lab-node-row .lab-node-name { flex: 1; color: var(--color-text-primary); }
-.lab-node-state {
-  padding: 1px var(--space-xs);
-  font-size: var(--text-2xs);
-  border-radius: var(--radius-full);
-  background: var(--color-success-bg);
-  color: var(--color-success);
-  font-family: var(--font-system);
-}
-.lab-node-state--stopped { background: var(--color-surface-sunken); color: var(--color-text-muted); }
-.lab-node-state--error   { background: var(--color-danger-bg);  color: var(--color-danger); }
-
-.lab-card-actions,
-.lab-card > div:last-child {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2xs);
-  padding: var(--space-sm) var(--space-md);
-  border-top: 1px solid var(--color-border-subtle);
-  background: var(--color-surface-sunken);
-}
-
-.lab-card-actions button,
-.lab-card > div:last-child > button {
-  font-family: var(--font-system);
-  font-size: var(--text-xs);
-  padding: var(--space-2xs) var(--space-sm);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard);
-}
-.lab-card-actions button:hover,
-.lab-card > div:last-child > button:hover {
-  background: var(--color-surface-hover);
-}
-
-/* Restore visibility on the per-node Stop/Start button (small mono-row button) */
-.lab-card li button,
-.lab-node-row button {
-  font-family: var(--font-system);
-  font-size: var(--text-2xs);
-  padding: 2px var(--space-xs);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-xs);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  cursor: pointer;
-}
-.lab-card li button:hover,
-.lab-node-row button:hover { background: var(--color-surface-hover); }
 
 /* ---- Network switcher (header) ---------------------------------------- */
 

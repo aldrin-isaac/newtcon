@@ -15,7 +15,6 @@ import {
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
 import {
-  fetchLabs,
   fetchLabStatus,
   postLabDeploy,
   postLabDestroy,
@@ -24,7 +23,6 @@ import {
   postLabStopNode,
   labEvents,
   type LabState,
-  type LabListItem,
 } from "./api/newtcon/lab.js";
 import {
   fetchTopology,
@@ -2306,6 +2304,30 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     });
     toolbar.appendChild(bringUpBtn);
 
+    // Provision — newtlab's post-deploy provisioning pass. Phase 4 moved
+    // this here from the retired Lab tab. Operator's typical flow:
+    // Bring up → (wait for VMs to settle) → Provision → use the lab. Some
+    // deploys carry `provision:true` and skip this; others split it out.
+    const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
+    provisionBtn.addEventListener("click", () => {
+      const network = activeNetwork();
+      if (!window.confirm(`Run provisioning pass on lab "${network}"? Requires VMs to be up.`)) return;
+      provisionBtn.setAttribute("disabled", "");
+      provisionBtn.textContent = "Provisioning…";
+      postLabProvision(network)
+        .then(() => {
+          provisionBtn.removeAttribute("disabled");
+          provisionBtn.textContent = "Provision";
+        })
+        .catch((err) => {
+          provisionBtn.removeAttribute("disabled");
+          provisionBtn.textContent = "Provision";
+          const msg = err instanceof Error ? err.message : String(err);
+          alert(`Provision failed: ${msg}`);
+        });
+    });
+    toolbar.appendChild(provisionBtn);
+
     // Tear down — mirror of Bring up. Destructive: extra-warning confirm,
     // danger styling. Phase 3 ships this in the toolbar so the operator never
     // has to leave the Topology tab for lab lifecycle.
@@ -2492,319 +2514,31 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
   }
 }
 
-// ---- Lab tab ----------------------------------------------------------------
-
-// mountLabTab renders the Lab tab: list labs with status badges, and
-// per-lab Deploy / Destroy / Provision buttons plus per-node Start/Stop.
-// Deploy opens an SSE log panel streaming phase events in real time.
-async function mountLabTab(root: HTMLElement): Promise<void> {
-  root.textContent = "";
-  root.appendChild(el("p", { className: "status-loading" }, "Loading labs…"));
-
-  let labs: LabListItem[];
-  try {
-    labs = await fetchLabs();
-  } catch (err) {
-    root.textContent = "";
-    root.appendChild(el("p", { className: "topology-error" }, "Could not reach the lab server."));
-    if (err instanceof Error) {
-      root.appendChild(el("p", { className: "panel-error-detail" }, err.message));
-    }
-    return;
-  }
-
-  root.textContent = "";
-
-  if (labs.length === 0) {
-    root.appendChild(el("p", { className: "topology-empty" }, "No labs found."));
-    return;
-  }
-
-  // Render one card per lab.
-  for (const lab of labs) {
-    const card = el("section", { className: "lab-card" });
-    card.appendChild(el("h2", { className: "lab-card-title" }, lab.name));
-
-    // Status section — loaded lazily.
-    const statusDiv = el("div", { className: "lab-card-status" });
-    statusDiv.textContent = "Loading status…";
-    card.appendChild(statusDiv);
-
-    // Node list section — populated after status load.
-    const nodesDiv = el("div", { className: "lab-card-nodes" });
-    card.appendChild(nodesDiv);
-
-    // SSE log panel — shown when Deploy is clicked.
-    const logPanel = el("div", { className: "lab-card-log" });
-    logPanel.hidden = true;
-    card.appendChild(logPanel);
-
-    // Action buttons row.
-    const actions = el("div", { className: "lab-card-actions" });
-
-    const deployBtn = el("button", { type: "button", className: "lab-btn lab-btn--primary" }, "Deploy");
-    const destroyBtn = el("button", { type: "button", className: "lab-btn lab-btn--danger" }, "Destroy");
-    const provisionBtn = el("button", { type: "button", className: "lab-btn" }, "Provision");
-
-    actions.appendChild(deployBtn);
-    actions.appendChild(destroyBtn);
-    actions.appendChild(provisionBtn);
-    card.appendChild(actions);
-
-    root.appendChild(card);
-
-    // Load status and render node list.
-    const loadStatus = async (): Promise<void> => {
-      try {
-        const state = await fetchLabStatus(lab.name);
-        renderLabStatus(statusDiv, state);
-        renderLabNodes(nodesDiv, logPanel, lab.name, state);
-      } catch (err) {
-        statusDiv.textContent = "";
-        statusDiv.appendChild(el("span", { className: "lab-status lab-status--unknown" }, "status unavailable"));
-        if (err instanceof Error) {
-          statusDiv.appendChild(el("span", { className: "lab-status-detail" }, " — " + err.message));
-        }
-        nodesDiv.textContent = "";
-      }
-    };
-
-    loadStatus();
-
-    // Deploy: open SSE log panel and stream events.
-    deployBtn.addEventListener("click", () => {
-      logPanel.hidden = false;
-      logPanel.textContent = "";
-      logPanel.appendChild(el("p", { className: "lab-log-header" }, "Deploying " + lab.name + "…"));
-
-      const logLines = el("pre", { className: "lab-log-lines" });
-      logPanel.appendChild(logLines);
-
-      let src: EventSource | null = null;
-
-      const startDeploy = async (): Promise<void> => {
-        try {
-          await postLabDeploy(lab.name, {});
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logLines.textContent += `\n[error] deploy failed: ${msg}`;
-          return;
-        }
-
-        src = labEvents(
-          lab.name,
-          (eventType, data) => {
-            try {
-              const payload = JSON.parse(data) as Record<string, unknown>;
-              if (eventType === "phase") {
-                const phase = String(payload["phase"] ?? "");
-                const detail = payload["detail"] ? " — " + String(payload["detail"]) : "";
-                logLines.textContent += `\n${phase}${detail}`;
-              } else if (eventType === "complete") {
-                logLines.textContent += "\n[done] deploy complete";
-                src?.close();
-                loadStatus();
-              } else if (eventType === "error") {
-                logLines.textContent += "\n[error] " + String(payload["message"] ?? data);
-                src?.close();
-              }
-            } catch {
-              logLines.textContent += "\n" + data;
-            }
-          },
-          () => {
-            // SSE connection closed or error — could be normal end-of-stream.
-            src?.close();
-          },
-        );
-      };
-
-      startDeploy();
-    });
-
-    // Destroy: gate with confirm to prevent accidental teardown.
-    destroyBtn.addEventListener("click", () => {
-      if (!window.confirm(`Destroy lab "${lab.name}"? This tears down all VMs and links.`)) return;
-      destroyBtn.disabled = true;
-      destroyBtn.textContent = "Destroying…";
-      postLabDestroy(lab.name)
-        .then(() => {
-          destroyBtn.textContent = "Destroy";
-          destroyBtn.disabled = false;
-          loadStatus();
-        })
-        .catch((err) => {
-          destroyBtn.textContent = "Destroy";
-          destroyBtn.disabled = false;
-          const msg = err instanceof Error ? err.message : String(err);
-          alert("Destroy failed: " + msg);
-        });
-    });
-
-    // Provision: run post-deploy provisioning pass.
-    provisionBtn.addEventListener("click", () => {
-      provisionBtn.disabled = true;
-      provisionBtn.textContent = "Provisioning…";
-      postLabProvision(lab.name)
-        .then(() => {
-          provisionBtn.textContent = "Provision";
-          provisionBtn.disabled = false;
-          loadStatus();
-        })
-        .catch((err) => {
-          provisionBtn.textContent = "Provision";
-          provisionBtn.disabled = false;
-          const msg = err instanceof Error ? err.message : String(err);
-          alert("Provision failed: " + msg);
-        });
-    });
-  }
-}
-
-// renderLabStatus writes a status badge into statusDiv from a LabState.
-function renderLabStatus(statusDiv: HTMLElement, state: LabState): void {
-  statusDiv.textContent = "";
-  const nodes = Object.values(state.nodes ?? {});
-  const running = nodes.filter((n) => n.status === "running").length;
-  const total = nodes.length;
-
-  let statusClass = "lab-status--stopped";
-  let statusText = "stopped";
-  if (running === total && total > 0) {
-    statusClass = "lab-status--running";
-    statusText = `running (${running}/${total} nodes)`;
-  } else if (running > 0) {
-    statusClass = "lab-status--partial";
-    statusText = `partial (${running}/${total} nodes running)`;
-  }
-
-  const badge = el("span", { className: "lab-status " + statusClass }, statusText);
-  statusDiv.appendChild(badge);
-}
-
-// renderLabNodes writes per-node Start/Stop buttons into nodesDiv.
-function renderLabNodes(
-  nodesDiv: HTMLElement,
-  _logPanel: HTMLElement,
-  lab: string,
-  state: LabState,
-): void {
-  nodesDiv.textContent = "";
-  const nodeEntries = Object.entries(state.nodes ?? {});
-  if (nodeEntries.length === 0) {
-    nodesDiv.appendChild(el("p", { className: "lab-nodes-empty" }, "No nodes."));
-    return;
-  }
-
-  const list = el("ul", { className: "lab-nodes-list" });
-  for (const [nodeName, nodeState] of nodeEntries) {
-    const item = el("li", { className: "lab-node-item" });
-
-    const nameSpan = el("span", { className: "lab-node-name" }, nodeName);
-    const stateClass = nodeState.status === "running"
-      ? "lab-node-status--running"
-      : "lab-node-status--stopped";
-    const stateSpan = el("span", { className: "lab-node-status " + stateClass }, nodeState.status);
-
-    item.appendChild(nameSpan);
-    item.appendChild(stateSpan);
-
-    if (nodeState.status === "stopped" || nodeState.status === "error") {
-      const startBtn = el("button", { type: "button", className: "lab-btn lab-btn--sm lab-btn--primary" }, "Start");
-      startBtn.addEventListener("click", () => {
-        startBtn.disabled = true;
-        startBtn.textContent = "Starting…";
-        postLabStartNode(lab, nodeName)
-          .then(() => {
-            // Reload the parent card status to refresh all node states.
-            fetchLabStatus(lab)
-              .then((s) => {
-                const parentCard = nodesDiv.closest(".lab-card");
-                const statusDiv = parentCard?.querySelector(".lab-card-status") as HTMLElement | null;
-                if (statusDiv) renderLabStatus(statusDiv, s);
-                renderLabNodes(nodesDiv, _logPanel, lab, s);
-              })
-              .catch(() => {
-                startBtn.textContent = "Start";
-                startBtn.disabled = false;
-              });
-          })
-          .catch((err) => {
-            startBtn.textContent = "Start";
-            startBtn.disabled = false;
-            const msg = err instanceof Error ? err.message : String(err);
-            alert("Start node failed: " + msg);
-          });
-      });
-      item.appendChild(startBtn);
-    }
-
-    if (nodeState.status === "running") {
-      const stopBtn = el("button", { type: "button", className: "lab-btn lab-btn--sm lab-btn--danger" }, "Stop");
-      stopBtn.addEventListener("click", () => {
-        if (!window.confirm(`Stop node "${nodeName}" in lab "${lab}"?`)) return;
-        stopBtn.disabled = true;
-        stopBtn.textContent = "Stopping…";
-        postLabStopNode(lab, nodeName)
-          .then(() => {
-            fetchLabStatus(lab)
-              .then((s) => {
-                const parentCard = nodesDiv.closest(".lab-card");
-                const statusDiv = parentCard?.querySelector(".lab-card-status") as HTMLElement | null;
-                if (statusDiv) renderLabStatus(statusDiv, s);
-                renderLabNodes(nodesDiv, _logPanel, lab, s);
-              })
-              .catch(() => {
-                stopBtn.textContent = "Stop";
-                stopBtn.disabled = false;
-              });
-          })
-          .catch((err) => {
-            stopBtn.textContent = "Stop";
-            stopBtn.disabled = false;
-            const msg = err instanceof Error ? err.message : String(err);
-            alert("Stop node failed: " + msg);
-          });
-      });
-      item.appendChild(stopBtn);
-    }
-
-    list.appendChild(item);
-  }
-  nodesDiv.appendChild(list);
-}
-
 // ---- Tab switching ----------------------------------------------------------
 
 function setupTabs(): void {
   const tabSpecs = document.getElementById("tab-specs");
   const tabTopology = document.getElementById("tab-topology");
-  const tabLab = document.getElementById("tab-lab");
   const panelSpecs = document.getElementById("panel-specs");
   const panelTopology = document.getElementById("panel-topology");
-  const panelLab = document.getElementById("panel-lab");
 
-  if (!tabSpecs || !tabTopology || !tabLab || !panelSpecs || !panelTopology || !panelLab) return;
+  if (!tabSpecs || !tabTopology || !panelSpecs || !panelTopology) return;
 
   let topologyMounted = false;
 
-  type TabName = "specs" | "topology" | "lab";
+  type TabName = "specs" | "topology";
 
   const activateTab = (name: TabName): void => {
     const isSpecs = name === "specs";
     const isTopology = name === "topology";
-    const isLab = name === "lab";
 
     tabSpecs.classList.toggle("workspace-tab--active", isSpecs);
     tabSpecs.setAttribute("aria-selected", isSpecs ? "true" : "false");
     tabTopology.classList.toggle("workspace-tab--active", isTopology);
     tabTopology.setAttribute("aria-selected", isTopology ? "true" : "false");
-    tabLab.classList.toggle("workspace-tab--active", isLab);
-    tabLab.setAttribute("aria-selected", isLab ? "true" : "false");
 
     (panelSpecs as HTMLElement).hidden = !isSpecs;
     (panelTopology as HTMLElement).hidden = !isTopology;
-    (panelLab as HTMLElement).hidden = !isLab;
 
     if (isTopology && !topologyMounted) {
       topologyMounted = true;
@@ -2814,15 +2548,10 @@ function setupTabs(): void {
       // Stop polling newtlab status when leaving the Topology tab.
       stopTopologyPoll();
     }
-
-    if (isLab) {
-      mountLabTab(panelLab as HTMLElement);
-    }
   };
 
   tabSpecs.addEventListener("click", () => activateTab("specs"));
   tabTopology.addEventListener("click", () => activateTab("topology"));
-  tabLab.addEventListener("click", () => activateTab("lab"));
 }
 
 // ---- Entry ------------------------------------------------------------------
