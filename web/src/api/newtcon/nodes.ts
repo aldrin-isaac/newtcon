@@ -7,51 +7,17 @@
 // Every function targets the operator's active network by default; pass
 // `network` to target a specific network (cross-engine workflows).
 
-import { ApiError } from "./services.js";
+import { apiFetch, apiSend } from "./_transport.js";
 import { apiPath } from "../../api-path.js";
 
 function pathFor(suffix: string, network?: string): string {
   return network ? apiPath.network(network, suffix) : apiPath(suffix);
 }
 
-// fetchNodeRaw is the shared helper for all node-level GET endpoints.
-// Returns the raw JSON value of the newtron response (any JSON value — object,
-// array, or primitive).
-//
-// On non-2xx responses it throws ApiError with kind and message from the
-// newtcon error envelope, or a plain Error for non-JSON bodies.
-async function fetchNodeRaw(url: string): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await fetch(url, { cache: "no-store" });
-  } catch (cause) {
-    throw new Error(`network error: ${cause instanceof Error ? cause.message : String(cause)}`);
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-
-  if (!response.ok) {
-    if (contentType.includes("application/json")) {
-      let body: { error?: { kind: string; message: string; details?: Record<string, unknown> } };
-      try {
-        body = (await response.json()) as typeof body;
-      } catch {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-      if (body.error) {
-        throw new ApiError(response.status, {
-          error: {
-            kind: body.error.kind,
-            message: body.error.message,
-            details: body.error.details ?? {},
-          },
-        });
-      }
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
+// fetchNodeRaw delegates to apiFetch with no-cache. Kept as a thin local
+// alias so per-endpoint functions read consistently.
+function fetchNodeRaw(url: string): Promise<unknown> {
+  return apiFetch(url, { cache: "no-store" });
 }
 
 // fetchTopology returns the full topology payload from GET /api/networks/{netID}/topology.
@@ -172,59 +138,20 @@ export async function postNodeReconcile(
   if (opts.mode) params.set("mode", opts.mode);
   const qs = params.toString();
   const base = pathFor(`nodes/${encodeURIComponent(device)}/reconcile`, network);
-  const url = qs ? `${base}?${qs}` : base;
-  const response = await fetch(url, { method: "POST", cache: "no-store" });
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!response.ok) {
-    if (contentType.includes("application/json")) {
-      const body = await response.json() as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
-      if (body.error) {
-        throw new ApiError(response.status, {
-          error: { kind: body.error.kind, message: body.error.message, details: body.error.details ?? {} },
-        });
-      }
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return apiSend(qs ? `${base}?${qs}` : base, "POST");
 }
 
 // ============================================================================
 // Write helpers (topology editor + interface binding)
 // ============================================================================
 
-// nodeWrite is the shared POST/PUT/DELETE helper for write operations.
-// Returns parsed response on 2xx; throws ApiError on structured error envelopes.
-async function nodeWrite(
+// nodeWrite is a thin wrapper for write methods. Delegates to apiSend.
+function nodeWrite(
   url: string,
   method: "POST" | "PUT" | "DELETE",
   body?: unknown,
 ): Promise<unknown> {
-  const init: RequestInit = { method, cache: "no-store" };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
-  let response: Response;
-  try {
-    response = await fetch(url, init);
-  } catch (cause) {
-    throw new Error(`network error: ${cause instanceof Error ? cause.message : String(cause)}`);
-  }
-  if (!response.ok) {
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      let envelope: { error?: { kind: string; message: string; details?: Record<string, unknown> } };
-      try { envelope = (await response.json()) as typeof envelope; } catch { throw new Error(`HTTP ${response.status}`); }
-      if (envelope.error) {
-        throw new ApiError(response.status, {
-          error: { kind: envelope.error.kind, message: envelope.error.message, details: envelope.error.details ?? {} },
-        });
-      }
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return apiSend(url, method, body);
 }
 
 // ---- Topology editor --------------------------------------------------------
@@ -310,25 +237,7 @@ export async function postNodeRPC(
   network?: string,
 ): Promise<unknown> {
   const url = pathFor(`nodes/${encodeURIComponent(device)}/rpc/${subpath}`, network);
-  const init: RequestInit = { method: "POST", cache: "no-store" };
-  if (body && Object.keys(body).length > 0) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
-  const response = await fetch(url, init);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!response.ok) {
-    if (contentType.includes("application/json")) {
-      const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
-      if (errBody.error) {
-        throw new ApiError(response.status, {
-          error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
-        });
-      }
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return apiSend(url, "POST", body && Object.keys(body).length > 0 ? body : undefined);
 }
 
 // postInterfaceRPC POSTs to any per-interface newtron action.
@@ -341,23 +250,5 @@ export async function postInterfaceRPC(
 ): Promise<unknown> {
   const ifaceEnc = iface.replace(/\//g, "%2F");
   const url = pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(ifaceEnc)}/rpc/${subpath}`, network);
-  const init: RequestInit = { method: "POST", cache: "no-store" };
-  if (body && Object.keys(body).length > 0) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
-  const response = await fetch(url, init);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!response.ok) {
-    if (contentType.includes("application/json")) {
-      const errBody = (await response.json()) as { error?: { kind: string; message: string; details?: Record<string, unknown> } };
-      if (errBody.error) {
-        throw new ApiError(response.status, {
-          error: { kind: errBody.error.kind, message: errBody.error.message, details: errBody.error.details ?? {} },
-        });
-      }
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return apiSend(url, "POST", body && Object.keys(body).length > 0 ? body : undefined);
 }
