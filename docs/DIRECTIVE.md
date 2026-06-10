@@ -31,19 +31,19 @@ Everything else newtcon could surface (per-device CONFIG_DB browser, BGP/EVPN st
 | 1 | Multi-spec workspace at `/` (read all 10 spec types) | 1 | ✅ PR #116 |
 | 2 | Per-spec detail drawer (full newtron payload) | 1 | ✅ PR #117 |
 | 3 | Topology view + node inspector (every per-device read) | 2, 3 | ✅ PR #118 |
-| 4 | Drift indicator + drift detail panel | 5 | 🔄 in progress |
+| 4 | Drift indicator + drift detail panel | 5 | ✅ drift counts on topology SVG (PR #131); detail-panel iteration ongoing |
 | 5 | Reconcile flow (preview → atomic apply) | 6 | next |
-| 6 | Spec authoring + editing (POST/PUT/DELETE for each kind) | 1 → write | next |
-| 7 | Topology editor + interface→service binding | 2 → write | next |
-| 8 | Deploy from UI (newtlab-server lifecycle + SSE phases) | 4 | gated on newtron#53 |
+| 6 | Spec authoring + editing (POST/PUT/DELETE for each kind) | 1 → write | ✅ PR #131 (staging queue + workspace Save/Discard) |
+| 7 | Topology editor + interface→service binding | 2 → write | ✅ PRs #131 / #140 / #141 (port-mode + service binding; primitive composition kept in Specs tab) |
+| 8 | Deploy from UI (newtlab-server lifecycle + SSE phases) | 4 | ✅ unified-substrate phases 1–4: PRs #136 (deploy modal) / #137 (status badges) / #138 (lifecycle inspector) / #139 (Lab tab retired, Provision moves to toolbar) |
 
-When all 8 are shipped, the 6-step loop closes: operator can author → place → visualize → deploy → see drift → reconcile entirely from the browser.
+The 6-step loop closes end-to-end through the Topology tab today: operator authors specs in Specs → adds devices + links in Topology → binds services to interfaces → brings up as lab → watches booting → running badges → reconciles drift per-device.
 
 ## Capability discipline
 
 **Maximize what newtron / newtrun / newtlab offers. Leave no capability inaccessible.**
 
-For every newtron HTTP endpoint (~80 in `pkg/newtron/api/handler.go`), surface either:
+For every newtron HTTP endpoint exposed in `pkg/newtron/api/handler.go` (and the sibling engines' handlers), surface either:
 - A direct affordance in the UI (read or write), or
 - A click-through reachable from a parent affordance.
 
@@ -59,7 +59,7 @@ Authoritative sources for the three peer tools (all under `/home/aldrin/src/newt
 |------|------|------|
 | **newtron** | `pkg/newtron/`, `cmd/newtron-server/`, `cmd/newtron/` | `docs/newtron/` (hld, lld, api, intents, unified-pipeline-architecture) |
 | **newtrun** | `pkg/newtrun/`, `cmd/newtrun-server/`, `cmd/newtrun/` | `docs/newtrun/` (hld, lld, api, howto) |
-| **newtlab** | `pkg/newtlab/`, `cmd/newtlab/`, `cmd/newtlink/` | `docs/newtlab/` (hld, lld, howto). **No HTTP server today** — see newtron#53. |
+| **newtlab** | `pkg/newtlab/`, `cmd/newtlab/`, `cmd/newtlink/`, exposed via aggregated `bin/newt-server` | `docs/newtlab/` (hld, lld, howto) and `docs/newt-server.md` for the aggregated routing |
 | **Principles** | — | `docs/DESIGN_PRINCIPLES_NEWTRON.md` |
 
 The lead reads `pkg/newtron/api/handler.go` `buildMux()` directly when uncertain about which endpoints exist or what they do.

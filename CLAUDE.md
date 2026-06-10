@@ -34,11 +34,13 @@ When implementing a slice an agent may discover that newtron's HTTP API does not
 
 The survey is the operator's audit trail. Confabulated gap reports have shipped before; the survey forces verification.
 
-Example precedent: `newtron#53` (newtlab HTTP API gap for programmatic topology lifecycle).
+Example precedents: `newtron#122` (register-network shouldn't require operator-supplied spec_dir path; closed) and the historical `newtron#53` (the original newtlab HTTP API gap — also closed; newtlab now exposes HTTP via `bin/newt-server`).
 
 ## 3. File ownership map
 
 Every feature lives in one file. A reader must be able to guess where something is implemented from the file tree alone.
+
+newtcon's outward HTTP surface mirrors newtron's geometry: network-scoped resources nest under `/api/networks/{netID}/...` (per PR #135). Network-agnostic surfaces (`/api/health`, `/api/networks`, `/api/labs/...`) sit flat.
 
 ```
 cmd/newtcon-server/main.go    → process entry, flag parsing, server boot, route wiring
@@ -49,26 +51,43 @@ internal/server/              → HTTP routing infrastructure
   static.go                   → static asset serving + docs serving
 internal/handlers/            → one file per resource family
   health.go                   → /api/health
-  services.go                 → /api/services
-  network.go                  → /api/{ipvpns,macvpns,qos-policies,filters,...}
-  nodes.go                    → /api/topology + /api/nodes/{device}/...
+  networks.go                 → /api/networks (list + register)
+  services.go                 → /api/networks/{netID}/services
+  network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
+  nodes.go                    → /api/networks/{netID}/topology + /api/networks/{netID}/nodes/{device}/...
+  lab.go                      → /api/labs (newtlab lifecycle: list / status / deploy / destroy / provision / events / per-node start/stop)
 internal/newtronc/            → THE ONLY HTTP client of newtron-server
-  client.go                   → http.Client, base URL, retry/timeout
-  errors.go                   → typed errors (UnavailableError, NotFoundError, ...)
+  client.go                   → http.Client, base URL, engine-base helpers
+  errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError)
   services.go                 → service-related newtron calls
-  network.go                  → network-level spec list + ShowSpec
+  network.go                  → network-level spec list + ShowSpec + writes
   nodes.go                    → topology + per-device + per-interface calls
-internal/types/               → DTOs (request/response shapes)
+  newtlab.go                  → newtlab-engine calls (labs list/status/deploy/destroy/provision/events/node-lifecycle)
+internal/types/               → DTOs (request/response shapes) + error envelope kinds
 web/                          → frontend (vanilla HTML + TypeScript-as-tsc per ADR-0002)
   src/                        → source
     index.html                → root workspace HTML
-    app.ts                    → workspace entry + tab dispatch
+    app.ts                    → workspace entry + tab dispatch + topology view + drawers
     workspace.css             → workspace layout (consumes design-system tokens)
+    shell.ts                  → app shell (sidebar, tabs, status pill, palette)
+    api-path.ts               → /api/networks/{netID}/... URL helper (PR #135)
+    network-switcher.ts       → active-network dropdown (PR #133)
+    device-status.ts          → unified-substrate state resolver (PR #137)
+    staging.ts                → workspace-level pending-changes queue
+    topology-actions.ts       → declarative action specs (per-port: mode + service)
+    topology-action-panel.ts  → docked side-panel renderer for actions + interfaces
+    topology-actions-ui.ts    → floating right-click context menu
+    icons.ts                  → inline-SVG icon set (Lucide)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
-  test/                       → node:test files
+      services.ts             → /api/networks/{netID}/services
+      network.ts              → /api/networks/{netID}/{kind}/...
+      nodes.ts                → /api/networks/{netID}/{topology,nodes/...}
+      lab.ts                  → /api/labs/{name}/... (newtlab — not network-scoped)
+    services/                 → Specs-tab service detail views
+  test/                       → node:test files + puppeteer smokes (web/test/smoke/)
   dist/                       → tsc output (served by --web-dir)
-docs/                         → DIRECTIVE.md + adr/ + historical/
+docs/                         → DIRECTIVE.md + operator-philosophy.md + architecture.md (stub) + roadmap.md + adr/ + audits/ + historical/
 ```
 
 When adding new endpoints, find the existing handler file by resource family; do not create new handler files unless adding a new resource family.
@@ -100,7 +119,9 @@ Before changing any handler, the agent MUST:
 
 ## 7. Greenfield — no backwards compatibility
 
-newtcon is greenfield. No compatibility shims, no API versioning until v1, no deprecated aliases. Delete, don't deprecate.
+newtcon is greenfield. No compatibility shims, no deprecated aliases, no dual-format detection. Delete, don't deprecate.
+
+newtcon's outward `/api/*` surface is internal (browser ↔ newtcon-server in the same release); it has no version segment and changes in lockstep with the binary. The engine `/<service>/v1/...` paths (newtron, newtlab, newt-server) are newtron's external-API version surface — see DESIGN_PRINCIPLES_NEWTRON §40.
 
 ## What else lives where
 

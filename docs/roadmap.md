@@ -6,7 +6,7 @@ operator has tracked but not yet committed to newtcon's current scope.
 ## Purpose & scope discipline
 
 This document is the **considered list** of features not in newtcon's
-current scope (see [`../CLAUDE.md`](../CLAUDE.md) §Project Scope) but
+current scope (see [`docs/DIRECTIVE.md`](DIRECTIVE.md) §The operator workflow loop + §Slice plan) but
 worth tracking. It is **distinct from the working backlog** at
 <https://github.com/aldrin-isaac/newtcon/issues>:
 
@@ -22,10 +22,10 @@ tracked considerations: features that look principled and useful but
 that would dilute current focus if added now. Promotion to current
 scope is operator-driven; until then they live here.
 
-This document is also **distinct from `CLAUDE.md` §Out of Scope**.
-"Out of scope" items are rejected on principle (topology editing as a
-primary surface, multi-tenant features, mobile-first UI, etc.); they
-will not be added. Future-considered items are deliberate deferrals;
+This document is also **distinct from out-of-scope rejections**.
+Out-of-scope items are rejected on principle (multi-tenant features,
+mobile-first UI, anything that violates `docs/operator-philosophy.md`);
+they will not be added. Future-considered items are deliberate deferrals;
 they may be promoted to current scope when conditions are met.
 
 ## Promotion / demotion protocol
@@ -38,23 +38,21 @@ Each entry carries a `Status` field with one of three values:
   Entry may grow design detail; questions in "Open questions" are
   being closed.
 - **`scoped`** — promoted to current scope. The entry remains here
-  for traceability but is now driven by GitHub issues. `CLAUDE.md`
-  §Project Scope is updated to include the surface in current
-  scope. Issues are filed for the Architect to author Contract PRs.
+  for traceability but is now driven by GitHub issues. The directive
+  (`docs/DIRECTIVE.md` §Slice plan) is updated to reflect the new
+  scope. Issues are filed for the implementer.
 
-**Promotion** (`future → under-evaluation → scoped`) is an
-Architecture-class PR by the operator (not the autonomous team — the
-team works against current scope only). The promotion PR:
+**Promotion** (`future → under-evaluation → scoped`) is operator-driven.
+The promotion PR:
 
 1. Updates the entry's `Status` field.
-2. If promoting to `scoped`, adds the feature to `CLAUDE.md` §Project
-   Scope and files corresponding issues for the Architect.
+2. If promoting to `scoped`, adds the slice to `docs/DIRECTIVE.md`
+   §Slice plan and files corresponding issues.
 3. Records the promotion rationale in the entry (one paragraph).
 
 **Demotion** (any status → removed) is also operator-driven. Entries
 can be removed if the design choice is no longer aligned with the
-philosophy, or if the feature has been judged out-of-scope on
-principle (in which case it migrates to `CLAUDE.md` §Out of Scope).
+philosophy or has been judged out-of-scope on principle.
 
 ## Why a separate document, not GitHub issues
 

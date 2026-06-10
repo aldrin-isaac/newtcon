@@ -4,6 +4,14 @@ Status: Accepted
 Date: 2026-05-29
 Decision: newtcon's browser frontend is built as **vanilla HTML + TypeScript-as-typed-ES-modules**, with no SPA framework, no client-side framework runtime, and no bundler. The TypeScript compiler (`tsc`) is the only build dependency; output is plain ES modules served as static files by `newtcon-server`.
 
+> **Reference note (2026-06-10).** The ADR body cites `docs/architecture.md`
+> §Frontend framework selection / §Artifact 2 / §File ownership map / §Surfaces.
+> `docs/architecture.md` was reduced to a superseding stub on 2026-05-30 when
+> the 8-surface paradigm was retired (see `docs/DIRECTIVE.md`). The cited
+> sections live in `docs/historical/architecture_2026-05-29.md` — read links
+> below against that historical snapshot, not the current stub. The decision
+> itself remains in force.
+
 ## Context
 
 [`docs/architecture.md`](../architecture.md) §Frontend framework

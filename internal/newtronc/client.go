@@ -1,9 +1,8 @@
 // Package newtronc is the sole HTTP client of newtron-server in the newtcon
-// codebase. CLAUDE.md §newtron API Consumption Rule: "All newtron interaction
-// is mediated by one package, internal/newtronc/, which is the only HTTP client
-// of newtron-server in the codebase. CI enforces this isolation: no other
-// package may construct an http.Client or call http.Get/http.Post against
-// newtron-server's address."
+// codebase. CLAUDE.md §1 binds this: no other package may import newtron Go
+// packages, construct an http.Client, or call http.Get/http.Post against
+// newtron-server's address. The rule is enforced by convention + review +
+// grep (there is no CI gate today).
 //
 // Wire shape (newtron docs/newt-server.md). The base URL points at the
 // aggregated bin/newt-server, which fans out by prefix to three engines and
@@ -12,9 +11,11 @@
 // the prefix again.
 //
 //	/newtron/v1/...        newtron engine        →  c.newtronBase()
-//	/newtrun/v1/...        newtrun engine        →  c.newtrunBase()
-//	/newtlab/v1/...        newtlab engine        →  c.newtlabBase()
+//	/newtlab/v1/...        newtlab engine        →  c.newtlabBase()    (newtlab.go)
 //	/newt-server/v1/health server-level liveness →  c.newtServerBase()
+//
+// No c.newtrunBase() today — newtrun has no newtronc-mediated routes (see
+// note above newtronBase below).
 //
 // Concurrency: as of newtron PR #101 (see docs/newtron/hld.md §8) the API
 // layer holds no spec lock and per-engine atomicity is owned by the engine.
