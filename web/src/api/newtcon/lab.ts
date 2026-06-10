@@ -27,6 +27,7 @@ export interface NodeState {
   ssh_port: number;
   console_port: number;
   original_mgmt_ip: string;
+  ssh_user?: string;   // e.g. "admin" for SONiC, "root" for hosts
   host?: string;
   device_type?: string;
 }

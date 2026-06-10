@@ -467,6 +467,19 @@
 .topology-toolbar-btn--primary:hover {
   background: var(--color-action-primary-hover, var(--color-brand-600, #1d4ed8));
 }
+.topology-toolbar-btn--danger {
+  background: var(--color-surface);
+  color: var(--color-danger, #dc2626);
+  border-color: var(--color-danger, #dc2626);
+}
+.topology-toolbar-btn--danger:hover {
+  background: var(--color-danger, #dc2626);
+  color: #fff;
+}
+.topology-toolbar-btn--danger:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 
 /* Deploy-as-lab modal log panel (reuses .network-modal chrome) */
 .deploy-modal {
@@ -1004,6 +1017,79 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---- Device-inspector Lifecycle section (phase 3 unified-substrate) ---- */
+
+.lifecycle-section {
+  margin: var(--space-md) 0;
+  padding: var(--space-md);
+  background: var(--color-surface-recessed, #f7f8fa);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+.lifecycle-header {
+  margin: 0 0 var(--space-sm) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+.lifecycle-body { display: flex; flex-direction: column; gap: var(--space-sm); }
+.lifecycle-loading { color: var(--color-text-muted); font-size: var(--text-sm); margin: 0; }
+.lifecycle-hint   { color: var(--color-text-muted); font-size: var(--text-sm); margin: 0; }
+
+.lifecycle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  width: fit-content;
+  max-width: 100%;
+}
+.lifecycle-pill-state {
+  font-weight: 600;
+  text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  color: #fff;
+}
+.lifecycle-pill--running    .lifecycle-pill-state { background: var(--color-success); }
+.lifecycle-pill--booting    .lifecycle-pill-state { background: var(--color-warning, #d97706); }
+.lifecycle-pill--down       .lifecycle-pill-state { background: var(--color-danger, #dc2626); }
+.lifecycle-pill--unrealized .lifecycle-pill-state { background: var(--color-text-muted); }
+.lifecycle-pill-detail { color: var(--color-text-muted); font-size: var(--text-xs); }
+
+.lifecycle-actions { display: flex; gap: var(--space-sm); }
+
+.lifecycle-snippet {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xs) var(--space-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+.lifecycle-snippet-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-width: 60px;
+}
+.lifecycle-snippet-value {
+  flex: 1;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+.lifecycle-snippet-copy { flex-shrink: 0; }
 
 /* ---- Topology device-status indicators (phase 2 unified-substrate) ----- */
 /*
