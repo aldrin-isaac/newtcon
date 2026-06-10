@@ -1,0 +1,95 @@
+// Headless smoke for phase 4 of the unified-substrate direction:
+//   - Lab tab retired (no #tab-lab / #panel-lab in DOM)
+//   - Provision button now lives in the Topology toolbar (alongside
+//     Bring up as lab + Tear down lab)
+//   - Sidebar nav shrinks to Specs + Topology
+
+import puppeteer from "puppeteer-core";
+
+const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
+const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
+
+const ok = [], failed = [];
+function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
+
+const browser = await puppeteer.launch({
+  executablePath: CHROME,
+  headless: "new",
+  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  defaultViewport: { width: 1500, height: 950 },
+});
+const page = await browser.newPage();
+page.on("dialog", (d) => { void d.dismiss(); });
+
+try {
+  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await page.evaluate(() => localStorage.setItem("newtcon.activeNetwork", "2node-vs"));
+  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
+
+  // ── 1. Sidebar nav is Specs + Topology only ─────────────────────────────
+  const navLabels = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".nav-item .nav-label")).map((el) => el.textContent?.trim()));
+  expect(JSON.stringify(navLabels) === JSON.stringify(["Specs", "Topology"]),
+    `sidebar nav: ${JSON.stringify(navLabels)}`);
+
+  // ── 2. #tab-lab and #panel-lab are gone ─────────────────────────────────
+  const stragglers = await page.evaluate(() => ({
+    tabLab:   !!document.getElementById("tab-lab"),
+    panelLab: !!document.getElementById("panel-lab"),
+  }));
+  expect(!stragglers.tabLab && !stragglers.panelLab,
+    `no Lab tab/panel in DOM: ${JSON.stringify(stragglers)}`);
+
+  // ── 3. Topology toolbar has all 3 lab-lifecycle buttons ─────────────────
+  await page.click("#tab-topology");
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const toolbarBtns = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".topology-toolbar-btn"))
+      .map((b) => b.textContent?.trim()));
+  expect(toolbarBtns.includes("Bring up as lab"), `toolbar has Bring up as lab: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Provision"),       `toolbar has Provision: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Tear down lab"),   `toolbar has Tear down lab: ${JSON.stringify(toolbarBtns)}`);
+
+  // ── 4. Provision click triggers confirm + POST /api/labs/{net}/provision ─
+  let provisionConfirmSeen = false;
+  let provisionPostSeen = false;
+  page.removeAllListeners("dialog");
+  page.on("dialog", (d) => { provisionConfirmSeen = true; void d.dismiss(); });
+  page.on("request", (req) => {
+    if (req.method() === "POST" && req.url().includes("/api/labs/") && req.url().endsWith("/provision")) {
+      provisionPostSeen = true;
+    }
+  });
+
+  await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
+      .find((el) => el.textContent.trim() === "Provision");
+    b?.click();
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  expect(provisionConfirmSeen, "Provision click triggers confirm");
+  expect(!provisionPostSeen, "dismissed confirm → no POST (operator stayed safe)");
+
+  // Re-click and accept to verify the POST shape on the wire.
+  page.removeAllListeners("dialog");
+  page.on("dialog", (d) => { void d.accept(); });
+  await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
+      .find((el) => el.textContent.trim() === "Provision");
+    b?.click();
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  expect(provisionPostSeen, "accepted confirm → POST /api/labs/{net}/provision observed");
+
+  await page.screenshot({ path: "/tmp/newtcon-smoke-phase4.png" });
+
+  console.log("");
+  if (failed.length === 0) console.log("✅ all checks passed");
+  else { console.log(`❌ ${failed.length} failed`); process.exitCode = 1; }
+} catch (err) {
+  console.error("test threw:", err.stack || err.message);
+  process.exitCode = 1;
+} finally {
+  await browser.close();
+}

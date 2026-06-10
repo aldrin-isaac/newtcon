@@ -13,11 +13,6 @@
 
 import { ApiError } from "./services.js";
 
-// LabListItem is one entry from GET /api/labs.
-export interface LabListItem {
-  name: string;
-}
-
 // NodeState mirrors pkg/newtlab/state.go NodeState. Only the fields we
 // render are typed; additional fields come through as unknown.
 export interface NodeState {
@@ -134,12 +129,6 @@ async function postLab(url: string, body?: unknown): Promise<unknown> {
   }
 
   return response.json();
-}
-
-// fetchLabs returns all known labs from GET /api/labs.
-export async function fetchLabs(): Promise<LabListItem[]> {
-  const data = await fetchLabRaw("/api/labs");
-  return data as LabListItem[];
 }
 
 // fetchLabStatus returns the LabState for one lab from
