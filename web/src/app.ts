@@ -1661,6 +1661,117 @@ function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unk
   container.appendChild(tableList);
 }
 
+// Phase 3: Lifecycle section in the device inspector. Substrate-agnostic
+// state + substrate-aware actions:
+//   - Lab VM running   → Stop button + SSH/console snippets
+//   - Lab VM stopped   → Start button
+//   - Lab VM booting   → state pill only (transition in progress)
+//   - Not realized     → guidance text pointing at "Bring up as lab"
+//   - Reachable via probe (not lab) → state pill only (start/stop n/a)
+//
+// Phase 4 may move this into a standalone module if the lifecycle surface
+// grows further (console viewer, log tail, etc.).
+async function renderLifecycleSection(host: HTMLElement, device: string): Promise<void> {
+  host.textContent = "";
+  host.appendChild(el("p", { className: "lifecycle-header" }, "Lifecycle"));
+  const body = el("div", { className: "lifecycle-body" });
+  body.appendChild(el("p", { className: "lifecycle-loading" }, "Checking substrate…"));
+  host.appendChild(body);
+
+  const network = activeNetwork();
+  let labState: LabState | null = null;
+  try { labState = await fetchLabStatus(network); } catch { /* lab unknown */ }
+  let online: boolean | undefined;
+  try { await fetchNodeInfo(device); online = true; } catch { online = false; }
+
+  const status = resolveDeviceStatus(device, labState, online);
+  const labNode = labState?.nodes?.[device];
+
+  body.textContent = "";
+
+  // State pill: substrate-agnostic state on the left, substrate detail on the
+  // right (the same content the topology badge tooltip shows).
+  const pill = el("div", { className: `lifecycle-pill lifecycle-pill--${status.state}` });
+  pill.appendChild(el("span", { className: "lifecycle-pill-state" }, status.state));
+  pill.appendChild(el("span", { className: "lifecycle-pill-detail" }, status.detail));
+  body.appendChild(pill);
+
+  if (status.state === "unrealized") {
+    body.appendChild(el("p", { className: "lifecycle-hint" },
+      `No substrate is realizing ${device} yet. Click "Bring up as lab" in the topology toolbar to deploy this network as VMs.`));
+    return;
+  }
+
+  // Start/Stop — only meaningful for lab-managed VMs.
+  if (labNode) {
+    const actions = el("div", { className: "lifecycle-actions" });
+    if (status.state === "running" || status.state === "booting") {
+      const stop = el("button", { type: "button", className: "btn btn-danger btn-sm" }, "Stop VM");
+      stop.addEventListener("click", () => {
+        if (!window.confirm(`Stop VM "${device}" in lab "${network}"? The device will go offline.`)) return;
+        stop.setAttribute("disabled", "");
+        stop.textContent = "Stopping…";
+        postLabStopNode(network, device)
+          .then(() => renderLifecycleSection(host, device))
+          .catch((err) => {
+            stop.removeAttribute("disabled");
+            stop.textContent = "Stop VM";
+            alert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      });
+      actions.appendChild(stop);
+    }
+    if (status.state === "down") {
+      const start = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Start VM");
+      start.addEventListener("click", () => {
+        start.setAttribute("disabled", "");
+        start.textContent = "Starting…";
+        postLabStartNode(network, device)
+          .then(() => renderLifecycleSection(host, device))
+          .catch((err) => {
+            start.removeAttribute("disabled");
+            start.textContent = "Start VM";
+            alert(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      });
+      actions.appendChild(start);
+    }
+    body.appendChild(actions);
+
+    // SSH/console snippets — only when the VM is up and ports are known.
+    if (status.state === "running" && labNode.ssh_port) {
+      const sshUser = labNode.ssh_user || "admin";
+      const sshCmd = `ssh -p ${labNode.ssh_port} ${sshUser}@localhost`;
+      body.appendChild(buildCopyRow("SSH", sshCmd));
+    }
+    if (labNode.console_port) {
+      const consoleCmd = `telnet localhost ${labNode.console_port}`;
+      body.appendChild(buildCopyRow("Console", consoleCmd));
+    }
+  }
+}
+
+function buildCopyRow(label: string, value: string): HTMLElement {
+  const row = el("div", { className: "lifecycle-snippet" });
+  row.appendChild(el("span", { className: "lifecycle-snippet-label" }, label));
+  const code = el("code", { className: "lifecycle-snippet-value" }, value);
+  row.appendChild(code);
+  const copyBtn = el("button", {
+    type: "button",
+    className: "btn btn-ghost btn-sm lifecycle-snippet-copy",
+    title: `Copy ${label.toLowerCase()} command`,
+  }, "Copy");
+  copyBtn.addEventListener("click", () => {
+    void navigator.clipboard.writeText(value).then(() => {
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = "Copied";
+      window.setTimeout(() => { copyBtn.textContent = orig; }, 1200);
+    });
+  });
+  row.appendChild(copyBtn);
+  return row;
+}
+
 // openNodeDrawer opens the detail drawer for a device and renders node-inspector
 // sub-tabs. Each sub-tab fetches its data lazily on first activation.
 function openNodeDrawer(device: string): void {
@@ -1675,6 +1786,13 @@ function openNodeDrawer(device: string): void {
   // Header.
   content.appendChild(el("p", { className: "drawer-kind" }, "Device"));
   content.appendChild(el("h2", { className: "drawer-name" }, device));
+
+  // Phase 3: Lifecycle section — substrate badge + start/stop + SSH/console
+  // snippets when the device is a lab VM. Renders empty placeholder first;
+  // populated asynchronously from newtlab status.
+  const lifecycleSection = el("section", { className: "lifecycle-section" });
+  content.appendChild(lifecycleSection);
+  void renderLifecycleSection(lifecycleSection, device);
 
   // Sub-tab strip.
   const tabStrip = el("nav", { className: "node-tabs", role: "tablist", ariaLabel: "Device information" });
@@ -2187,6 +2305,33 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       openDeployModal(network);
     });
     toolbar.appendChild(bringUpBtn);
+
+    // Tear down — mirror of Bring up. Destructive: extra-warning confirm,
+    // danger styling. Phase 3 ships this in the toolbar so the operator never
+    // has to leave the Topology tab for lab lifecycle.
+    const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--danger" }, "Tear down lab");
+    tearDownBtn.addEventListener("click", () => {
+      const network = activeNetwork();
+      if (!window.confirm(`Tear down lab "${network}"? This will destroy all VMs and their state. The topology spec stays intact.`)) return;
+      tearDownBtn.setAttribute("disabled", "");
+      tearDownBtn.textContent = "Tearing down…";
+      postLabDestroy(network)
+        .then(() => {
+          tearDownBtn.removeAttribute("disabled");
+          tearDownBtn.textContent = "Tear down lab";
+          // The 5s topology poll will pick up the new state within 5s and
+          // patch device badges back to "unrealized"; force an immediate
+          // re-render too so the operator sees the change without waiting.
+          mountTopologyTab(root);
+        })
+        .catch((err) => {
+          tearDownBtn.removeAttribute("disabled");
+          tearDownBtn.textContent = "Tear down lab";
+          const msg = err instanceof Error ? err.message : String(err);
+          alert(`Tear down failed: ${msg}`);
+        });
+    });
+    toolbar.appendChild(tearDownBtn);
 
     root.appendChild(toolbar);
 
