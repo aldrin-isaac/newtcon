@@ -147,7 +147,7 @@ function handleActionInvoke(action: ActionDef, ctx: MenuContext): void {
   const needsForm = (action.fields ?? []).length > 0;
   if (!needsForm) {
     if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
     if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
     queueFromMenu(action, ctx, {});
     ctx.onComplete?.();
@@ -238,7 +238,7 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
     }
 
     if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to send to newtron.`)) return;
+    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
     if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
 
     try {
@@ -246,7 +246,7 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
       // Show a brief success summary, then close the drawer.
       const ok = document.createElement("p");
       ok.className = "form-success";
-      ok.textContent = "Queued. Click Apply changes (per-device or workspace) to send to newtron.";
+      ok.textContent = "Queued. Click Apply changes (per-device or workspace) to apply.";
       content.appendChild(ok);
       ctx.onComplete?.();
       setTimeout(() => closeDrawer(), 700);
