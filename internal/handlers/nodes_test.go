@@ -47,7 +47,7 @@ func TestTopology_Success(t *testing.T) {
 }
 
 // TestTopology_Unavailable verifies that a 503 from newtron yields a
-// newtron_unavailable error envelope from /api/topology.
+// newtron_unavailable error envelope from /api/networks/{netID}/topology.
 func TestTopology_Unavailable(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)

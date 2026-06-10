@@ -8,10 +8,9 @@
 //	                       (supports scaffold:true to create the spec dir
 //	                       and register in one call — newtron PR #110)
 //
-// The active network for read/write traffic is selected per-request via the
-// ?net=<id> query parameter (server.NetworkSelector middleware). These two
-// routes are the *meta* surface for managing networks themselves; they
-// ignore ?net=.
+// The active network for read/write traffic is positional in the URL path
+// (/api/networks/{netID}/..., per PR #135). These two routes are the *meta*
+// surface for managing networks themselves; they carry no netID segment.
 
 package handlers
 

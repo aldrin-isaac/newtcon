@@ -158,7 +158,7 @@ func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (in
 // LabListLabs calls GET /newtlab/v1/labs and returns the raw
 // "data" payload (an array of {"name":string} objects).
 //
-// Verified: pkg/newtlab/api/labs.go handleListTopologies
+// Verified: pkg/newtlab/api/labs.go handleListLabs
 func (c *Client) LabListLabs(ctx context.Context) (json.RawMessage, error) {
 	return c.newtlabGet(ctx, "/"+newtlabLabsSegment)
 }

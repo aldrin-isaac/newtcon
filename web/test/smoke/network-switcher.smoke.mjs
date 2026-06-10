@@ -2,7 +2,10 @@
 // Verifies:
 //   1. Header trigger renders with the active network label
 //   2. Dropdown lists registered networks
-//   3. Fetches to /api/* automatically include ?net=<active>
+//   3. Network-scoped /api/* calls render as /api/networks/{netID}/...
+//      (the path-substitution that replaced the ?net= fetch interceptor
+//      in PR #135), and the network-agnostic exclusions (/api/health) are
+//      not given the prefix
 //   4. The "+ New topology" modal can be opened (we don't actually
 //      scaffold — that would write to disk on the operator's box)
 
