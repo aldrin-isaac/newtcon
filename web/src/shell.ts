@@ -87,7 +87,6 @@ function setupBreadcrumb(): void {
   const labelByTab: Record<string, string> = {
     "tab-specs": "Specs",
     "tab-topology": "Topology",
-    "tab-lab": "Lab",
   };
   const crumb = document.getElementById("crumb-view");
   for (const id of Object.keys(labelByTab)) {
@@ -105,7 +104,7 @@ function setupBreadcrumb(): void {
 // ---- Sidebar nav active-state ---------------------------------------------
 
 function setupSidebarActiveStates(): void {
-  const ids = ["tab-specs", "tab-topology", "tab-lab"];
+  const ids = ["tab-specs", "tab-topology"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     btn?.addEventListener(
@@ -191,7 +190,6 @@ function setupPalette(): void {
     paletteItems.push(
       { label: "Go to Specs", kind: "View", action: () => document.getElementById("tab-specs")?.click() },
       { label: "Go to Topology", kind: "View", action: () => document.getElementById("tab-topology")?.click() },
-      { label: "Go to Lab", kind: "View", action: () => document.getElementById("tab-lab")?.click() },
     );
     document.querySelectorAll<HTMLElement>(".spec-row-name").forEach((row) => {
       const text = row.textContent?.trim() ?? "";
