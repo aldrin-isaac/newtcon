@@ -12,7 +12,8 @@
 // All forms POST through the same generic catch-all (NodeRPC / InterfaceRPC).
 
 import { iconSVG } from "./icons.js";
-import { ApiError, ErrorEnvelope } from "./api/newtcon/services.js";
+import { ApiError } from "./api/newtcon/services.js";
+import { apiFetch, apiSend } from "./api/newtcon/_transport.js";
 import { apiPath } from "./api-path.js";
 import {
   NODE_ACTIONS,
@@ -32,43 +33,15 @@ import {
 
 // ---- HTTP plumbing --------------------------------------------------------
 
-async function jsonFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const resp = await fetch(path, init);
-  const text = await resp.text();
-  let parsed: unknown = null;
-  if (text.length > 0) {
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-  }
-  if (!resp.ok) {
-    const inner = (parsed as { error?: { kind?: string; message?: string; details?: Record<string, unknown> } })?.error;
-    const envelope: ErrorEnvelope = {
-      error: {
-        kind: inner?.kind ?? "internal",
-        message: inner?.message ?? (typeof parsed === "string" && parsed !== "" ? parsed : resp.statusText),
-        details: inner?.details ?? {},
-      },
-    };
-    throw new ApiError(resp.status, envelope);
-  }
-  return parsed;
-}
-
 export async function postNodeRPC(device: string, subpath: string, body: Record<string, unknown>): Promise<unknown> {
-  return jsonFetch(apiPath(`nodes/${encodeURIComponent(device)}/rpc/${subpath}`), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
+  return apiSend(apiPath(`nodes/${encodeURIComponent(device)}/rpc/${subpath}`), "POST", body ?? {});
 }
 
 export async function postInterfaceRPC(device: string, iface: string, subpath: string, body: Record<string, unknown>): Promise<unknown> {
-  return jsonFetch(
+  return apiSend(
     apiPath(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(iface)}/rpc/${subpath}`),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-    },
+    "POST",
+    body ?? {},
   );
 }
 
@@ -95,7 +68,7 @@ async function fetchSource(source: string): Promise<string[]> {
   const url = sourceURL(kind, scope);
   if (!url) return [];
   try {
-    const data = await jsonFetch(url);
+    const data = await apiFetch(url);
     const names = extractNames(data);
     sourceCache.set(source, names);
     return names;
@@ -394,11 +367,7 @@ function renderLinkSection(a: string, z: string, deps: PanelDeps): HTMLElement {
     submit.disabled = true;
     submit.textContent = "Adding…";
     try {
-      await jsonFetch(apiPath("topology/links"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ a: `${a}:${aIface}`, z: `${z}:${zIface}` }),
-      });
+      await apiSend(apiPath("topology/links"), "POST", { a: `${a}:${aIface}`, z: `${z}:${zIface}` });
       deps.onLinkRequest(a, z);
       deps.onChange();
     } catch (e) {

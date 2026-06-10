@@ -15,6 +15,7 @@
 // documented in web/README.md.
 
 import { apiPath } from "../../api-path.js";
+import { apiFetch } from "./_transport.js";
 
 /** ServiceHealth mirrors internal/types/services.go ServiceHealth. */
 export interface ServiceHealth {
@@ -91,30 +92,8 @@ export class ApiError extends Error {
  */
 export async function fetchServices(network?: string): Promise<ServiceListResponse> {
   const url = network ? apiPath.network(network, "services") : apiPath("services");
-  let response: Response;
-  try {
-    // cache: "no-store" — no client-side caching per newtcon#105 criterion.
-    // The services list reflects live newtron state; a stale cached copy
-    // would silently hide additions or removals (invariant #9).
-    response = await fetch(url, { cache: "no-store" });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error("network error reaching newtcon-server: " + msg);
-  }
-
-  if (!response.ok) {
-    let envelope: ErrorEnvelope;
-    try {
-      envelope = (await response.json()) as ErrorEnvelope;
-    } catch {
-      throw new Error(
-        "newtcon-server returned HTTP " +
-          response.status +
-          " with non-JSON body"
-      );
-    }
-    throw new ApiError(response.status, envelope);
-  }
-
-  return (await response.json()) as ServiceListResponse;
+  // cache: "no-store" — no client-side caching per newtcon#105 criterion.
+  // The services list reflects live newtron state; a stale cached copy
+  // would silently hide additions or removals (invariant #9).
+  return (await apiFetch(url, { cache: "no-store" })) as ServiceListResponse;
 }
