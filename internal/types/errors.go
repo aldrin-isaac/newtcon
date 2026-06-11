@@ -42,6 +42,12 @@ const (
 	// attribute to a recognized substrate cause. The only durable handle is the
 	// correlation_id. See API_CONTRACT.md §details for kind: "internal".
 	KindInternal ErrorKind = "internal"
+
+	// KindAuthorizationFailure is returned when newtron-server refuses an
+	// operation due to authorization enforcement (newtron PR #133 / newtcon#143).
+	// Details carry caller / permission / resource so the UI can render an
+	// operator-honest "X lacks Y on Z" message.
+	KindAuthorizationFailure ErrorKind = "authorization_failure"
 )
 
 // ErrorEnvelope is the top-level wrapper for every non-2xx response body.

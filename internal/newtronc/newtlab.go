@@ -75,6 +75,8 @@ func (c *Client) newtlabGet(ctx context.Context, path string) (json.RawMessage, 
 		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
 	case resp.StatusCode == http.StatusConflict:
 		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode == http.StatusForbidden:
+		return nil, decodeAuthorizationError(resp.StatusCode, body)
 	case resp.StatusCode >= 500:
 		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	default:
@@ -136,6 +138,8 @@ func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (in
 		return resp.StatusCode, nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
 	case resp.StatusCode == http.StatusConflict:
 		return resp.StatusCode, nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode == http.StatusForbidden:
+		return resp.StatusCode, nil, decodeAuthorizationError(resp.StatusCode, body)
 	case resp.StatusCode >= 500:
 		return resp.StatusCode, nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	default:

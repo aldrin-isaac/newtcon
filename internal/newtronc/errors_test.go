@@ -1,0 +1,136 @@
+package newtronc
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// Pins the wire shape the upstream newtron regression test
+// (pkg/newtron/api/authorization_test.go TestAuthorization_DenyWireShape)
+// promises. If newtron changes these JSON keys, this test breaks first.
+func TestDecodeAuthorizationError_WithResource(t *testing.T) {
+	body := []byte(`{
+	  "data":  { "caller": "alice", "permission": "spec.author", "resource": "svc-b" },
+	  "error": "authorization denied: alice lacks spec.author on svc-b"
+	}`)
+
+	got := decodeAuthorizationError(http.StatusForbidden, body)
+
+	if got.StatusCode != 403 {
+		t.Errorf("StatusCode: want 403, got %d", got.StatusCode)
+	}
+	if got.Caller != "alice" {
+		t.Errorf("Caller: want %q, got %q", "alice", got.Caller)
+	}
+	if got.Permission != "spec.author" {
+		t.Errorf("Permission: want %q, got %q", "spec.author", got.Permission)
+	}
+	if got.Resource != "svc-b" {
+		t.Errorf("Resource: want %q, got %q", "svc-b", got.Resource)
+	}
+	// Body is preserved verbatim for diagnostics.
+	if !strings.Contains(string(got.Body), `"resource": "svc-b"`) {
+		t.Errorf("Body should be the original envelope; got %q", string(got.Body))
+	}
+}
+
+func TestDecodeAuthorizationError_NoResource(t *testing.T) {
+	body := []byte(`{
+	  "data":  { "caller": "mallory", "permission": "admin" },
+	  "error": "authorization denied: mallory lacks admin"
+	}`)
+
+	got := decodeAuthorizationError(http.StatusForbidden, body)
+
+	if got.Caller != "mallory" {
+		t.Errorf("Caller: want %q, got %q", "mallory", got.Caller)
+	}
+	if got.Permission != "admin" {
+		t.Errorf("Permission: want %q, got %q", "admin", got.Permission)
+	}
+	if got.Resource != "" {
+		t.Errorf("Resource: want empty, got %q", got.Resource)
+	}
+}
+
+func TestDecodeAuthorizationError_BadEnvelopeFallback(t *testing.T) {
+	// Newtron returned 403 but with a non-envelope body — possibly a proxy
+	// or a deployment running an older newtron. Returned error still
+	// carries the status + body for diagnostics, but the structured fields
+	// are empty.
+	body := []byte(`Forbidden`)
+
+	got := decodeAuthorizationError(http.StatusForbidden, body)
+
+	if got.StatusCode != 403 {
+		t.Errorf("StatusCode: want 403, got %d", got.StatusCode)
+	}
+	if got.Caller != "" || got.Permission != "" || got.Resource != "" {
+		t.Errorf("structured fields should be empty on malformed envelope; got %+v", got)
+	}
+	if string(got.Body) != "Forbidden" {
+		t.Errorf("Body: want %q, got %q", "Forbidden", string(got.Body))
+	}
+}
+
+func TestAuthorizationError_Error_WithResource(t *testing.T) {
+	e := &AuthorizationError{Caller: "alice", Permission: "spec.author", Resource: "svc-b"}
+	want := "authorization denied: alice lacks spec.author on svc-b"
+	if e.Error() != want {
+		t.Errorf("Error():\n  want %q\n  got  %q", want, e.Error())
+	}
+}
+
+func TestAuthorizationError_Error_NoResource(t *testing.T) {
+	e := &AuthorizationError{Caller: "mallory", Permission: "admin"}
+	want := "authorization denied: mallory lacks admin"
+	if e.Error() != want {
+		t.Errorf("Error():\n  want %q\n  got  %q", want, e.Error())
+	}
+}
+
+// End-to-end: ListNetworks against a fake upstream returning 403 with the
+// typed envelope. The returned error must be *AuthorizationError with all
+// fields populated, not "unexpected status 403".
+func TestListNetworks_Forbidden(t *testing.T) {
+	envelope := map[string]any{
+		"data": map[string]string{
+			"caller":     "alice",
+			"permission": "network.read",
+			"resource":   "test-network",
+		},
+		"error": "authorization denied: alice lacks network.read on test-network",
+	}
+	body, _ := json.Marshal(envelope)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write(body)
+	}))
+	defer upstream.Close()
+
+	c := New(upstream.URL)
+	_, err := c.ListNetworks(context.Background())
+
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	authErr, ok := err.(*AuthorizationError)
+	if !ok {
+		t.Fatalf("want *AuthorizationError, got %T: %v", err, err)
+	}
+	if authErr.Caller != "alice" {
+		t.Errorf("Caller: want %q, got %q", "alice", authErr.Caller)
+	}
+	if authErr.Permission != "network.read" {
+		t.Errorf("Permission: want %q, got %q", "network.read", authErr.Permission)
+	}
+	if authErr.Resource != "test-network" {
+		t.Errorf("Resource: want %q, got %q", "test-network", authErr.Resource)
+	}
+}
