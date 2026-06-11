@@ -58,6 +58,7 @@ import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 // instead, so we don't import them here.
 import { NODE_ACTIONS } from "./topology-actions.js";
 import { showContextMenu } from "./topology-actions-ui.js";
+import { iconSVG } from "./icons.js";
 import { renderActionPanel } from "./topology-action-panel.js";
 import {
   enqueueSpecCreate,
@@ -268,7 +269,7 @@ function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues
     group.appendChild(label);
 
     if (field.type === "select" && field.options) {
-      const select = el("select", { className: "form-control", id: "field-" + field.name }) as HTMLSelectElement;
+      const select = el("select", { className: "form-control", id: "field-" + field.name, name: field.name }) as HTMLSelectElement;
       if (!field.required) {
         select.appendChild(el("option", { value: "" }, "— optional —") as HTMLOptionElement);
       }
@@ -281,6 +282,7 @@ function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues
       const input = el("input", {
         className: "form-control",
         id: "field-" + field.name,
+        name: field.name,
         type: field.type === "number" ? "number" : "text",
         placeholder: field.placeholder ?? "",
       }) as HTMLInputElement;
@@ -1939,9 +1941,71 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
 
 // ---- Topology write forms ---------------------------------------------------
 
-// openAddDeviceDrawer opens the detail drawer with a form to add a device.
-// onSuccess is called after the device is added to refresh the topology.
-function openAddDeviceDrawer(onSuccess: () => void): void {
+// showCanvasContextMenu pops a small floating menu at (x, y) with a single
+// "Create node" entry. Used by the empty-canvas right-click handler. Reuses
+// .topo-menu / .topo-menu-item CSS from the per-device menu so the visual
+// language is consistent.
+function showCanvasContextMenu(x: number, y: number, onCreated: () => void): void {
+  // Remove any prior canvas menu.
+  document.querySelectorAll(".topo-menu--canvas").forEach((m) => m.remove());
+
+  const menu = el("div", { className: "topo-menu topo-menu--canvas", role: "menu" });
+  const item = el("button", { type: "button", className: "topo-menu-item" });
+  const icon = el("span", { className: "topo-menu-item-icon" });
+  icon.innerHTML = iconSVG("plus");
+  item.appendChild(icon);
+  item.appendChild(el("span", { className: "topo-menu-item-label" }, "Create node"));
+  item.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.remove();
+    openCreateNodeDrawer(onCreated);
+  });
+  menu.appendChild(item);
+
+  document.body.appendChild(menu);
+
+  // Position with viewport-bound clamp (mirror positionMenu in topology-actions-ui).
+  const margin = 8;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - margin);
+  const top = Math.min(y, window.innerHeight - rect.height - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+
+  // Auto-dismiss on outside click or Escape.
+  const dismiss = (): void => {
+    menu.remove();
+    document.removeEventListener("click", outsideClick, true);
+    document.removeEventListener("keydown", onEsc, true);
+  };
+  const outsideClick = (ev: MouseEvent): void => {
+    if (ev.target instanceof Node && menu.contains(ev.target)) return;
+    dismiss();
+  };
+  const onEsc = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") dismiss();
+  };
+  // Defer so the contextmenu event that opened us doesn't immediately close.
+  setTimeout(() => {
+    document.addEventListener("click", outsideClick, true);
+    document.addEventListener("keydown", onEsc, true);
+  }, 0);
+}
+
+// openCreateNodeDrawer opens the detail drawer with a form to create a node.
+//
+// A node is a single operator-domain concept that newtron stores in two
+// places: (a) `topology.json` as a TopologyDevice entry (steps + ports —
+// initially empty) and (b) `profiles/{name}.json` as a DeviceProfile
+// (mgmt_ip + loopback_ip + zone, plus optional platform/ssh_user). The
+// drawer stages BOTH writes so every node always has a profile — newtron
+// matches them by name. The staging queue's apply order already runs spec
+// creates before topology adds, so the profile lands first.
+//
+// Zone is a required dropdown — newtron's DeviceProfile.Zone must reference
+// an existing entry in network.json zones; freeform input would let the
+// operator queue an invalid profile that fails on Save.
+function openCreateNodeDrawer(onSuccess: () => void): void {
   const drawer = document.getElementById("detail-drawer");
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
@@ -1951,10 +2015,21 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
   content.textContent = "";
 
   content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
-  content.appendChild(el("h2", { className: "drawer-name" }, "Add device"));
+  content.appendChild(el("h2", { className: "drawer-name" }, "Create node"));
+  content.appendChild(el("p", { className: "drawer-hint" },
+    "Stages two writes: a profile (identity) and a topology entry (steps + ports). " +
+    "Both land on Save. Disconnected nodes are fine — links are added separately."));
 
+  // Build the form first; populate zone/platform dropdowns asynchronously so
+  // the drawer opens immediately. If newtron is unreachable, the dropdowns
+  // fall back to text inputs so the operator can still type.
   const fields: FieldDef[] = [
-    { name: "name", label: "Device name", type: "text", required: true, placeholder: "e.g. spine1" },
+    { name: "name",         label: "Node name",         type: "text",   required: true, placeholder: "e.g. spine1" },
+    { name: "mgmt_ip",      label: "Management IP",     type: "text",   required: true, placeholder: "e.g. 192.168.1.1" },
+    { name: "loopback_ip",  label: "Loopback IP",       type: "text",   required: true, placeholder: "e.g. 10.0.0.1" },
+    { name: "zone",         label: "Zone",              type: "select", required: true, options: ["Loading…"] },
+    { name: "platform",     label: "Platform",          type: "select",                  options: [""] },
+    { name: "ssh_user",     label: "SSH user (opt)",    type: "text",   placeholder: "e.g. admin" },
   ];
   const { form, getValues } = buildFormFields(fields);
   content.appendChild(form);
@@ -1962,33 +2037,80 @@ function openAddDeviceDrawer(onSuccess: () => void): void {
   const errorOut = el("div", { className: "form-error-out" });
   content.appendChild(errorOut);
 
-  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add device");
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Stage node");
   content.appendChild(submitBtn);
 
-  submitBtn.addEventListener("click", async () => {
+  // Populate dropdowns from live network specs.
+  void (async () => {
+    try {
+      const zones = await fetchSpecList("zones");
+      const zoneSelect = form.querySelector('select[name="zone"]') as HTMLSelectElement | null;
+      if (zoneSelect) {
+        zoneSelect.textContent = "";
+        if (zones.length === 0) {
+          zoneSelect.appendChild(new Option("(no zones defined — add one in Specs first)", ""));
+          zoneSelect.disabled = true;
+        } else {
+          zoneSelect.appendChild(new Option("Select a zone…", ""));
+          for (const z of zones) zoneSelect.appendChild(new Option(z, z));
+        }
+      }
+    } catch { /* leave the dropdown showing "Loading…"; submit will surface the error */ }
+    try {
+      const platforms = await fetchSpecList("platforms");
+      const platformSelect = form.querySelector('select[name="platform"]') as HTMLSelectElement | null;
+      if (platformSelect) {
+        platformSelect.textContent = "";
+        platformSelect.appendChild(new Option("(none)", ""));
+        for (const p of platforms) platformSelect.appendChild(new Option(p, p));
+      }
+    } catch { /* same — platform is optional */ }
+  })();
+
+  submitBtn.addEventListener("click", () => {
     errorOut.textContent = "";
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Queued";
     try {
       const values = getValues();
-      const name = values["name"] as string;
-      if (!name) {
-        errorOut.appendChild(el("p", { className: "panel-error" }, "Device name is required."));
-        submitBtn.disabled = false;
-        submitBtn.textContent = "Add device";
+      const name        = String(values["name"] ?? "").trim();
+      const mgmtIP      = String(values["mgmt_ip"] ?? "").trim();
+      const loopbackIP  = String(values["loopback_ip"] ?? "").trim();
+      const zone        = String(values["zone"] ?? "").trim();
+      const platform    = String(values["platform"] ?? "").trim();
+      const sshUser     = String(values["ssh_user"] ?? "").trim();
+
+      if (!name || !mgmtIP || !loopbackIP || !zone) {
+        errorOut.appendChild(el("p", { className: "panel-error" },
+          "Node name, management IP, loopback IP, and zone are all required."));
         return;
       }
-      // Stage rather than POST. Final body is materialised on Save.
+
+      const profileBody: Record<string, unknown> = {
+        mgmt_ip: mgmtIP,
+        loopback_ip: loopbackIP,
+        zone,
+      };
+      if (platform) profileBody["platform"] = platform;
+      if (sshUser) profileBody["ssh_user"] = sshUser;
+
+      // Stage profile first (apply order runs spec creates before topology
+      // adds, so the profile lands before the topology entry references it
+      // by name).
+      enqueueSpecCreate("profiles", name, profileBody);
       enqueueTopologyAddDevice(name, { steps: [], ports: {} });
-      content.insertBefore(el("p", { className: "form-success" }, "Device queued (green). Click Save in the header to apply."), submitBtn);
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Staged";
+      content.insertBefore(
+        el("p", { className: "form-success" },
+          `Node "${name}" staged (profile + topology). Click Save in the header to apply.`),
+        submitBtn,
+      );
       onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
         drawer.classList.remove("open");
-      }, 800);
+      }, 1000);
     } catch (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Add device";
       errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
   });
@@ -2276,11 +2398,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Build toolbar with Add device and Add link buttons.
     const toolbar = el("div", { className: "topology-toolbar" });
 
-    const addDeviceBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add device");
-    addDeviceBtn.addEventListener("click", () => {
-      openAddDeviceDrawer(() => mountTopologyTab(root));
+    const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Create node");
+    createNodeBtn.addEventListener("click", () => {
+      openCreateNodeDrawer(() => mountTopologyTab(root));
     });
-    toolbar.appendChild(addDeviceBtn);
+    toolbar.appendChild(createNodeBtn);
 
     const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
     addLinkBtn.addEventListener("click", () => {
@@ -2479,6 +2601,17 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         renderGraph();
         renderPanel();
       }
+    });
+
+    // Right-click on empty canvas → "Create node" affordance. Per-device
+    // right-click is handled inside renderTopologySVG via onNodeContextMenu;
+    // here we only handle clicks on the canvas background (graphSlot or
+    // the <svg> element itself), not on device <g> elements.
+    graphSlot.addEventListener("contextmenu", (e) => {
+      const tag = (e.target as Element).tagName?.toLowerCase();
+      if (e.target !== graphSlot && tag !== "svg") return;
+      e.preventDefault();
+      showCanvasContextMenu(e.clientX, e.clientY, () => mountTopologyTab(root));
     });
 
     renderGraph();
