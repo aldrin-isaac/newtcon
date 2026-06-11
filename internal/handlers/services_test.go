@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -341,3 +342,68 @@ func TestServices_Empty(t *testing.T) {
 // Compile-time: verify time.Time{} encodes to "0001-01-01T00:00:00Z" per RFC3339.
 // This is the expected value of last_modified in v1.
 var _ = func() string { return time.Time{}.UTC().Format(time.RFC3339) }()
+
+// TestServices_AuthorizationDenied verifies that a 403 from newtron with the
+// typed AuthorizationError envelope (newtron PR #133 / newtcon#143) surfaces
+// at the newtcon edge as a 403 KindAuthorizationFailure response with
+// caller / permission / resource in details — operator-honest, not
+// "unexpected status 403".
+func TestServices_AuthorizationDenied(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		envelope := map[string]any{
+			"data": map[string]string{
+				"caller":     "alice",
+				"permission": "spec.read",
+				"resource":   "default",
+			},
+			"error": "authorization denied: alice lacks spec.read on default",
+		}
+		body, _ := json.Marshal(envelope)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write(body)
+	}))
+	defer upstream.Close()
+
+	nc := newtronc.New(upstream.URL)
+	mux := http.NewServeMux()
+	handlers.RegisterServicesRoutes(mux, handlers.ServicesDeps{Client: nc})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/services", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var env map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	errBlock, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatal("response missing 'error' block")
+	}
+	if kind, _ := errBlock["kind"].(string); kind != "authorization_failure" {
+		t.Errorf("error.kind: want %q, got %q", "authorization_failure", kind)
+	}
+	msg, _ := errBlock["message"].(string)
+	if !strings.Contains(msg, "alice lacks spec.read on default") {
+		t.Errorf("error.message should contain the operator-honest text, got %q", msg)
+	}
+
+	details, ok := errBlock["details"].(map[string]any)
+	if !ok {
+		t.Fatal("error.details missing or wrong type")
+	}
+	if got, _ := details["caller"].(string); got != "alice" {
+		t.Errorf("details.caller: want %q, got %q", "alice", got)
+	}
+	if got, _ := details["permission"].(string); got != "spec.read" {
+		t.Errorf("details.permission: want %q, got %q", "spec.read", got)
+	}
+	if got, _ := details["resource"].(string); got != "default" {
+		t.Errorf("details.resource: want %q, got %q", "default", got)
+	}
+}

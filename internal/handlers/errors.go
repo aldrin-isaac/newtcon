@@ -18,14 +18,18 @@
 //
 // Status / kind mapping (both helpers):
 //
-//   *newtronc.NotFoundError    → 404 KindPreconditionFailure   (the named
-//                                  network / device / spec doesn't exist —
-//                                  precondition for the operation)
-//   *newtronc.ConflictError    → 409 KindDriftRefusal
-//   *newtronc.ValidationError  → 400 KindValidationFailure
-//   *newtronc.UnavailableError → 503 (or 502 for lab) KindNewtronUnavailable
-//                                  with a default next_action_hint
-//   default                    → 500 KindInternal
+//   *newtronc.NotFoundError      → 404 KindPreconditionFailure (the named
+//                                    network / device / spec doesn't exist —
+//                                    precondition for the operation)
+//   *newtronc.ConflictError      → 409 KindDriftRefusal
+//   *newtronc.ValidationError    → 400 KindValidationFailure
+//   *newtronc.AuthorizationError → 403 KindAuthorizationFailure (caller /
+//                                    permission / resource surfaced in
+//                                    details so the UI can render
+//                                    "X lacks Y on Z"; newtcon#143)
+//   *newtronc.UnavailableError   → 503 (or 502 for lab) KindNewtronUnavailable
+//                                    with a default next_action_hint
+//   default                      → 500 KindInternal
 //
 // extras is merged into the details map; pass nil if no per-call-site fields.
 // Standard fields the helper always sets (correlation_id, underlying_error,
@@ -67,6 +71,18 @@ func writeUpstreamErrorWithStatus(w http.ResponseWriter, corrID string, err erro
 		setIfAbsent(details, "underlying_error_message", string(e.Body))
 		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
 			fmt.Sprintf("%s: conflict", endpoint), details)
+	case *newtronc.AuthorizationError:
+		// Surface caller / permission / resource so the operator sees
+		// "alice lacks spec.author on svc-b" not "unexpected status 403".
+		// newtcon#143.
+		setIfAbsent(details, "caller", e.Caller)
+		setIfAbsent(details, "permission", e.Permission)
+		if e.Resource != "" {
+			setIfAbsent(details, "resource", e.Resource)
+		}
+		setIfAbsent(details, "underlying_error_message", e.Error())
+		types.WriteError(w, http.StatusForbidden, types.KindAuthorizationFailure,
+			fmt.Sprintf("%s: %s", endpoint, e.Error()), details)
 	case *newtronc.UnavailableError:
 		setIfAbsent(details, "underlying_error", upstreamErrorKind(e))
 		setIfAbsent(details, "underlying_error_message", e.Cause)

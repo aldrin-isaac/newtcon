@@ -91,6 +91,8 @@ func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronSer
 		// OK — fall through to decode.
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode == http.StatusForbidden:
+		return nil, decodeAuthorizationError(resp.StatusCode, body)
 	case resp.StatusCode >= 500:
 		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	default:
@@ -155,6 +157,8 @@ func (c *Client) ShowService(ctx context.Context, network, name string) (*Newtro
 		// OK — fall through to decode.
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode == http.StatusForbidden:
+		return nil, decodeAuthorizationError(resp.StatusCode, body)
 	case resp.StatusCode >= 500:
 		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	default:

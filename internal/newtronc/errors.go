@@ -7,7 +7,10 @@
 // Each family maps to one of the five ErrorKind values in internal/types.
 package newtronc
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // UnavailableError is returned when newtron-server is unreachable or returns a
 // 5xx status. It maps to types.KindNewtronUnavailable.
@@ -64,4 +67,51 @@ type NotFoundError struct {
 
 func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("newtron-server not found (%d): %s", e.StatusCode, string(e.Body))
+}
+
+// AuthorizationError is returned when newtron-server returns a 403 with its
+// typed AuthorizationError envelope (newtcon#143). It maps to
+// types.KindAuthorizationFailure.
+//
+// Wire shape (per newtron's pkg/newtron/types.go AuthorizationError + the
+// regression test pkg/newtron/api/authorization_test.go TestAuthorization_
+// DenyWireShape that pins these JSON keys):
+//
+//	{
+//	  "data":  { "caller": "alice", "permission": "spec.author", "resource": "svc-b" },
+//	  "error": "authorization denied: alice lacks spec.author on svc-b"
+//	}
+//
+// Resource is optional — operations that aren't resource-scoped (e.g. global
+// admin permissions) omit it.
+type AuthorizationError struct {
+	StatusCode int
+	Caller     string `json:"caller"`
+	Permission string `json:"permission"`
+	Resource   string `json:"resource,omitempty"`
+	Body       []byte `json:"-"` // raw body for diagnostics; never JSON-encoded
+}
+
+func (e *AuthorizationError) Error() string {
+	if e.Resource != "" {
+		return fmt.Sprintf("authorization denied: %s lacks %s on %s", e.Caller, e.Permission, e.Resource)
+	}
+	return fmt.Sprintf("authorization denied: %s lacks %s", e.Caller, e.Permission)
+}
+
+// decodeAuthorizationError extracts the AuthorizationError from a 403 envelope
+// body. Falls back to a bare AuthorizationError carrying only StatusCode +
+// Body when the envelope doesn't match the expected shape (e.g. newtron
+// returned 403 without enabling enforcement, or a proxy injected one).
+func decodeAuthorizationError(statusCode int, body []byte) *AuthorizationError {
+	var env struct {
+		Data  *AuthorizationError `json:"data"`
+		Error string              `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err == nil && env.Data != nil {
+		env.Data.StatusCode = statusCode
+		env.Data.Body = body
+		return env.Data
+	}
+	return &AuthorizationError{StatusCode: statusCode, Body: body}
 }

@@ -144,6 +144,9 @@ func (c *Client) ListNetworksDetail(ctx context.Context) ([]NetworkInfo, error) 
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, decodeAuthorizationError(resp.StatusCode, body)
+	}
 	if resp.StatusCode >= 500 {
 		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	}
@@ -197,6 +200,8 @@ func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
 		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
 	case resp.StatusCode == http.StatusConflict:
 		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
+	case resp.StatusCode == http.StatusForbidden:
+		return nil, decodeAuthorizationError(resp.StatusCode, body)
 	case resp.StatusCode >= 500:
 		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
 	default:
@@ -340,6 +345,8 @@ func (c *Client) RegisterNetwork(ctx context.Context, id, specDir string, scaffo
 		return "", &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
 	case resp.StatusCode == http.StatusConflict:
 		return "", &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
+	case resp.StatusCode == http.StatusForbidden:
+		return "", decodeAuthorizationError(resp.StatusCode, respBody)
 	case resp.StatusCode >= 500:
 		return "", &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
 	default:
