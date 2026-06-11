@@ -7,3 +7,14 @@ import "net/http"
 func TransportFor(c *Client) http.RoundTripper {
 	return c.httpClient.Transport
 }
+
+// InnerTransportFor peels off the [bearerInjector] wrapper installed by
+// [New] and returns the underlying transport (typically *http.Transport
+// for production; whatever the caller installed for tests). Test-only.
+func InnerTransportFor(c *Client) http.RoundTripper {
+	tr := c.httpClient.Transport
+	if bi, ok := tr.(*bearerInjector); ok {
+		return bi.inner
+	}
+	return tr
+}

@@ -71,6 +71,22 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("newtron-server not found (%d): %s", e.StatusCode, string(e.Body))
 }
 
+// UnauthenticatedError is returned when newtron-server returns a 401.
+// The operator either presented no credentials, expired credentials, or
+// otherwise unrecognised credentials. It maps to types.KindAuthenticationFailure.
+//
+// Body carries the verbatim newtron response for diagnostics. Newtron's
+// own auth-design.md leaves the 401 body free-form (no typed envelope),
+// so callers should not try to extract structured fields.
+type UnauthenticatedError struct {
+	StatusCode int
+	Body       []byte
+}
+
+func (e *UnauthenticatedError) Error() string {
+	return fmt.Sprintf("newtron-server unauthenticated (%d): %s", e.StatusCode, string(e.Body))
+}
+
 // AuthorizationError is returned when newtron-server returns a 403 with its
 // typed AuthorizationError envelope (newtcon#143). It maps to
 // types.KindAuthorizationFailure.
@@ -145,6 +161,8 @@ func classifyResponse(statusCode int, body []byte, successCodes ...int) error {
 	switch statusCode {
 	case http.StatusBadRequest:
 		return &ValidationError{StatusCode: statusCode, Body: body}
+	case http.StatusUnauthorized:
+		return &UnauthenticatedError{StatusCode: statusCode, Body: body}
 	case http.StatusForbidden:
 		return decodeAuthorizationError(statusCode, body)
 	case http.StatusNotFound:
