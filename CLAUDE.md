@@ -51,6 +51,7 @@ internal/server/              → HTTP routing infrastructure
   static.go                   → static asset serving + docs serving
 internal/handlers/            → one file per resource family
   health.go                   → /api/health
+  auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
@@ -59,11 +60,14 @@ internal/handlers/            → one file per resource family
 internal/newtronc/            → THE ONLY HTTP client of newtron-server
   client.go                   → http.Client, base URL, engine-base helpers
   tls.go                      → outbound TLS config (BuildTLSConfig: --newtron-ca-cert / --newtron-skip-tls-verify)
-  errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, AuthorizationError)
+  auth.go                     → Login/Logout RPCs + WithBearer context plumbing + bearer-injecting RoundTripper
+  errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
   nodes.go                    → topology + per-device + per-interface calls
   newtlab.go                  → newtlab-engine calls (labs list/status/deploy/destroy/provision/events/node-lifecycle)
+internal/session/             → operator session store + cookie helpers + middleware (cookie ↔ {bearer,user,expires_at})
+  session.go                  → Store, SetCookie/ClearCookie, Middleware, UserFromContext
 internal/types/               → DTOs (request/response shapes) + error envelope kinds
 web/                          → frontend (vanilla HTML + TypeScript-as-tsc per ADR-0002)
   src/                        → source

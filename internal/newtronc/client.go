@@ -79,8 +79,14 @@ func WithTLSConfig(cfg *tls.Config) Option {
 		if cfg == nil {
 			return
 		}
-		if tr, ok := cl.httpClient.Transport.(*http.Transport); ok {
-			tr.TLSClientConfig = cfg
+		// The constructor wraps the base *http.Transport in a [bearerInjector];
+		// drill through it to find the real transport.
+		tr := cl.httpClient.Transport
+		if bi, ok := tr.(*bearerInjector); ok {
+			tr = bi.inner
+		}
+		if httpTr, ok := tr.(*http.Transport); ok {
+			httpTr.TLSClientConfig = cfg
 		}
 	}
 }
@@ -92,13 +98,15 @@ func WithTLSConfig(cfg *tls.Config) Option {
 // ones for the same field.
 func New(baseURL string, opts ...Option) *Client {
 	// Clone http.DefaultTransport so TLSClientConfig is settable per-instance
-	// via [WithTLSConfig] without mutating package-global state.
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	// via [WithTLSConfig] without mutating package-global state. Wrap with
+	// [bearerInjector] so any request whose ctx carries [WithBearer] picks up
+	// the Authorization header automatically.
+	base := http.DefaultTransport.(*http.Transport).Clone()
 	c := &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout:   DefaultTimeout,
-			Transport: tr,
+			Transport: &bearerInjector{inner: base},
 		},
 	}
 	for _, o := range opts {

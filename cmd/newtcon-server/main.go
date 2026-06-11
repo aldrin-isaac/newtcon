@@ -30,6 +30,7 @@ import (
 	"github.com/aldrin-isaac/newtcon/internal/handlers"
 	"github.com/aldrin-isaac/newtcon/internal/newtronc"
 	"github.com/aldrin-isaac/newtcon/internal/server"
+	"github.com/aldrin-isaac/newtcon/internal/session"
 )
 
 func main() {
@@ -108,6 +109,18 @@ func main() {
 	// without a server restart.
 	handlers.NewNetworksHandler(mux, nc, server.CorrelationIDFromContext)
 
+	// Operator-identity endpoints: /api/auth/{login,logout,whoami}.
+	// Cookie.Secure is auto-derived from tlsOn — production HTTPS deployments
+	// get Secure cookies; plain-HTTP dev gets non-Secure (so the browser will
+	// re-send). Reverse-proxy scenarios may need a future override flag.
+	sessionStore := session.NewStore()
+	handlers.RegisterAuthRoutes(mux, handlers.AuthDeps{
+		Client:        nc,
+		Store:         sessionStore,
+		CookieSecure:  tlsOn,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
 	// server.RegisterStaticAssets logs a warning and skips registration when
@@ -119,7 +132,11 @@ func main() {
 	// routing correctness; the more-specific "/docs/" wins over "/" regardless.
 	server.RegisterDocsAssets(mux, *docsDir, *docsRootDir)
 
-	handler := server.ApplyMiddleware(mux)
+	// Session middleware wraps the mux: read cookie → resolve bearer + user
+	// into request context for downstream handlers + newtronc transport;
+	// watch for 401 on the way out to evict + clear the cookie.
+	sessionMW := session.Middleware(sessionStore, tlsOn)
+	handler := server.ApplyMiddleware(sessionMW(mux))
 
 	srv := &http.Server{
 		Addr:              *addr,

@@ -48,6 +48,16 @@ const (
 	// Details carry caller / permission / resource so the UI can render an
 	// operator-honest "X lacks Y on Z" message.
 	KindAuthorizationFailure ErrorKind = "authorization_failure"
+
+	// KindAuthenticationFailure is returned when newtcon-server cannot
+	// resolve the requesting operator to a known identity — no session
+	// cookie, the cookie's session expired, or newtron rejected the
+	// credentials at /auth/login. Distinct from authorization_failure,
+	// which means "we know who you are, you may not do this."
+	//
+	// Details carry correlation_id and the underlying upstream message
+	// when one is available.
+	KindAuthenticationFailure ErrorKind = "authentication_failure"
 )
 
 // ErrorEnvelope is the top-level wrapper for every non-2xx response body.

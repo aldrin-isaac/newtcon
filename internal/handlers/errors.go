@@ -18,15 +18,18 @@
 //
 // Status / kind mapping (both helpers):
 //
-//   *newtronc.NotFoundError      → 404 KindPreconditionFailure (the named
-//                                    network / device / spec doesn't exist —
-//                                    precondition for the operation)
-//   *newtronc.ConflictError      → 409 KindDriftRefusal
-//   *newtronc.ValidationError    → 400 KindValidationFailure
-//   *newtronc.AuthorizationError → 403 KindAuthorizationFailure (caller /
-//                                    permission / resource surfaced in
-//                                    details so the UI can render
-//                                    "X lacks Y on Z"; newtcon#143)
+//   *newtronc.NotFoundError       → 404 KindPreconditionFailure (the named
+//                                     network / device / spec doesn't exist —
+//                                     precondition for the operation)
+//   *newtronc.ConflictError       → 409 KindDriftRefusal
+//   *newtronc.ValidationError     → 400 KindValidationFailure
+//   *newtronc.UnauthenticatedError→ 401 KindAuthenticationFailure (session
+//                                     expired / missing — middleware will
+//                                     clear the cookie as the 401 unwinds)
+//   *newtronc.AuthorizationError  → 403 KindAuthorizationFailure (caller /
+//                                     permission / resource surfaced in
+//                                     details so the UI can render
+//                                     "X lacks Y on Z"; newtcon#143)
 //   *newtronc.UnavailableError   → 503 (or 502 for lab) KindNewtronUnavailable
 //                                    with a default next_action_hint
 //   default                      → 500 KindInternal
@@ -63,6 +66,13 @@ func writeUpstreamErrorWithStatus(w http.ResponseWriter, corrID string, err erro
 		setIfAbsent(details, "underlying_error_message", string(e.Body))
 		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
 			fmt.Sprintf("%s: validation failed", endpoint), details)
+	case *newtronc.UnauthenticatedError:
+		// newtron rejected the request with 401 — the operator's session is
+		// expired, missing, or wrong. The session middleware will see the 401
+		// status going out and evict + clear the cookie automatically.
+		setIfAbsent(details, "underlying_error_message", string(e.Body))
+		types.WriteError(w, http.StatusUnauthorized, types.KindAuthenticationFailure,
+			fmt.Sprintf("%s: authentication required", endpoint), details)
 	case *newtronc.NotFoundError:
 		setIfAbsent(details, "underlying_error_message", string(e.Body))
 		types.WriteError(w, http.StatusNotFound, types.KindPreconditionFailure,

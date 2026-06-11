@@ -124,7 +124,7 @@ func TestWithTLSConfig_AppliedToTransport(t *testing.T) {
 	}
 	c := newtronc.New("https://example.invalid", newtronc.WithTLSConfig(cfg))
 
-	tr := newtronc.TransportFor(c)
+	tr := newtronc.InnerTransportFor(c)
 	httpTr, ok := tr.(*http.Transport)
 	if !ok {
 		t.Fatalf("expected *http.Transport, got %T", tr)
@@ -141,7 +141,7 @@ func TestWithTLSConfig_AppliedToTransport(t *testing.T) {
 // whatever the constructor left in place — Go's default transport behaviour).
 func TestWithTLSConfig_NilNoOp(t *testing.T) {
 	c := newtronc.New("https://example.invalid", newtronc.WithTLSConfig(nil))
-	tr := newtronc.TransportFor(c)
+	tr := newtronc.InnerTransportFor(c)
 	httpTr, ok := tr.(*http.Transport)
 	if !ok {
 		t.Fatalf("expected *http.Transport, got %T", tr)
