@@ -4,9 +4,10 @@
 PR #143 (merged 2026-06-10).
 **Why this matters here:** L2c was designed specifically to unblock
 browser clients. newtcon is the browser client. This update tells the
-lead what shipped, what the wire surface is, and what newtcon would
-need to do to adopt it. **It does not commit newtcon to adopting it
-yet** — promotion is operator-driven per `DIRECTIVE.md`.
+lead what shipped, what the new HTTP endpoints look like, and what
+newtcon would need to do to adopt them. **It does not commit newtcon
+to adopting them yet** — promotion is operator-driven per
+`DIRECTIVE.md`.
 
 ---
 
@@ -18,7 +19,7 @@ the client carries on subsequent requests as `Authorization: Bearer
 returned; downstream identity, authorization (L3/L4/L5), and audit
 (L1/L6) consume it identically to fresh PAM credentials.
 
-Wire surface (per `../newtron/docs/newtron/pam-howto.md` §7):
+HTTP endpoints (per `../newtron/docs/newtron/pam-howto.md` §7):
 
 ```
 POST /newtron/v1/auth/login          (Authorization: Basic …)
@@ -145,8 +146,8 @@ Worth raising on the newtron side if the lead wants any of these:
   expected sessions, the operator-side knob is
   `--session-key-ttl`. If it's too long for browser hygiene, raise
   upstream for a shorter cap.
-- **CORS.** newtcon-server is the only browser-facing surface; it
-  doesn't talk directly to newtron from the browser today. If that
+- **CORS.** newtcon-server is the only process the browser talks to
+  today; the browser doesn't reach newtron directly. If that ever
   changes, CORS on `/auth/login` would need explicit handling.
 
 ## Status
