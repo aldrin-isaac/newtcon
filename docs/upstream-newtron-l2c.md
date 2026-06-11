@@ -13,11 +13,15 @@ to adopting them yet** — promotion is operator-driven per
 
 ## What shipped in newtron
 
-A successful PAM authentication can now mint an opaque session key
-the client carries on subsequent requests as `Authorization: Bearer
-<key>`. The key resolves to the same verified Unix username PAM
-returned; downstream identity, authorization (L3/L4/L5), and audit
-(L1/L6) consume it identically to fresh PAM credentials.
+A successful PAM authentication can now mint an opaque **newtron
+session key** the client carries on subsequent requests as
+`Authorization: Bearer <key>`. ("Newtron session key" qualified to
+disambiguate from any browser-session concept newtcon may grow on
+its own side; from here on, "session key" in this document means
+the newtron one unless explicitly qualified.) The key resolves to
+the same verified Unix username PAM returned; downstream identity,
+authorization (L3/L4/L5), and audit (L1/L6) consume it identically
+to fresh PAM credentials.
 
 HTTP endpoints (per `../newtron/docs/newtron/pam-howto.md` §7):
 
@@ -71,14 +75,17 @@ slice spec. Sized order-of-magnitude:
 1. **Login page** — minimal HTML form, two fields. On submit,
    newtcon-server proxies the Basic auth to newtron's `/auth/login`,
    captures the returned `{key, expires_at, user}`, and either:
-   - stores the key on a session cookie set by newtcon-server
-     (`Secure; HttpOnly; SameSite=Strict`), or
-   - returns it to the browser for in-memory storage.
+   - stores the key against an opaque newtcon-side cookie set with
+     the HTTP `Secure; HttpOnly; SameSite=Strict` attributes (the
+     cookie is the browser's handle; the newtron session key never
+     reaches the browser), or
+   - returns the newtron session key to the browser for in-memory
+     storage.
 
-   The cookie approach is simpler and keeps the key out of JS. The
-   in-memory approach is more robust to XSS (no cookie to steal) but
-   the trade-off is the session dying on every reload. Operator
-   call.
+   The cookie approach is simpler and keeps the newtron session key
+   out of JS. The in-memory approach is more robust to XSS (no
+   cookie to steal) but the trade-off is the browser session dying
+   on every reload. Operator call.
 
 2. **`internal/newtronc/Client` carries a Bearer header.** Three
    options:
