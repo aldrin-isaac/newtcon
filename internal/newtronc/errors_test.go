@@ -3,6 +3,7 @@ package newtronc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,6 +92,58 @@ func TestAuthorizationError_Error_NoResource(t *testing.T) {
 	if e.Error() != want {
 		t.Errorf("Error():\n  want %q\n  got  %q", want, e.Error())
 	}
+}
+
+func TestClassifyResponse(t *testing.T) {
+	cases := []struct {
+		name         string
+		statusCode   int
+		body         string
+		successCodes []int
+		wantType     string // empty = nil error
+	}{
+		{"OK in success list", 200, "", []int{200}, ""},
+		{"Created in success list", 201, "", []int{200, 201}, ""},
+		{"Accepted in success list", 202, "", []int{200, 202}, ""},
+		{"OK not in success list returns unavailable", 200, "body", []int{201}, "*newtronc.UnavailableError"},
+		{"400 → ValidationError", 400, "validation body", []int{200}, "*newtronc.ValidationError"},
+		{"403 with envelope → AuthorizationError",
+			403,
+			`{"data":{"caller":"x","permission":"y"},"error":"denied"}`,
+			[]int{200},
+			"*newtronc.AuthorizationError"},
+		{"403 bare body → AuthorizationError (fallback)",
+			403, "Forbidden", []int{200}, "*newtronc.AuthorizationError"},
+		{"404 → NotFoundError", 404, "not found body", []int{200}, "*newtronc.NotFoundError"},
+		{"409 → ConflictError", 409, "conflict body", []int{200}, "*newtronc.ConflictError"},
+		{"500 → UnavailableError", 500, "server error", []int{200}, "*newtronc.UnavailableError"},
+		{"503 → UnavailableError", 503, "unavail", []int{200}, "*newtronc.UnavailableError"},
+		{"418 → UnavailableError (unexpected)", 418, "teapot", []int{200}, "*newtronc.UnavailableError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyResponse(tc.statusCode, []byte(tc.body), tc.successCodes...)
+			if tc.wantType == "" {
+				if err != nil {
+					t.Fatalf("want nil error, got %T: %v", err, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want %s, got nil", tc.wantType)
+			}
+			got := strings.TrimPrefix(reflectTypeName(err), "newtronc.")
+			want := strings.TrimPrefix(strings.TrimPrefix(tc.wantType, "*"), "newtronc.")
+			if got != want {
+				t.Errorf("type: want *%s, got *%s", want, got)
+			}
+		})
+	}
+}
+
+// reflectTypeName returns the type name like "newtronc.NotFoundError".
+func reflectTypeName(v any) string {
+	return strings.TrimPrefix(fmt.Sprintf("%T", v), "*")
 }
 
 // End-to-end: ListNetworks against a fake upstream returning 403 with the

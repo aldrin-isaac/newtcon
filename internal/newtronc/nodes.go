@@ -49,16 +49,8 @@ func (c *Client) nodeGet(ctx context.Context, path string) (json.RawMessage, err
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -256,20 +248,8 @@ func (c *Client) nodePostBody(ctx context.Context, path string, body any) (json.
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -308,20 +288,8 @@ func (c *Client) nodePutBody(ctx context.Context, path string, body any) (json.R
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -355,20 +323,8 @@ func (c *Client) nodeDelete(ctx context.Context, path string) (json.RawMessage, 
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -480,16 +436,8 @@ func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, er
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 	var apiResp newtronAPIResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
@@ -552,16 +500,8 @@ func (c *Client) nodePostRaw(ctx context.Context, path string, body []byte) (jso
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response: %v", err)}
 	}
-	switch {
-	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	case resp.StatusCode >= 400:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); err != nil {
+		return nil, err
 	}
 	var apiResp newtronAPIResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {

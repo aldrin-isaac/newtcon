@@ -37,16 +37,8 @@ func (c *Client) listNames(ctx context.Context, network, kind string) ([]string,
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -152,21 +144,8 @@ func (c *Client) networkPost(ctx context.Context, network, verb string, body any
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
-		// OK — fall through to decode.
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -299,16 +278,8 @@ func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
