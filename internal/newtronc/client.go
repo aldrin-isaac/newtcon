@@ -144,14 +144,8 @@ func (c *Client) ListNetworksDetail(ctx context.Context) ([]NetworkInfo, error) 
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	}
-	if resp.StatusCode >= 500 {
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 	var env newtronAPIResponse
 	if err := json.Unmarshal(body, &env); err != nil {
@@ -191,24 +185,8 @@ func (c *Client) ListNetworks(ctx context.Context) ([]string, error) {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-		// OK — fall through to decode below.
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{
-			StatusCode: resp.StatusCode,
-			Cause:      fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
-		}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -336,21 +314,8 @@ func (c *Client) RegisterNetwork(ctx context.Context, id, specDir string, scaffo
 	if err != nil {
 		return "", &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
-	switch {
-	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
-		// fall through
-	case resp.StatusCode == http.StatusBadRequest:
-		return "", &ValidationError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusNotFound:
-		return "", &NotFoundError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusConflict:
-		return "", &ConflictError{StatusCode: resp.StatusCode, Body: respBody}
-	case resp.StatusCode == http.StatusForbidden:
-		return "", decodeAuthorizationError(resp.StatusCode, respBody)
-	case resp.StatusCode >= 500:
-		return "", &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
-	default:
-		return "", &UnavailableError{StatusCode: resp.StatusCode, Cause: string(respBody)}
+	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); err != nil {
+		return "", err
 	}
 	var env newtronAPIResponse
 	if err := json.Unmarshal(respBody, &env); err != nil {

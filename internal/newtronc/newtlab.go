@@ -67,23 +67,8 @@ func (c *Client) newtlabGet(ctx context.Context, path string) (json.RawMessage, 
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-	case resp.StatusCode == http.StatusBadRequest:
-		return nil, &ValidationError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusConflict:
-		return nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{
-			StatusCode: resp.StatusCode,
-			Cause:      fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
-		}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -130,23 +115,8 @@ func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (in
 		return 0, nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted:
-	case resp.StatusCode == http.StatusBadRequest:
-		return resp.StatusCode, nil, &ValidationError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusNotFound:
-		return resp.StatusCode, nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusConflict:
-		return resp.StatusCode, nil, &ConflictError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return resp.StatusCode, nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return resp.StatusCode, nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return resp.StatusCode, nil, &UnavailableError{
-			StatusCode: resp.StatusCode,
-			Cause:      fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
-		}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK, http.StatusAccepted); err != nil {
+		return resp.StatusCode, nil, err
 	}
 
 	var apiResp newtronAPIResponse

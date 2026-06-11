@@ -86,20 +86,8 @@ func (c *Client) ListServices(ctx context.Context, network string) ([]NewtronSer
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-		// OK — fall through to decode.
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{
-			StatusCode: resp.StatusCode,
-			Cause:      fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
-		}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
@@ -152,20 +140,8 @@ func (c *Client) ShowService(ctx context.Context, network, name string) (*Newtro
 		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
-		// OK — fall through to decode.
-	case resp.StatusCode == http.StatusNotFound:
-		return nil, &NotFoundError{StatusCode: resp.StatusCode, Body: body}
-	case resp.StatusCode == http.StatusForbidden:
-		return nil, decodeAuthorizationError(resp.StatusCode, body)
-	case resp.StatusCode >= 500:
-		return nil, &UnavailableError{StatusCode: resp.StatusCode, Cause: string(body)}
-	default:
-		return nil, &UnavailableError{
-			StatusCode: resp.StatusCode,
-			Cause:      fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
-		}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var apiResp newtronAPIResponse
