@@ -38,10 +38,19 @@ func main() {
 	newtronTimeout := flag.Duration("newtron-timeout", 10*time.Second, "per-request timeout for newtron-server calls")
 	newtronCACert := flag.String("newtron-ca-cert", "", "PEM file with CA roots to verify newtron-server's TLS cert (default: system roots). Only consulted when --newtron-url uses https://.")
 	newtronSkipTLSVerify := flag.Bool("newtron-skip-tls-verify", false, "DEV ONLY: skip TLS cert verification on newtron-server. Defeats encryption guarantees; never use in production.")
+	tlsCert := flag.String("tls-cert", "", "PEM file with newtcon-server's TLS certificate chain. When set together with --tls-key, the server serves HTTPS; otherwise it serves plain HTTP (dev).")
+	tlsKey := flag.String("tls-key", "", "PEM file with newtcon-server's TLS private key. Must be set together with --tls-cert.")
 	webDir := flag.String("web-dir", "web/dist", "directory of compiled frontend static assets to serve at /; empty or non-existent disables static serving")
 	docsDir := flag.String("docs-dir", "docs", "directory of operator documentation to serve at /docs/; empty or non-existent disables docs serving")
 	docsRootDir := flag.String("docs-root-dir", ".", "repository root directory; CLAUDE.md and API_CONTRACT.md are served from here at /CLAUDE.md and /API_CONTRACT.md")
 	flag.Parse()
+
+	// Inbound TLS mode: both --tls-cert and --tls-key, or neither. Catch
+	// misconfig before doing any other setup work.
+	if (*tlsCert == "") != (*tlsKey == "") {
+		log.Fatalf("newtcon-server: --tls-cert and --tls-key must be set together (got cert=%q key=%q)", *tlsCert, *tlsKey)
+	}
+	tlsOn := *tlsCert != "" && *tlsKey != ""
 
 	tlsCfg, err := newtronc.BuildTLSConfig(*newtronCACert, *newtronSkipTLSVerify)
 	if err != nil {
@@ -118,10 +127,23 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("newtcon-server listening on %s (newtron-url=%q newtron-timeout=%s newtron-ca-cert=%q newtron-skip-tls-verify=%t web-dir=%q docs-dir=%q)",
-		*addr, *newtronURL, *newtronTimeout, *newtronCACert, *newtronSkipTLSVerify, *webDir, *docsDir)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Printf("server exited: %v", err)
+	scheme := "http"
+	if tlsOn {
+		scheme = "https"
+	}
+
+	log.Printf("newtcon-server listening on %s://%s (newtron-url=%q newtron-timeout=%s newtron-ca-cert=%q newtron-skip-tls-verify=%t tls-cert=%q tls-key=%q web-dir=%q docs-dir=%q)",
+		scheme, *addr, *newtronURL, *newtronTimeout, *newtronCACert, *newtronSkipTLSVerify, *tlsCert, *tlsKey, *webDir, *docsDir)
+
+	var serveErr error
+	if tlsOn {
+		serveErr = srv.ListenAndServeTLS(*tlsCert, *tlsKey)
+	} else {
+		log.Printf("WARNING: newtcon-server is serving plain HTTP. Operator credentials sent over this listener will be transmitted in cleartext. Set --tls-cert and --tls-key for production.")
+		serveErr = srv.ListenAndServe()
+	}
+	if serveErr != nil {
+		log.Printf("server exited: %v", serveErr)
 		os.Exit(1)
 	}
 }
