@@ -58,7 +58,8 @@ internal/handlers/            → one file per resource family
   lab.go                      → /api/labs (newtlab lifecycle: list / status / deploy / destroy / provision / events / per-node start/stop)
 internal/newtronc/            → THE ONLY HTTP client of newtron-server
   client.go                   → http.Client, base URL, engine-base helpers
-  errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError)
+  tls.go                      → outbound TLS config (BuildTLSConfig: --newtron-ca-cert / --newtron-skip-tls-verify)
+  errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
   nodes.go                    → topology + per-device + per-interface calls

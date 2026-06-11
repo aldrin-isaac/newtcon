@@ -26,6 +26,7 @@ package newtronc
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,16 +67,38 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithTLSConfig sets the TLS config used by the client's outbound transport.
+// Pass nil for Go's defaults (system root CAs). Use [BuildTLSConfig] to
+// construct from --newtron-ca-cert / --newtron-skip-tls-verify flag values.
+//
+// No-op if the underlying transport has been replaced (e.g., via
+// [WithHTTPClient] for tests) — in that case the caller owns the transport's
+// TLS config end-to-end.
+func WithTLSConfig(cfg *tls.Config) Option {
+	return func(cl *Client) {
+		if cfg == nil {
+			return
+		}
+		if tr, ok := cl.httpClient.Transport.(*http.Transport); ok {
+			tr.TLSClientConfig = cfg
+		}
+	}
+}
+
 // New constructs a [Client] targeting the newtron-server at baseURL.
 //
 // baseURL should include scheme and host (e.g., "http://127.0.0.1:9090") with
 // no trailing slash. Options are applied in order; later options override earlier
 // ones for the same field.
 func New(baseURL string, opts ...Option) *Client {
+	// Clone http.DefaultTransport so TLSClientConfig is settable per-instance
+	// via [WithTLSConfig] without mutating package-global state.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
 	c := &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: DefaultTimeout,
+			Timeout:   DefaultTimeout,
+			Transport: tr,
 		},
 	}
 	for _, o := range opts {
