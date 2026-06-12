@@ -1,0 +1,112 @@
+// test/render-error.test.js — unit tests for the shared error-rendering helpers.
+//
+// Covers:
+//   - translateErrorKind for every known kind + unknown fallback
+//   - formatAuthorizationDetails happy path / missing fields / wrong types
+//   - formatErrorBrief for ApiError(authorization_failure) with full details,
+//     ApiError(authorization_failure) without details (server-message fallback),
+//     other ApiError kinds, plain Error, unknown thrown values
+
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  translateErrorKind,
+  formatAuthorizationDetails,
+  formatErrorBrief,
+} from "../dist/render-error.js";
+import { ApiError } from "../dist/api/newtcon/services.js";
+
+describe("translateErrorKind()", () => {
+  test("known kinds map to operator-readable text", () => {
+    assert.equal(translateErrorKind("validation_failure"), "validation failed");
+    assert.equal(translateErrorKind("precondition_failure"), "precondition not met");
+    assert.equal(translateErrorKind("drift_refusal"), "drift detected — refused to apply");
+    assert.equal(translateErrorKind("authorization_failure"), "permission denied");
+    assert.equal(translateErrorKind("authentication_failure"), "not signed in");
+    assert.equal(translateErrorKind("newtron_unavailable"), "newtron is unreachable");
+    assert.equal(translateErrorKind("internal"), "internal error");
+  });
+
+  test("unknown kind falls back to snake-case humanised", () => {
+    assert.equal(translateErrorKind("some_future_kind"), "some future kind");
+  });
+});
+
+describe("formatAuthorizationDetails()", () => {
+  test("returns 'caller lacks permission on resource' with full triplet", () => {
+    const s = formatAuthorizationDetails({
+      caller: "alice",
+      permission: "spec.author",
+      resource: "svc-b",
+    });
+    assert.equal(s, "alice lacks spec.author on svc-b");
+  });
+
+  test("omits 'on resource' when resource is absent", () => {
+    const s = formatAuthorizationDetails({ caller: "alice", permission: "global.admin" });
+    assert.equal(s, "alice lacks global.admin");
+  });
+
+  test("returns null when caller is missing", () => {
+    const s = formatAuthorizationDetails({ permission: "spec.author", resource: "svc-b" });
+    assert.equal(s, null);
+  });
+
+  test("returns null when permission is missing", () => {
+    const s = formatAuthorizationDetails({ caller: "alice", resource: "svc-b" });
+    assert.equal(s, null);
+  });
+
+  test("ignores wrong-typed fields", () => {
+    const s = formatAuthorizationDetails({ caller: 7, permission: "x" });
+    assert.equal(s, null);
+  });
+});
+
+describe("formatErrorBrief()", () => {
+  test("authorization_failure with full details renders structured form", () => {
+    const err = new ApiError(403, {
+      error: {
+        kind: "authorization_failure",
+        message: "POST /api/networks/x/create-service: authorization denied: alice lacks spec.author on svc-b",
+        details: { caller: "alice", permission: "spec.author", resource: "svc-b" },
+      },
+    });
+    assert.equal(formatErrorBrief(err), "permission denied: alice lacks spec.author on svc-b");
+  });
+
+  test("authorization_failure without typed details falls back to server message", () => {
+    const err = new ApiError(403, {
+      error: {
+        kind: "authorization_failure",
+        message: "some bare 403 from the substrate",
+        details: {},
+      },
+    });
+    assert.equal(formatErrorBrief(err), "permission denied: some bare 403 from the substrate");
+  });
+
+  test("validation_failure renders translated kind + server message", () => {
+    const err = new ApiError(400, {
+      error: { kind: "validation_failure", message: "spec name required", details: {} },
+    });
+    assert.equal(formatErrorBrief(err), "validation failed: spec name required");
+  });
+
+  test("authentication_failure renders translated kind + server message", () => {
+    const err = new ApiError(401, {
+      error: { kind: "authentication_failure", message: "session expired", details: {} },
+    });
+    assert.equal(formatErrorBrief(err), "not signed in: session expired");
+  });
+
+  test("plain Error returns its message", () => {
+    assert.equal(formatErrorBrief(new Error("boom")), "boom");
+  });
+
+  test("unknown thrown value stringifies", () => {
+    assert.equal(formatErrorBrief("string thrown directly"), "string thrown directly");
+    assert.equal(formatErrorBrief(42), "42");
+  });
+});

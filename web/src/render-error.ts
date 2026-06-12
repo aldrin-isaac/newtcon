@@ -1,0 +1,86 @@
+// render-error.ts — single source of truth for translating wire error kinds
+// and formatting brief error strings for the frontend.
+//
+// Before this module, staging.ts / topology-action-panel.ts /
+// topology-actions-ui.ts each defined their own `formatError()` (three near-
+// identical copies: `${err.kind}: ${err.message}`). services/services.ts had
+// its own `translateErrorKind()`. Per ai-instructions §7 (second instance =
+// stop and question) + DESIGN_PRINCIPLES §39 (one mechanism per capability),
+// they collapse here.
+//
+// Slice 2.1 also lands the L5 authorization_failure rendering: when the typed
+// envelope from newtcon#143 carries {caller, permission, resource}, the brief
+// form becomes "permission denied: alice lacks spec.author on svc-b" rather
+// than the generic "authorization_failure: <endpoint>: authorization denied: …"
+// the server emits. The server message stays accurate; the operator just sees
+// the structured form first.
+
+import { ApiError } from "./api/newtcon/services.js";
+
+/**
+ * translateErrorKind converts a wire-shape error kind into operator-readable
+ * text. The wire kind never appears in the UI; this function is the
+ * translation boundary.
+ */
+export function translateErrorKind(kind: string): string {
+  switch (kind) {
+    case "validation_failure":     return "validation failed";
+    case "precondition_failure":   return "precondition not met";
+    case "drift_refusal":          return "drift detected — refused to apply";
+    case "authorization_failure":  return "permission denied";
+    case "authentication_failure": return "not signed in";
+    case "newtron_unavailable":    return "newtron is unreachable";
+    case "internal":               return "internal error";
+    default:                       return kind.replace(/_/g, " ");
+  }
+}
+
+/**
+ * formatAuthorizationDetails returns "caller lacks permission on resource"
+ * when the details object carries the typed fields the server emits for
+ * KindAuthorizationFailure (per internal/handlers/errors.go + newtcon#143
+ * substrate). Returns null when caller or permission is missing — the
+ * caller falls back to the bare server message.
+ *
+ * Resource is optional: global permissions don't carry one, so the format
+ * shortens to "caller lacks permission".
+ */
+export function formatAuthorizationDetails(details: Record<string, unknown>): string | null {
+  const caller = typeof details.caller === "string" ? details.caller : null;
+  const permission = typeof details.permission === "string" ? details.permission : null;
+  const resource = typeof details.resource === "string" ? details.resource : null;
+  if (!caller || !permission) return null;
+  return resource
+    ? `${caller} lacks ${permission} on ${resource}`
+    : `${caller} lacks ${permission}`;
+}
+
+/**
+ * formatErrorBrief returns a short single-line operator-readable string for
+ * any error — suitable for toasts, inline panel notices, the staging-apply
+ * results dialog. The long-form panel rendering (with details disclosure)
+ * lives in services/services.ts renderOtherApiError.
+ *
+ * Special cases:
+ *
+ *   ApiError kind = authorization_failure with typed details
+ *     → "permission denied: alice lacks spec.author on svc-b"
+ *   ApiError other kinds
+ *     → "<translated kind>: <message>"
+ *   Plain Error
+ *     → err.message
+ *   anything else
+ *     → String(err)
+ */
+export function formatErrorBrief(err: unknown): string {
+  if (err instanceof ApiError) {
+    const kindLabel = translateErrorKind(err.kind);
+    if (err.kind === "authorization_failure") {
+      const structured = formatAuthorizationDetails(err.details);
+      if (structured) return `${kindLabel}: ${structured}`;
+    }
+    return `${kindLabel}: ${err.message}`;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}

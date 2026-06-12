@@ -85,6 +85,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-action-panel.ts  → docked side-panel renderer for actions + interfaces
     topology-actions-ui.ts    → floating right-click context menu
     icons.ts                  → inline-SVG icon set (Lucide)
+    render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
       services.ts             → /api/networks/{netID}/services
