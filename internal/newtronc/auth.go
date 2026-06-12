@@ -73,16 +73,28 @@ func (c *Client) Login(ctx context.Context, username, password string) (*LoginRe
 		return nil, err
 	}
 
+	// Newtron's /auth/login returns the LoginResponse either enveloped
+	// ({"data": {…}, "error": ""}) or bare ({"key", "expires_at", "user"});
+	// both shapes are observed against newtron-server today. Tolerate both:
+	// peek at the envelope, then fall through to the bare body when no data
+	// field is present.
 	var env newtronAPIResponse
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding response: %v", err)}
 	}
 	if env.Error != "" {
 		return nil, &UnavailableError{Cause: env.Error}
 	}
+	payload := []byte(env.Data)
+	if len(payload) == 0 {
+		payload = body
+	}
 	var data LoginResponse
-	if err := json.Unmarshal(env.Data, &data); err != nil {
+	if err := json.Unmarshal(payload, &data); err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding login response: %v", err)}
+	}
+	if data.Key == "" {
+		return nil, &UnavailableError{Cause: "login response missing key"}
 	}
 	return &data, nil
 }

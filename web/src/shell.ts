@@ -13,6 +13,7 @@ import {
   applyAll,
 } from "./staging.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
+import { ensureSignedIn, setupAuthGate } from "./auth-gate.js";
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -337,9 +338,15 @@ function setupPendingBar(): void {
   render();
 }
 
-function boot(): void {
+async function boot(): Promise<void> {
   hydrateIcons();
   watchForNewIcons();
+  // Auth gate runs first: the workspace only renders once whoami succeeds or
+  // the operator signs in. The overlay markup lives in index.html; auth-gate.ts
+  // hydrates it and resolves when signed-in. Anonymous /api/health probing
+  // (via startStatusPolling) is fine — newtcon-server's /api/health is public.
+  await ensureSignedIn();
+  setupAuthGate();
   setupBreadcrumb();
   setupSidebarActiveStates();
   setupPalette();

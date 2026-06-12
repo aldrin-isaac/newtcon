@@ -36,6 +36,46 @@ func TestLogin_Success(t *testing.T) {
 	}
 }
 
+// TestLogin_BareShape verifies newtron's alternative response shape — the
+// bare {key, expires_at, user} object without the {data, error} envelope.
+// Both shapes are observed live (newtron PR #143).
+func TestLogin_BareShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"key":"bare-key","expires_at":"2026-06-11T20:00:00Z","user":"alice"}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	lr, err := c.Login(context.Background(), "alice", "hunter2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lr.Key != "bare-key" || lr.User != "alice" {
+		t.Errorf("unexpected response: %#v", lr)
+	}
+}
+
+// TestLogin_MissingKey guards against newtron returning a 200 but no key —
+// the body decodes, but there's no session to remember. Should error.
+func TestLogin_MissingKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"user":"alice","expires_at":"2026-06-11T20:00:00Z"}}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	_, err := c.Login(context.Background(), "alice", "hunter2")
+	if err == nil {
+		t.Fatal("expected error when key is missing")
+	}
+	var unavail *newtronc.UnavailableError
+	if !errors.As(err, &unavail) {
+		t.Errorf("expected *UnavailableError, got %T", err)
+	}
+}
+
 func TestLogin_Unauthenticated(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

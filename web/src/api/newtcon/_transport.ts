@@ -38,6 +38,19 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<unknown
     }
   }
 
+  // 401 is broadcast as a global event so the auth-gate can intercept it
+  // without every caller wiring its own redirect-to-login. The ApiError still
+  // throws — callers can show inline error UI if they prefer. /api/auth/*
+  // endpoints (the only intentional 401 sources during sign-in) opt out via
+  // the X-Suppress-Auth-Event header convention; see auth-gate.ts.
+  if (response.status === 401 && typeof document !== "undefined") {
+    const headers = init?.headers as Record<string, string> | undefined;
+    const suppress = headers?.["X-Suppress-Auth-Event"];
+    if (!suppress) {
+      document.dispatchEvent(new CustomEvent("auth:401"));
+    }
+  }
+
   // Try to decode an error envelope; if anything fails fall through to the
   // generic HTTP error. Same tolerance as the OK path.
   type ErrEnv = { error?: { kind: string; message: string; details?: Record<string, unknown> } };

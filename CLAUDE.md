@@ -75,6 +75,8 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     app.ts                    → workspace entry + tab dispatch + topology view + drawers
     workspace.css             → workspace layout (consumes design-system tokens)
     shell.ts                  → app shell (sidebar, tabs, status pill, palette)
+    auth-gate.ts              → login overlay + user pill + 401 redirect (slice 1.D)
+    auth-gate.css             → styling for the login overlay + user pill
     api-path.ts               → /api/networks/{netID}/... URL helper (PR #135)
     network-switcher.ts       → active-network dropdown (PR #133)
     device-status.ts          → unified-substrate state resolver (PR #137)
@@ -89,6 +91,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
       network.ts              → /api/networks/{netID}/{kind}/...
       nodes.ts                → /api/networks/{netID}/{topology,nodes/...}
       lab.ts                  → /api/labs/{name}/... (newtlab — not network-scoped)
+      auth.ts                 → /api/auth/{login,logout,whoami}
     services/                 → Specs-tab service detail views
   test/                       → node:test files + puppeteer smokes (web/test/smoke/)
   dist/                       → tsc output (served by --web-dir)
