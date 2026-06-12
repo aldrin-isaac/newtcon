@@ -1,0 +1,213 @@
+// auth-gate.ts — operator sign-in flow + 401 redirect.
+//
+// Wired by shell.ts at boot. Three responsibilities:
+//
+//   1. Boot gate — before the workspace renders, call /api/auth/whoami.
+//      If signed in, hide the overlay and continue. If 401, show the login
+//      overlay.
+//   2. Login overlay — username + password form. On submit, POST to
+//      /api/auth/login. On 200, hide overlay and re-broadcast a window
+//      reload so any view state that depended on "anonymous" reinitializes
+//      with the now-authenticated session.
+//   3. 401 dispatch — listens for the auth:401 event emitted by
+//      api/newtcon/_transport.ts whenever a non-auth-endpoint /api/* call
+//      gets a 401. Shows the login overlay over the current view; the
+//      operator can re-authenticate without losing what they had on screen.
+//
+// Sign-out: the user-pill dropdown calls logout() and reloads.
+//
+// The overlay markup is owned by index.html — this module hydrates it.
+
+import { whoami, login, logout, type WhoamiResponse } from "./api/newtcon/auth.js";
+import { ApiError } from "./api/newtcon/services.js";
+
+let currentUser: string | null = null;
+let resolveSignedInOnce: () => void = () => { /* replaced below */ };
+
+/**
+ * signedInOnce resolves the first time the operator successfully authenticates
+ * (or on boot if a valid session cookie is already present). app.ts awaits
+ * this before calling its mount() so the workspace doesn't fire /api/* calls
+ * anonymously and trigger spurious 401s.
+ *
+ * It resolves at most once; subsequent re-sign-ins after a session expiry do
+ * not re-fire (the views are already mounted by then).
+ */
+export const signedInOnce: Promise<void> = new Promise<void>((resolve) => {
+  resolveSignedInOnce = resolve;
+});
+
+/** UserFromGate returns the signed-in operator's display name, or null. */
+export function userFromGate(): string | null {
+  return currentUser;
+}
+
+/**
+ * ensureSignedIn runs the boot gate. Resolves when there's a verified session
+ * (currentUser populated). Never rejects on auth failure — the overlay stays
+ * shown until the operator signs in.
+ */
+export async function ensureSignedIn(): Promise<void> {
+  const overlay = requireOverlay();
+  const error = overlay.querySelector<HTMLElement>("#auth-error")!;
+  const form = overlay.querySelector<HTMLFormElement>("#auth-form")!;
+  const userInput = overlay.querySelector<HTMLInputElement>("#auth-username")!;
+  const pwInput = overlay.querySelector<HTMLInputElement>("#auth-password")!;
+  const submit = overlay.querySelector<HTMLButtonElement>("#auth-submit")!;
+
+  // Boot-time check: skip if we already see a session.
+  try {
+    const me = await whoami();
+    if (me) {
+      setSignedIn(me);
+      hideOverlay();
+      return;
+    }
+  } catch (err) {
+    // Network / unexpected status — show the overlay with the error visible,
+    // operator can still try to sign in.
+    error.textContent = `Cannot reach newtcon-server: ${describe(err)}`;
+    error.hidden = false;
+  }
+
+  showOverlay();
+
+  return new Promise<void>((resolve) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = userInput.value.trim();
+      const password = pwInput.value;
+      if (!username || !password) {
+        error.textContent = "Username and password are required.";
+        error.hidden = false;
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = "Signing in…";
+      error.hidden = true;
+      try {
+        const me = await login(username, password);
+        setSignedIn(me);
+        // Wipe the password field even though the overlay will hide.
+        pwInput.value = "";
+        hideOverlay();
+        resolve();
+      } catch (err) {
+        error.textContent = describe(err);
+        error.hidden = false;
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Sign in";
+      }
+    });
+  });
+}
+
+/**
+ * setupAuthGate wires the global auth:401 listener and the user pill's
+ * sign-out behaviour. Call from shell.ts boot AFTER ensureSignedIn settles.
+ */
+export function setupAuthGate(): void {
+  document.addEventListener("auth:401", () => {
+    // Session expired mid-session. Clear our display state, show the overlay
+    // again. The operator's view (Topology / Specs / whatever) stays in the
+    // background; signing back in returns them right where they were.
+    currentUser = null;
+    renderUserPill(null);
+    showOverlay();
+    const error = document.querySelector<HTMLElement>("#auth-error");
+    if (error) {
+      error.textContent = "Your session has expired. Please sign in again.";
+      error.hidden = false;
+    }
+    // Wire a one-shot submit handler for the re-sign-in.
+    const overlay = requireOverlay();
+    const form = overlay.querySelector<HTMLFormElement>("#auth-form")!;
+    const userInput = overlay.querySelector<HTMLInputElement>("#auth-username")!;
+    const pwInput = overlay.querySelector<HTMLInputElement>("#auth-password")!;
+    const submit = overlay.querySelector<HTMLButtonElement>("#auth-submit")!;
+    const handler = async (e: Event): Promise<void> => {
+      e.preventDefault();
+      submit.disabled = true;
+      submit.textContent = "Signing in…";
+      try {
+        const me = await login(userInput.value.trim(), pwInput.value);
+        setSignedIn(me);
+        pwInput.value = "";
+        hideOverlay();
+        form.removeEventListener("submit", handler);
+      } catch (err) {
+        if (error) {
+          error.textContent = describe(err);
+          error.hidden = false;
+        }
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Sign in";
+      }
+    };
+    form.addEventListener("submit", handler);
+  });
+
+  const signOutBtn = document.querySelector<HTMLButtonElement>("#user-signout");
+  if (signOutBtn) {
+    signOutBtn.addEventListener("click", async () => {
+      try {
+        await logout();
+      } finally {
+        // Reload so every view's cached state is shed alongside the session.
+        window.location.reload();
+      }
+    });
+  }
+}
+
+// ---- helpers --------------------------------------------------------------
+
+function setSignedIn(me: WhoamiResponse): void {
+  currentUser = me.user;
+  renderUserPill(me);
+  resolveSignedInOnce();
+}
+
+function renderUserPill(me: WhoamiResponse | null): void {
+  const label = document.querySelector<HTMLElement>("#user-pill-name");
+  const pill = document.querySelector<HTMLElement>("#user-pill");
+  if (!label || !pill) return;
+  if (!me) {
+    pill.hidden = true;
+    return;
+  }
+  label.textContent = me.user;
+  pill.hidden = false;
+}
+
+function requireOverlay(): HTMLElement {
+  const el = document.getElementById("auth-overlay");
+  if (!el) throw new Error("auth-overlay element missing from index.html");
+  return el;
+}
+
+function showOverlay(): void {
+  const el = requireOverlay();
+  el.hidden = false;
+  // Move focus into the form so the operator can type immediately.
+  setTimeout(() => {
+    const userInput = el.querySelector<HTMLInputElement>("#auth-username");
+    userInput?.focus();
+  }, 10);
+}
+
+function hideOverlay(): void {
+  const el = requireOverlay();
+  el.hidden = true;
+}
+
+function describe(err: unknown): string {
+  if (err instanceof ApiError) {
+    // Surface kind + message verbatim per operator-philosophy invariant #9.
+    return err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}

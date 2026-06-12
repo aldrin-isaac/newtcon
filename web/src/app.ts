@@ -2804,4 +2804,9 @@ async function mount(): Promise<void> {
   });
 }
 
-mount();
+// Gate the workspace mount on a successful sign-in so we don't fire /api/*
+// calls anonymously at boot and trigger spurious 401s. signedInOnce resolves
+// when auth-gate.ts has either confirmed an existing session via /api/auth/whoami
+// or completed an interactive login.
+import { signedInOnce } from "./auth-gate.js";
+void signedInOnce.then(mount);

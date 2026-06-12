@@ -1,0 +1,103 @@
+/* auth-gate.css — login overlay + user pill.
+ *
+ * Owned by auth-gate.ts. Consumes design-system tokens; no per-component
+ * colours.
+ */
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000; /* above palette (no fixed z but typically lower); below toast */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(28 25 23 / 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-overlay);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.auth-card-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.auth-card-subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.auth-field-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.auth-error {
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 4px;
+  padding: var(--space-2xs) var(--space-sm);
+}
+
+.auth-submit {
+  align-self: stretch;
+}
+
+/* ---- User pill ---------------------------------------------------------- */
+
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 1px var(--space-xs);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.user-pill[hidden] { display: none; }
+
+.user-pill-name {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.user-pill-signout {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 var(--space-2xs);
+  font-size: var(--text-xs);
+}
+
+.user-pill-signout:hover {
+  color: var(--color-danger);
+}

@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="design-system/motion.css" />
     <link rel="stylesheet" href="design-system/components.css" />
     <link rel="stylesheet" href="workspace.css" />
+    <link rel="stylesheet" href="auth-gate.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -63,6 +64,10 @@
               <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
               <span id="newtron-target">checking…</span>
             </span>
+            <span class="user-pill" id="user-pill" hidden title="Signed-in operator">
+              <span class="user-pill-name" id="user-pill-name"></span>
+              <button type="button" class="user-pill-signout" id="user-signout" title="Sign out">Sign out</button>
+            </span>
           </div>
         </header>
 
@@ -85,6 +90,26 @@
         </header>
         <div id="drawer-content" class="drawer-content"></div>
       </aside>
+
+      <!-- Auth overlay (hydrated by auth-gate.ts). Hidden by default; shown when
+           /api/auth/whoami returns 401 at boot or when any /api/* call returns
+           401 mid-session. -->
+      <div id="auth-overlay" class="auth-overlay" hidden role="dialog" aria-modal="true" aria-label="Sign in to newtcon">
+        <form id="auth-form" class="auth-card">
+          <h2 class="auth-card-title">Sign in to newtcon</h2>
+          <p class="auth-card-subtitle">Use your operator account credentials.</p>
+          <div id="auth-error" class="auth-error" hidden></div>
+          <label class="auth-field">
+            <span class="auth-field-label">Username</span>
+            <input type="text" class="input" id="auth-username" autocomplete="username" autocapitalize="off" autocorrect="off" required />
+          </label>
+          <label class="auth-field">
+            <span class="auth-field-label">Password</span>
+            <input type="password" class="input" id="auth-password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="btn btn-primary auth-submit" id="auth-submit">Sign in</button>
+        </form>
+      </div>
 
       <div id="palette-overlay" class="palette-overlay" hidden role="dialog" aria-modal="true" aria-label="Command palette">
         <div class="palette" role="document">
