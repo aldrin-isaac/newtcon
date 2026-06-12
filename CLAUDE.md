@@ -86,6 +86,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-actions-ui.ts    → floating right-click context menu
     icons.ts                  → inline-SVG icon set (Lucide)
     render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
+    auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
       services.ts             → /api/networks/{netID}/services

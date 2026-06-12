@@ -46,8 +46,9 @@ try {
   const specsPanelEmpty = await page.$eval("#panel-specs", (el) => el.children.length === 0);
   expect(specsPanelEmpty, "workspace panel-specs is empty (app mount gated on auth)");
 
-  // 3. User pill hidden when not signed-in.
-  const userPillHidden = await page.$eval("#user-pill", (el) => el.hasAttribute("hidden"));
+  // 3. User pill hidden when not signed-in. (The user-pill-wrap is the
+  //    visibility-toggled element; the trigger + dropdown live inside it.)
+  const userPillHidden = await page.$eval("#user-pill-wrap", (el) => el.hasAttribute("hidden"));
   expect(userPillHidden, "user pill hidden while not signed in");
 
   // 4. Successful sign-in: type creds, submit, overlay hides, app mounts.
@@ -76,9 +77,27 @@ try {
   expect(true, "workspace panel-specs mounts after sign-in");
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-02-signed-in.png" });
 
-  // 7. Sign-out: click the pill's button, page reloads, overlay returns.
-  // The button calls logout() then window.location.reload(); we navigate
-  // alongside to handle the reload.
+  // 6a. Pill dropdown opens on trigger click, shows username + expiry.
+  const dropdownHiddenBefore = await page.$eval("#user-pill-dropdown", (el) => el.hidden);
+  expect(dropdownHiddenBefore, "pill dropdown hidden before click");
+  await page.click("#user-pill-trigger");
+  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
+  const dropdownUser = await page.$eval("#user-pill-dropdown-username", (el) => el.textContent);
+  const expiresValue = await page.$eval("#user-pill-dropdown-expires", (el) => el.textContent);
+  expect(dropdownUser === USER, `dropdown shows username: "${dropdownUser}"`);
+  expect(/in /.test(expiresValue || ""), `dropdown shows expiry relative: "${expiresValue}"`);
+  await page.screenshot({ path: "/tmp/newtcon-smoke-auth-02b-dropdown.png" });
+
+  // 6b. Dropdown closes on outside click.
+  await page.evaluate(() => document.body.click());
+  await page.waitForFunction(() => document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
+  expect(true, "pill dropdown closes on outside click");
+
+  // 7. Sign-out: open the pill dropdown, click the signout button, page
+  // reloads, overlay returns. The button calls logout() then
+  // window.location.reload(); we navigate alongside to handle the reload.
+  await page.click("#user-pill-trigger");
+  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
   const [_, navOut] = await Promise.all([
     page.click("#user-signout"),
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }).catch(() => null),

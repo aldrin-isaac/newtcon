@@ -20,8 +20,11 @@
 
 import { whoami, login, logout, type WhoamiResponse } from "./api/newtcon/auth.js";
 import { ApiError } from "./api/newtcon/services.js";
+import { formatExpiryRelative, isNearExpiry } from "./auth-expiry.js";
 
 let currentUser: string | null = null;
+let currentExpiresAt: Date | null = null;
+let expiryTickHandle: ReturnType<typeof setInterval> | null = null;
 let resolveSignedInOnce: () => void = () => { /* replaced below */ };
 
 /**
@@ -160,26 +163,85 @@ export function setupAuthGate(): void {
       }
     });
   }
+
+  setupUserPillDropdown();
+}
+
+/**
+ * setupUserPillDropdown wires the click toggle + outside-click close for the
+ * user-pill dropdown. Mirrors the network-switcher pattern.
+ */
+function setupUserPillDropdown(): void {
+  const trigger = document.getElementById("user-pill-trigger");
+  const dropdown = document.getElementById("user-pill-dropdown");
+  if (!trigger || !dropdown) return;
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.hidden = !dropdown.hidden;
+    if (!dropdown.hidden) refreshExpiryUI();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (dropdown.hidden) return;
+    if (
+      e.target instanceof Node &&
+      (dropdown.contains(e.target) || trigger.contains(e.target))
+    ) return;
+    dropdown.hidden = true;
+  });
 }
 
 // ---- helpers --------------------------------------------------------------
 
 function setSignedIn(me: WhoamiResponse): void {
   currentUser = me.user;
+  currentExpiresAt = new Date(me.expires_at);
   renderUserPill(me);
+  startExpiryTick();
   resolveSignedInOnce();
 }
 
+/**
+ * startExpiryTick refreshes the dropdown's "expires in …" line and the pill's
+ * warning state on a 30 s cadence. The session middleware on the server is
+ * already authoritative — the browser-side timer is purely UX.
+ */
+function startExpiryTick(): void {
+  if (expiryTickHandle !== null) clearInterval(expiryTickHandle);
+  refreshExpiryUI();
+  expiryTickHandle = setInterval(refreshExpiryUI, 30_000);
+}
+
+function refreshExpiryUI(): void {
+  if (!currentExpiresAt) return;
+  const pill = document.getElementById("user-pill-trigger");
+  const expiresValueEl = document.getElementById("user-pill-dropdown-expires");
+  if (expiresValueEl) {
+    expiresValueEl.textContent = formatExpiryRelative(currentExpiresAt);
+    expiresValueEl.classList.toggle(
+      "user-pill-dropdown-value--warning",
+      isNearExpiry(currentExpiresAt),
+    );
+  }
+  if (pill) {
+    pill.classList.toggle("user-pill--warning", isNearExpiry(currentExpiresAt));
+  }
+}
+
 function renderUserPill(me: WhoamiResponse | null): void {
+  const wrap = document.querySelector<HTMLElement>("#user-pill-wrap");
   const label = document.querySelector<HTMLElement>("#user-pill-name");
-  const pill = document.querySelector<HTMLElement>("#user-pill");
-  if (!label || !pill) return;
+  const dropdownName = document.querySelector<HTMLElement>("#user-pill-dropdown-username");
+  if (!wrap || !label) return;
   if (!me) {
-    pill.hidden = true;
+    wrap.hidden = true;
+    if (expiryTickHandle !== null) { clearInterval(expiryTickHandle); expiryTickHandle = null; }
     return;
   }
   label.textContent = me.user;
-  pill.hidden = false;
+  if (dropdownName) dropdownName.textContent = me.user;
+  wrap.hidden = false;
 }
 
 function requireOverlay(): HTMLElement {
