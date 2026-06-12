@@ -16,6 +16,7 @@
 
 import { ApiError, type ErrorEnvelope } from "./api/newtcon/services.js";
 import { apiPath } from "./api-path.js";
+import { formatErrorBrief as formatError } from "./render-error.js";
 
 // ---- Pending change shapes -----------------------------------------------
 
@@ -342,11 +343,6 @@ async function parseOrThrow(r: Response): Promise<unknown> {
   return parsed;
 }
 
-function formatError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.kind ?? "error"}: ${err.message}`;
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
 
 // ---- Description (for the pending-bar list) ------------------------------
 

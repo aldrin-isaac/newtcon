@@ -23,6 +23,10 @@ import {
   ApiError,
   type ServiceListResponse,
 } from "../api/newtcon/services.js";
+import {
+  translateErrorKind,
+  formatAuthorizationDetails,
+} from "../render-error.js";
 
 // ---- DOM helper ---------------------------------------------------------
 
@@ -197,31 +201,32 @@ function renderNewtronUnavailableError(
 }
 
 /**
- * translateErrorKind converts a wire-shape error kind identifier (schema
- * symbol per editing-guidelines §42) into operator-readable text. The wire
- * kind never appears in the UI; this function is the translation boundary.
- */
-function translateErrorKind(kind: string): string {
-  switch (kind) {
-    case "validation_failure":   return "validation failed";
-    case "precondition_failure": return "precondition not met";
-    case "drift_refusal":        return "drift detected — refused to apply";
-    case "internal":             return "internal error";
-    default:                     return kind.replace(/_/g, " ");
-  }
-}
-
-/**
  * renderOtherApiError renders non-503 ApiError cases (validation_failure,
- * internal, precondition_failure, drift_refusal). Renders a translated error
- * label plus the error message, with HTTP status and the full details in a
- * <details> block for inspection.
+ * internal, precondition_failure, drift_refusal, authorization_failure,
+ * authentication_failure). Renders a translated error label plus the error
+ * message, with HTTP status and the full details in a <details> block for
+ * inspection.
+ *
+ * For kind="authorization_failure" the typed details fields {caller,
+ * permission, resource} are surfaced as the primary line so the operator
+ * sees "alice lacks spec.author on svc-b" rather than the server's compound
+ * "POST /api/.../create-service: authorization denied: …" string (which
+ * repeats the endpoint already visible in the URL bar / breadcrumb).
  */
 function renderOtherApiError(box: HTMLElement, err: ApiError): void {
   box.appendChild(
     el("p", { className: "error-kind" }, translateErrorKind(err.kind))
   );
-  box.appendChild(el("p", { className: "error-message" }, err.message));
+  if (err.kind === "authorization_failure") {
+    const structured = formatAuthorizationDetails(err.details);
+    if (structured) {
+      box.appendChild(el("p", { className: "error-message" }, structured));
+    } else {
+      box.appendChild(el("p", { className: "error-message" }, err.message));
+    }
+  } else {
+    box.appendChild(el("p", { className: "error-message" }, err.message));
+  }
 
   const details = el("details", { className: "error-details" });
   const summary = el("summary", {}, "HTTP " + String(err.status) + " — details");

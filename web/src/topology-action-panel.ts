@@ -12,9 +12,9 @@
 // All forms POST through the same generic catch-all (NodeRPC / InterfaceRPC).
 
 import { iconSVG } from "./icons.js";
-import { ApiError } from "./api/newtcon/services.js";
 import { apiFetch, apiSend } from "./api/newtcon/_transport.js";
 import { apiPath } from "./api-path.js";
+import { formatErrorBrief as formatError } from "./render-error.js";
 import {
   NODE_ACTIONS,
   INTERFACE_ACTIONS,
@@ -710,11 +710,6 @@ function panelError(text: string): HTMLElement {
   return el("p", { className: "panel-error" }, text);
 }
 
-function formatError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.kind ?? "error"}: ${err.message}`;
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
 
 function flash(target: HTMLElement, text: string, danger = false): void {
   const tag = el("span", { className: "topo-action-flash" + (danger ? " topo-action-flash--danger" : "") }, text);

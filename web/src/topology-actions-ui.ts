@@ -4,13 +4,13 @@
 // resulting parameters to the generic newtron RPC endpoints.
 
 import { iconSVG } from "./icons.js";
-import { ApiError } from "./api/newtcon/services.js";
 import {
   type ActionDef,
   type ActionField,
   type ActionGroup,
 } from "./topology-actions.js";
 import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
+import { formatErrorBrief as formatError } from "./render-error.js";
 
 // ---- API helpers (avoid importing app.ts to keep this self-contained) -----
 
@@ -332,13 +332,6 @@ function errorParagraph(text: string): HTMLElement {
   return p;
 }
 
-function formatError(err: unknown): string {
-  if (err instanceof ApiError) {
-    const kind = err.kind ?? "error";
-    return `${kind}: ${err.message}`;
-  }
-  return String(err);
-}
 
 // runAction / renderResult are no longer needed: actions are queued (not
 // POSTed immediately) via queueFromMenu / queueActionFromForm. The Apply
