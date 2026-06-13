@@ -1,181 +1,218 @@
-# Upstream update — newtron L2c (PAM-issued session keys)
+# Upstream update — newtron L2c, post-adoption refresh
 
 **Source:** `../newtron/docs/newtron/auth-design.md` §L2c, newtron
-PR #143 (merged 2026-06-10).
-**Why this matters here:** L2c was designed specifically to unblock
-browser clients. newtcon is the browser client. This update tells the
-lead what shipped, what the new HTTP endpoints look like, and what
-newtcon would need to do to adopt them. **It does not commit newtcon
-to adopting them yet** — promotion is operator-driven per
-`DIRECTIVE.md`.
+PRs #143 (initial L2c) through #151 (multi-user cache + scenario
+impersonation).
+**Status:** newtcon shipped its L2c adoption in slices 1.A–2.1
+(`internal/newtronc/auth.go`, `internal/session/session.go`,
+plus the frontend login UI). This document captures the upstream
+state newtcon should rely on going forward — what's stable, what
+one line of code to refactor, and what newtron added at adjacent
+layers that newtcon hasn't touched and probably doesn't need to.
 
 ---
 
-## What shipped in newtron
+## 1. What's stable now (the contract newtcon depends on)
 
-A successful PAM authentication can now mint an opaque **newtron
-session key** the client carries on subsequent requests as
-`Authorization: Bearer <key>`. ("Newtron session key" qualified to
-disambiguate from any browser-session concept newtcon may grow on
-its own side; from here on, "session key" in this document means
-the newtron one unless explicitly qualified.) The key resolves to
-the same verified Unix username PAM returned; downstream identity,
-authorization (L3/L4/L5), and audit (L1/L6) consume it identically
-to fresh PAM credentials.
+These shapes have settled after the L2c arc. newtcon can treat
+them as fixed contracts; any future change here would come with
+a deprecation cycle.
 
-HTTP endpoints (per `../newtron/docs/newtron/pam-howto.md` §7):
+### `POST /newtron/v1/auth/login`
 
 ```
-POST /newtron/v1/auth/login          (Authorization: Basic …)
-→ 200 { "key": "<43-char URL-safe base64>",
-        "expires_at": "2026-06-11T08:00:00Z",
-        "user": "alice" }
-
-POST /newtron/v1/auth/logout         (Authorization: Bearer …)
-→ 204 No Content (idempotent)
-
-every other newtron route now also accepts Authorization: Bearer …
+Request:  Authorization: Basic <base64(user:password)>
+Response: 200 + JSON envelope
+          {"data": {"key": "<43-char URL-safe base64>",
+                    "expires_at": "RFC3339 timestamp",
+                    "user": "alice"},
+           "error": ""}
 ```
 
-Server-side flags (must be on the `newtron-server` invocation —
-`newt-server` does not yet expose PAM):
+Failure modes:
+- 404 — `--auth-pam-service` is unset on the server (L2c not
+  engaged). newtcon-server treats this as "auth not enabled" and
+  proceeds without a cookie.
+- 401 — PAM rejected the Basic credentials. newtcon-server
+  surfaces "invalid credentials" to the operator without leaking
+  which dimension failed.
+- 200 with `error != ""` — server-side fault; surface as 502 to
+  the browser.
 
-- `--auth-pam-service=<name>` enables L2b (PAM). L2c auto-engages
-  with it.
-- `--session-key-ttl=<dur>` tunes absolute key lifetime (default
-  `8h`). Using a key does NOT extend it.
-- `--session-key-ttl=-1` suppresses L2c while keeping L2b — every
-  request hits PAM directly.
+The envelope is now the only response shape. See §2 for the
+concrete refactor this allows.
 
-Server restart invalidates every key (in-memory store; no
-persistence by design).
+### `POST /newtron/v1/auth/logout`
 
-## Why this is the right primitive for newtcon
+```
+Request:  Authorization: Bearer <key>
+Response: 204 No Content (idempotent — returns 204 even for
+          unknown / expired / never-issued keys)
+```
 
-The current `internal/newtronc/Client` sends requests with no caller
-identity attached. That works only against a server with
-`--enforce-authorization=false` or against the aggregated
-`newt-server` in its current PAM-less form. Against any
-production-grade newtron deployment, every newtcon request would
-401 or 403.
+newtcon-server calls this on cookie expiry / explicit logout. A
+204 means "the key won't work again from anywhere"; no further
+verification needed.
 
-Three plausible identity mechanisms for newtcon:
+### Bearer semantics on every other endpoint
 
-| Option | Verdict | Why |
-|---|---|---|
-| **Embed Basic auth in every fetch.** Operator types password into a newtcon login page, newtcon stores it in memory and sends it on every backend call. | Wrong. | The browser holds an unhashed password. JS storage is hostile turf. Plus every fetch hits PAM (directory or KDC round-trip per click). |
-| **Self-attested `X-Newtron-Caller` header.** The current test-suite mechanism. | Wrong. | newtron docs are explicit: this is "trustworthy only when the operator's deployment confirms no untrusted client can reach the listener." A browser doesn't fit. |
-| **L2c session keys.** Operator signs in once via Basic (newtcon → `/auth/login`), newtcon stores the key in memory or a `Secure; HttpOnly; SameSite=Strict` cookie, presents it on every subsequent call. | Right. | Password leaves memory the moment login returns. Bounded TTL. Revocable. PAM hit once per session, not per click. Exactly what L2c was designed for. |
+When `--auth-pam-service` is configured, every newtron route
+accepts `Authorization: Bearer <key>` and resolves the caller via
+the in-memory session-key store. A revoked or expired key gets
+401 immediately — no grace period, no soft fallback.
 
-## What newtcon would need to do to adopt
+### Audit log `verification_source` taxonomy
 
-This is a recommendation list for the lead to decide on, not a
-slice spec. Sized order-of-magnitude:
+newtcon doesn't read the audit log directly, but the L5
+authorization-failure inspector (slice 2.1) renders error
+payloads that include `verification_source`. The taxonomy is
+stable:
 
-1. **Login page** — minimal HTML form, two fields. On submit,
-   newtcon-server proxies the Basic auth to newtron's `/auth/login`,
-   captures the returned `{key, expires_at, user}`, and either:
-   - stores the key against an opaque newtcon-side cookie set with
-     the HTTP `Secure; HttpOnly; SameSite=Strict` attributes (the
-     cookie is the browser's handle; the newtron session key never
-     reaches the browser), or
-   - returns the newtron session key to the browser for in-memory
-     storage.
+| Value | Meaning |
+|---|---|
+| `pam` | Caller authenticated via Basic auth on `/auth/login` this request. |
+| `session_key` | Caller authenticated via Bearer header. Maps back to a `pam` event from the same user earlier in the log. |
+| `unix_peer_creds` | Local Unix-socket caller. Not applicable to newtcon's TCP traffic. |
+| `service_cert_cn` | mTLS peer cert. Applicable if newtcon-server ever moves to mTLS-to-newtron. |
+| `self_attested_header` | `X-Newtron-Caller` from header mode. **Not** used in PAM-enabled deployments — present only in dev / test setups. |
 
-   The cookie approach is simpler and keeps the newtron session key
-   out of JS. The in-memory approach is more robust to XSS (no
-   cookie to steal) but the trade-off is the browser session dying
-   on every reload. Operator call.
+newtcon's inspector can show "PAM-verified at HH:MM, session
+established for 8h" by joining `verification_source: pam` events
+with the corresponding `verification_source: session_key`
+mutations under the same user.
 
-2. **`internal/newtronc/Client` carries a Bearer header.** Three
-   options:
-   - Per-request: caller passes the key into each method call.
-     Explicit but verbose.
-   - On the `Client`: `WithSessionKey(key string)` Option at
-     construction. Implicit, clean.
-   - On the `http.Client.Transport`: a `RoundTripper` wrapper that
-     injects the header. Fully transparent.
+### TTL knob
 
-   The transport approach is the right pattern for a client whose
-   identity is fixed for the request's lifetime — matches stdlib
-   conventions.
+`--session-key-ttl` on the server (default 8h). Hard expiry —
+using a key does not extend it. newtcon's session-expiry warning
+in slice 1.D ("your session expires in N minutes") is the right
+shape; no refresh-token flow is coming.
 
-3. **Newtcon-server holds the cookie → key mapping.** When the
-   browser sends a session cookie, newtcon-server looks up the key
-   it stored at login, constructs a per-request newtronc.Client
-   with that key, and proxies the request. The key never crosses
-   the browser ↔ newtcon-server boundary as a header — only as a
-   cookie newtcon-server set.
+---
 
-4. **Expiry handling.** When newtron 401s with "invalid or expired
-   session key", newtcon-server clears the cookie and redirects to
-   the login page. Standard pattern; no surprises.
+## 2. One concrete refactor
 
-5. **Logout.** `POST /api/logout` on newtcon-server → proxy to
-   newtron `/auth/logout` → clear the cookie. The browser ends up
-   back at the login page on the next request.
+**`internal/newtronc/auth.go:76-91`** carries dual-shape decode
+logic for `/auth/login`:
 
-## Open design questions for the lead
+```go
+// Newtron's /auth/login returns the LoginResponse either enveloped
+// ({"data": {…}, "error": ""}) or bare ({"key", "expires_at", "user"});
+// both shapes are observed against newtron-server today. Tolerate both:
+// peek at the envelope, then fall through to the bare body when no data
+// field is present.
+```
 
-These are the calls the lead would close before opening an
-implementation slice. None of them block today's work — they're
-listed so they're visible:
+That comment is no longer true. The envelope is the only shape
+newtron emits (PR #148 normalized it; PR #149 confirmed it; PR
+#151 didn't touch it). The bare-shape fallback is dead code
+against any newtron version newtcon would realistically talk to.
 
-- **Cookie vs. in-memory?** Cookie is simpler; in-memory is
-  XSS-tolerant. Recommendation: cookie, because newtcon's operator
-  threat model is "trusted operator on a trusted workstation," not
-  "untrusted browser tab." But the lead decides.
-- **`newt-server` parity.** Does the lead want to wait until
-  `newt-server` has a `--auth-pam-service` flag, or adopt L2c
-  against a standalone `newtron-server`? Today the suites use
-  `newt-server` exclusively. If newtcon adopts L2c, the deployment
-  expectation flips. Worth flagging upstream.
-- **Auto-login during dev?** A `--no-auth` newtcon-server flag for
-  local development (talk to a newtron without
-  `--enforce-authorization`) keeps the dev loop cheap. Default
-  prod-mode and document the override.
-- **Multi-engine sessions.** L2c is newtron-only today. If newtcon
-  ever needs `/newtlab/v1/*` or `/newtrun/v1/*` with caller
-  identity, a separate session mechanism would be needed (or the
-  upstream work to promote L2c into `httputil` lands first).
-  Filing that visibility upstream might be worth doing if newtcon
-  cares about it within the next slice or two.
+**Refactor**: drop the `payload = body` fallback at line 90.
+Decode `env.Data` directly into `LoginResponse`. Roughly:
 
-## Open questions for upstream
+```go
+if env.Error != "" {
+    return nil, &UnavailableError{Cause: env.Error}
+}
+var data LoginResponse
+if err := json.Unmarshal(env.Data, &data); err != nil {
+    return nil, &UnavailableError{Cause: fmt.Sprintf("decoding login response: %v", err)}
+}
+if data.Key == "" {
+    return nil, &UnavailableError{Cause: "login response missing key"}
+}
+return &data, nil
+```
 
-Worth raising on the newtron side if the lead wants any of these:
+~10 lines removed. Update the leading comment to "the
+{data, error} envelope is the only shape newtron emits."
 
-- **Cookie endpoint?** L2c returns JSON. A `Set-Cookie`-based
-  variant of `/auth/login` would let newtcon-server skip the
-  JSON-then-cookie translation step. Not blocking; nice to have.
-- **Refresh tokens.** Explicitly out of scope in L2c — using a key
-  doesn't extend its lifetime. If 8h is too short for newtcon's
-  expected sessions, the operator-side knob is
-  `--session-key-ttl`. If it's too long for browser hygiene, raise
-  upstream for a shorter cap.
-- **CORS.** newtcon-server is the only process the browser talks to
-  today; the browser doesn't reach newtron directly. If that ever
-  changes, CORS on `/auth/login` would need explicit handling.
+That's the entire actionable change. Everything else newtron
+added since slice 1.C lives at layers newtcon hasn't adopted and
+likely won't.
 
-## Status
+---
 
-- newtron L2c: shipped, merged, available against
-  `newtron-server --auth-pam-service=<name>`.
-- newtron suite coverage: disabled-path safety pinned by
-  `1node-vs-auth/25-L2c-disabled-routes`; full round-trip is
-  manual-verify-only today.
-- newtcon adoption: **not started.** Filed here for visibility
-  per `DIRECTIVE.md`'s capability-discipline section ("maximize
-  what newtron / newtrun / newtlab offers").
+## 3. What's at adjacent layers (FYI)
+
+newtron grew three things in PRs #149–#151 that aren't part of
+the contract newtcon adopted. Listed here so the team knows they
+exist when future slices touch related areas.
+
+### Per-user CLI session cache (`~/.newtron/sessions/`)
+
+Newtron grew a multi-user disk cache for its CLI tools (`bin/newtron`,
+`bin/newtrun`, `bin/newtlab`). Layout: one file per `(user, server)`
+pair at `~/.newtron/sessions/<user>@<host>.json`, mode 0600. The
+CLI commands `newtron auth login` / `auth logout` / `auth status`
+manage the cache.
+
+**Relevance to newtcon**: zero today. newtcon's session storage
+lives in `internal/session/session.go` and is server-side (cookie
+→ Bearer map, in-memory). The two don't overlap. If newtcon ever
+adds a "the operator can also run CLI tools that share their web
+login" feature — letting an operator who logged in through the
+browser then also drive `newtron service list` from a shell — the
+disk cache layout is what they'd integrate with. Not on any
+roadmap today.
+
+### Scenario-level impersonation in newtrun (`as: <user>`)
+
+newtrun gained a per-step `as: <user>` field in PR #151. The
+runner picks up a Bearer for the named user from a multi-user
+session map the CLI submits at run start. This is how the
+1node-vs-auth suite runs all 11 scenarios under PAM in one server
+invocation, with mallory's denial assertions correctly evaluated
+against mallory's grants.
+
+**Relevance to newtcon**: zero today. newtcon is a UI for newtron,
+not a driver of newtrun. If newtcon ever surfaces "run a suite
+from the UI as user X" — for example a CI dashboard or a
+test-the-other-team's-grants debug tool — `as:` is the underlying
+mechanism. Not on any roadmap today.
+
+### `SessionProblem` surfacing
+
+`pkg/newtron/client.ListSessions` returns a `(valid []*SessionRecord,
+problems []SessionProblem, error)` triple — the problems list
+carries cache files the loader couldn't trust (wrong mode,
+malformed JSON). `newtron auth status` prints these as warnings
+so a tampered file can't silently disappear from view.
+
+**Relevance to newtcon**: zero today; only relevant if newtcon
+ever reads the disk cache directly (see "Per-user CLI session
+cache" above).
+
+---
+
+## 4. What did NOT change
+
+- The bearer-token protocol. `Authorization: Bearer <key>` works
+  exactly as it did at slice 1.C adoption time.
+- The 401-on-revoke contract. A logged-out or expired key returns
+  401 immediately on the next call.
+- The audit envelope every other endpoint uses (`{data, error}`).
+- The `--audit-log-integrity` hash chain (newtcon doesn't read the
+  audit log, but operators who do still get the L6 tamper-evident
+  shape).
+
+---
 
 ## Cross-references
 
 - `../newtron/docs/newtron/auth-design.md` §L2c — authoritative
   design rationale.
-- `../newtron/docs/newtron/pam-howto.md` §7 — operator howto for
-  the round trip + revocation knobs.
-- `../newtron/newtrun/suites/1node-vs-auth/README.md` — manual
-  verification pattern (curl + jq) suitable for adapting into a
-  newtcon smoke test.
-- newtron PR #143 — implementation.
-- newtron PR #144 — suite scenario.
+- `../newtron/docs/newtron/pam-howto.md` §7 — server-side operator
+  setup, including the per-user CLI cache pattern.
+- newtron PR #143 — initial L2c implementation (envelope at this
+  point was bare; later normalized).
+- newtron PR #148 — `/auth/login` switched to the standard
+  envelope shape.
+- newtron PR #149 — per-user CLI cache + `newtron auth login`.
+- newtron PR #151 — multi-user cache + scenario-level `as:`.
+- newtcon PR #154 (slice 1.C) — newtcon's L2c login adoption.
+- newtcon PR #155 (slice 1.D) — gated workspace + 401 redirect.
+- newtcon PR #156 (slice 2.1) — authorization-failure inspector
+  (consumer of `verification_source`).
+- newtcon PR #157 (slice 1 polish) — session-expiry warning.
