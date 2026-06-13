@@ -261,3 +261,37 @@ func TestAddRoutePolicyRule_Success(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 }
+
+// TestShowSpec_UsesPluralKindInURL pins the bug fixed in the
+// "view profile from Topology" slice: ShowSpec must use the plural form of
+// the kind in the URL path ("profiles", not "profile"). Before the fix every
+// per-spec detail GET silently 404'd because the handler passed the singular
+// create-verb suffix.
+func TestShowSpec_UsesPluralKindInURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/newtron/v1/networks/default/profiles/switch1" {
+			t.Errorf("unexpected request: %s %s (expected /newtron/v1/networks/default/profiles/switch1)", r.Method, r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"mgmt_ip":"10.0.0.1","loopback_ip":"127.0.0.1","zone":"amer"},"error":""}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	raw, err := c.ShowSpec(context.Background(), "default", "profiles", "switch1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var data struct {
+		MgmtIP string `json:"mgmt_ip"`
+		Zone   string `json:"zone"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	if data.MgmtIP != "10.0.0.1" || data.Zone != "amer" {
+		t.Errorf("unexpected payload fields: %+v", data)
+	}
+}

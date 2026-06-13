@@ -1123,6 +1123,7 @@ function renderTopologySVG(
 // vocabulary, per vocabulary discipline in the slice spec).
 const NODE_TABS = [
   { id: "overview",  label: "Overview" },
+  { id: "profile",   label: "Profile" },
   { id: "interfaces", label: "Interfaces" },
   { id: "vlans",     label: "VLANs" },
   { id: "vrfs",      label: "VRFs" },
@@ -1161,6 +1162,29 @@ function renderErrorInto(container: HTMLElement, err: unknown): void {
     container.appendChild(el("p", { className: "panel-error" }, "Request failed"));
     container.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
   }
+}
+
+// renderProfileNotFound renders the empty-state for the Profile sub-tab when
+// no profile spec is named after the device. Two reasons this can happen:
+//
+//   - Older topologies created before the unified-substrate convention
+//     (PR #148) may name profile and device differently.
+//   - The profile was deleted but the topology entry survived.
+//
+// We surface this honestly rather than rendering a generic "not found" — the
+// operator's mental model of "every node has a profile" should not be
+// silently violated by the UI.
+function renderProfileNotFound(container: HTMLElement, device: string): void {
+  container.textContent = "";
+  container.appendChild(el("p", { className: "panel-error" }, "No profile found"));
+  container.appendChild(el(
+    "p",
+    { className: "panel-error-detail" },
+    `No profile spec named "${device}" exists for this device. ` +
+    "Profiles and device names are conventionally identical (created together " +
+    "from the Topology view). If this device's profile uses a different name, " +
+    "find it under the Specs view → Device profiles."
+  ));
 }
 
 // renderValueInto places renderValue output into a container, adding .drawer-detail.
@@ -1856,6 +1880,24 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       fetchNodeInfo(device)
         .then((data) => renderValueInto(container, data))
         .catch((err) => renderErrorInto(container, err));
+      break;
+
+    case "profile":
+      // The profile spec is the device's static identity (mgmt_ip, loopback_ip,
+      // zone, platform, ssh_user). The unified-substrate convention (PR #148)
+      // creates profiles with the same name as the device — so a per-device
+      // fetch is just fetchSpecDetail("profiles", device). Older topologies
+      // may use a different naming convention; the 404 branch surfaces that
+      // honestly rather than rendering an opaque error.
+      fetchSpecDetail("profiles", device)
+        .then((data) => renderValueInto(container, data))
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 404) {
+            renderProfileNotFound(container, device);
+            return;
+          }
+          renderErrorInto(container, err);
+        });
       break;
 
     case "interfaces":
