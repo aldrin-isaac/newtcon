@@ -259,6 +259,12 @@ func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy stri
 // ShowSpec returns the full newtron payload for a single spec instance.
 // Returns the decoded "data" field as RawMessage — callers forward it
 // verbatim to keep the substrate honest (no field stripping, no rename).
+//
+// kind is the URL path segment, which is plural for every spec type:
+// "services" / "profiles" / "zones" / "qos-policies" / etc. Do not pass the
+// singular create-/delete- verb suffix (e.g. "profile") — newtron's mux
+// will 404. The handler caller in internal/handlers/network.go passes the
+// plural form from the (url, newtronKind) pair.
 func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json.RawMessage, error) {
 	url := fmt.Sprintf("%s/networks/%s/%s/%s", c.newtronBase(), network, kind, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

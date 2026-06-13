@@ -93,7 +93,14 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 			ctx := r.Context()
 			netID := r.PathValue("netID")
 			name := r.PathValue("name")
-			payload, err := c.ShowSpec(ctx, netID, k.newtronKind, name)
+			// newtron's per-spec detail route is plural (matches the list
+			// path one level up: GET /networks/{n}/profiles/{name}, not
+			// /profile/{name}). Pass k.url (plural) not k.newtronKind
+			// (singular, which is the create-/delete- verb suffix).
+			// Pre-PR every detail GET 404'd silently — k.newtronKind
+			// produced /newtron/v1/networks/{n}/profile/{name} which
+			// newtron's mux doesn't recognise.
+			payload, err := c.ShowSpec(ctx, netID, k.url, name)
 			if err != nil {
 				writeUpstreamError(w, cid(ctx), err,
 					k.newtronKind+" "+name+" at /api/networks/"+netID+"/"+k.url+"/"+name, nil)
