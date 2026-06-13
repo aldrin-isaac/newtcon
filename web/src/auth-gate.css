@@ -68,7 +68,14 @@
   align-self: stretch;
 }
 
-/* ---- User pill ---------------------------------------------------------- */
+/* ---- User pill + dropdown ----------------------------------------------- */
+
+.user-pill-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.user-pill-wrap[hidden] { display: none; }
 
 .user-pill {
   display: inline-flex;
@@ -80,24 +87,82 @@
   border-radius: 999px;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
-}
-
-.user-pill[hidden] { display: none; }
-
-.user-pill-name {
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.user-pill-signout {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
   cursor: pointer;
-  padding: 0 var(--space-2xs);
-  font-size: var(--text-xs);
+  transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
 
-.user-pill-signout:hover {
+.user-pill:hover { background: var(--color-surface-hover); }
+
+/* Near-expiry: amber treatment so the operator notices the session is
+ * about to die before the next /api/* call returns 401. */
+.user-pill--warning {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.user-pill--warning:hover { background: var(--color-warning-bg); }
+
+.user-pill-name { font-weight: 500; color: var(--color-text-primary); }
+.user-pill--warning .user-pill-name { color: var(--color-warning); }
+
+.user-pill-chevron { display: inline-flex; }
+.user-pill-chevron svg { width: 12px; height: 12px; }
+
+.user-pill-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2xs));
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-overlay);
+  padding: var(--space-sm);
+  min-width: 220px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.user-pill-dropdown[hidden] { display: none; }
+
+.user-pill-dropdown-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-pill-dropdown-label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.user-pill-dropdown-value {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.user-pill-dropdown-value--warning {
+  color: var(--color-warning);
+}
+
+.user-pill-dropdown-signout {
+  margin-top: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  border-radius: 4px;
   color: var(--color-danger);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: var(--font-system);
+}
+
+.user-pill-dropdown-signout:hover {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
 }

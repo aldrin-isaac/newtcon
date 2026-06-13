@@ -64,10 +64,23 @@
               <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
               <span id="newtron-target">checking…</span>
             </span>
-            <span class="user-pill" id="user-pill" hidden title="Signed-in operator">
-              <span class="user-pill-name" id="user-pill-name"></span>
-              <button type="button" class="user-pill-signout" id="user-signout" title="Sign out">Sign out</button>
-            </span>
+            <div class="user-pill-wrap" id="user-pill-wrap" hidden>
+              <button type="button" class="user-pill" id="user-pill-trigger" title="Signed-in operator — click for details">
+                <span class="user-pill-name" id="user-pill-name"></span>
+                <span class="user-pill-chevron" data-icon="chevron-down"></span>
+              </button>
+              <div class="user-pill-dropdown" id="user-pill-dropdown" hidden role="menu">
+                <div class="user-pill-dropdown-row">
+                  <div class="user-pill-dropdown-label">Signed in as</div>
+                  <div class="user-pill-dropdown-value" id="user-pill-dropdown-username"></div>
+                </div>
+                <div class="user-pill-dropdown-row">
+                  <div class="user-pill-dropdown-label">Session expires</div>
+                  <div class="user-pill-dropdown-value" id="user-pill-dropdown-expires"></div>
+                </div>
+                <button type="button" class="user-pill-dropdown-signout" id="user-signout">Sign out</button>
+              </div>
+            </div>
           </div>
         </header>
 
