@@ -105,15 +105,46 @@ try {
     `Profile tab activated and showed a recognisable state: "${value}"`
   );
 
-  // If profile rendered, sanity-check a typical field appears somewhere in the
-  // panel — mgmt_ip is the strongest signal it's actually the device profile.
+  // If profile rendered, sanity-check the tailored layout took effect:
+  //   - the schema-aware labels appear ("Management IP", not "mgmt_ip")
+  //   - the panel uses the .spec-detail-label class (the labeled-row layout)
+  //   - ssh_pass — present in the raw newtron response but NOT in the schema —
+  //     lives inside the "All fields" disclosure, not in the prominent rows.
   if (value === "rendered") {
-    const hasMgmtField = await page.evaluate(() => {
+    const layoutSignal = await page.evaluate(() => {
       const panel = document.getElementById("node-panel-profile");
-      if (!panel) return false;
-      return /mgmt_ip|loopback_ip|zone|platform/.test(panel.textContent || "");
+      if (!panel) return null;
+      const rowLabels = Array.from(panel.querySelectorAll(".spec-detail-label:not(.spec-detail-label--extra)"))
+        .map((el) => (el.textContent || "").trim());
+      const extraLabels = Array.from(panel.querySelectorAll(".spec-detail-label--extra"))
+        .map((el) => (el.textContent || "").trim());
+      return {
+        prominent: rowLabels,
+        extras: extraLabels,
+        hasDisclosure: !!panel.querySelector(".spec-detail-extras"),
+      };
     });
-    expect(hasMgmtField, "rendered profile contains a device-profile field (mgmt_ip / loopback_ip / zone / platform)");
+    expect(layoutSignal !== null, "tailored layout DOM is present (.spec-detail-label present)");
+    expect(
+      layoutSignal.prominent.includes("Management IP"),
+      `prominent rows use operator labels: ${JSON.stringify(layoutSignal.prominent)}`
+    );
+    expect(
+      !layoutSignal.prominent.includes("ssh_pass"),
+      "ssh_pass (not in schema) is NOT a prominent row"
+    );
+    // ssh_pass might or might not exist depending on the test newtron's config.
+    // If it's present, it MUST be in the extras disclosure, not in prominent.
+    const newtronReturnsSshPass = await page.evaluate(() => {
+      const panel = document.getElementById("node-panel-profile");
+      return panel ? (panel.textContent || "").includes("ssh_pass") : false;
+    });
+    if (newtronReturnsSshPass) {
+      expect(
+        layoutSignal.hasDisclosure && layoutSignal.extras.includes("ssh_pass"),
+        "ssh_pass surfaces only in the 'All fields' disclosure"
+      );
+    }
   }
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-profile-tab-02-tab.png" });

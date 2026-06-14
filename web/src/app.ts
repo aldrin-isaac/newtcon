@@ -51,6 +51,7 @@ import {
 } from "./api/newtcon/nodes.js";
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
+import { buildSpecDetailShape } from "./spec-detail-shape.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
@@ -724,11 +725,21 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
   try {
     const detail = await fetchSpecDetail(kind, name);
     content.removeChild(loading);
-    const body = renderValue(detail);
-    if (body instanceof HTMLElement) {
-      body.classList.add("drawer-detail");
+
+    // Schema-aware rendering when specForms knows this kind; generic
+    // recursive tree as the fallback so unknown kinds still render.
+    const fields = specForms[kind];
+    if (fields) {
+      const body = el("div");
+      renderSpecDetailInto(body, fields, detail);
+      content.appendChild(body);
+    } else {
+      const body = renderValue(detail);
+      if (body instanceof HTMLElement) {
+        body.classList.add("drawer-detail");
+      }
+      content.appendChild(body);
     }
-    content.appendChild(body);
 
     // Render existing sub-rule items with delete affordances.
     const subRuleConf = subRuleForms[kind];
@@ -1195,6 +1206,54 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
     body.classList.add("drawer-detail");
   }
   container.appendChild(body);
+}
+
+// renderSpecDetailInto renders spec data with a tailored, schema-aware
+// layout: each schema field becomes a labeled row in the order the schema
+// defines, and any extra fields newtron returned (not in the schema) sit
+// inside an "All fields" disclosure so the operator never silently loses
+// visibility of newtron data — even fields the schema hasn't been updated
+// to cover (e.g. ssh_pass, additions made after this build).
+//
+// Falls back to renderValueInto when data is not an object (defensive
+// against newtron returning a primitive or null).
+function renderSpecDetailInto(container: HTMLElement, fields: FieldDef[], data: unknown): void {
+  container.textContent = "";
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    renderValueInto(container, data);
+    return;
+  }
+  // "name" is rendered in the drawer header already (drawer-name); skip it
+  // here to avoid a redundant row in the body.
+  const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name"]);
+
+  const dl = el("dl", { className: "spec-detail drawer-detail" });
+  for (const row of shape.rows) {
+    dl.appendChild(el("dt", { className: "spec-detail-label" }, row.label));
+    const dd = el("dd", { className: "spec-detail-value" });
+    dd.appendChild(row.empty
+      ? el("span", { className: "spec-detail-empty" }, "—")
+      : renderValue(row.value));
+    dl.appendChild(dd);
+  }
+  container.appendChild(dl);
+
+  if (shape.extras.length > 0) {
+    const det = el("details", { className: "spec-detail-extras" });
+    det.appendChild(el("summary", { className: "spec-detail-extras-summary" },
+      `All fields (${shape.extras.length} additional)`));
+    const dlx = el("dl", { className: "spec-detail" });
+    for (const row of shape.extras) {
+      dlx.appendChild(el("dt", { className: "spec-detail-label spec-detail-label--extra" }, row.label));
+      const dd = el("dd", { className: "spec-detail-value" });
+      dd.appendChild(row.empty
+        ? el("span", { className: "spec-detail-empty" }, "—")
+        : renderValue(row.value));
+      dlx.appendChild(dd);
+    }
+    det.appendChild(dlx);
+    container.appendChild(det);
+  }
 }
 
 // openBindServiceDrawer opens a form drawer for binding a service to an interface.
@@ -1889,8 +1948,15 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       // fetch is just fetchSpecDetail("profiles", device). Older topologies
       // may use a different naming convention; the 404 branch surfaces that
       // honestly rather than rendering an opaque error.
+      //
+      // Render with the schema-aware layout (labeled rows) rather than the
+      // generic recursive tree — the profile schema is known to specForms.
       fetchSpecDetail("profiles", device)
-        .then((data) => renderValueInto(container, data))
+        .then((data) => {
+          const fields = specForms["profiles"];
+          if (fields) renderSpecDetailInto(container, fields, data);
+          else renderValueInto(container, data);
+        })
         .catch((err) => {
           if (err instanceof ApiError && err.status === 404) {
             renderProfileNotFound(container, device);
