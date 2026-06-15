@@ -51,7 +51,8 @@ internal/server/              → HTTP routing infrastructure
   static.go                   → static asset serving + docs serving
 internal/handlers/            → one file per resource family
   health.go                   → /api/health
-  auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store)
+  config.go                   → /api/config (deployment posture descriptor — auth_required, …)
+  auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store; returns 404 when --auth-required is off)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
@@ -95,6 +96,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
       nodes.ts                → /api/networks/{netID}/{topology,nodes/...}
       lab.ts                  → /api/labs/{name}/... (newtlab — not network-scoped)
       auth.ts                 → /api/auth/{login,logout,whoami}
+      config.ts               → /api/config (deployment posture — auth_required, …)
     services/                 → Specs-tab service detail views
   test/                       → node:test files + puppeteer smokes (web/test/smoke/)
   dist/                       → tsc output (served by --web-dir)

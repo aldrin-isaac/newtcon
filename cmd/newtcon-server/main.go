@@ -42,6 +42,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "PEM file with newtcon-server's TLS certificate chain. When set together with --tls-key, the server serves HTTPS; otherwise it serves plain HTTP (dev).")
 	tlsKey := flag.String("tls-key", "", "PEM file with newtcon-server's TLS private key. Must be set together with --tls-cert.")
 	cookieSecure := flag.String("cookie-secure", "auto", "Session-cookie Secure attribute: \"auto\" (default — true when --tls-cert/--tls-key are set, false otherwise), \"true\" (reverse-proxy deployments where TLS terminates upstream), or \"false\" (plain-HTTP dev only).")
+	authRequired := flag.Bool("auth-required", false, "When set, newtcon-server runs the L2c login flow: /api/auth/{login,logout,whoami} are active, the frontend gates the workspace behind a login overlay, and outbound newtronc calls carry the operator's bearer. Default is false (anonymous / playground mode) so a fresh clone reaches the workspace with one command. PRODUCTION DEPLOYMENTS MUST SET THIS.")
 	webDir := flag.String("web-dir", "web/dist", "directory of compiled frontend static assets to serve at /; empty or non-existent disables static serving")
 	docsDir := flag.String("docs-dir", "docs", "directory of operator documentation to serve at /docs/; empty or non-existent disables docs serving")
 	docsRootDir := flag.String("docs-root-dir", ".", "repository root directory; CLAUDE.md and API_CONTRACT.md are served from here at /CLAUDE.md and /API_CONTRACT.md")
@@ -70,6 +71,9 @@ func main() {
 	}
 	if !cookieSecureResolved {
 		log.Printf("WARNING: session cookie will be sent without the Secure attribute. Operator credentials over plain HTTP are at risk; this mode is intended for dev only.")
+	}
+	if !*authRequired {
+		log.Printf("WARNING: --auth-required=false; newtcon-server is serving anonymous traffic. Intended for development / playground use; PRODUCTION DEPLOYMENTS MUST SET --auth-required.")
 	}
 
 	tlsCfg, err := newtronc.BuildTLSConfig(*newtronCACert, *newtronSkipTLSVerify)
@@ -137,8 +141,13 @@ func main() {
 		Client:        nc,
 		Store:         sessionStore,
 		CookieSecure:  cookieSecureResolved,
+		AuthRequired:  *authRequired,
 		CorrelationID: server.CorrelationIDFromContext,
 	})
+
+	// Deployment posture surface for the frontend to read at boot (auth-gate
+	// uses it to skip the overlay flow entirely in anonymous mode).
+	mux.Handle("GET /api/config", handlers.NewConfigHandler(*authRequired))
 
 	// Static-asset serving must be registered after all /api/* routes so
 	// that the more-specific /api/* patterns take precedence in the mux.
@@ -168,8 +177,8 @@ func main() {
 		scheme = "https"
 	}
 
-	log.Printf("newtcon-server listening on %s://%s (newtron-url=%q newtron-timeout=%s newtron-ca-cert=%q newtron-skip-tls-verify=%t tls-cert=%q tls-key=%q cookie-secure=%s (resolved=%t) web-dir=%q docs-dir=%q)",
-		scheme, *addr, *newtronURL, *newtronTimeout, *newtronCACert, *newtronSkipTLSVerify, *tlsCert, *tlsKey, *cookieSecure, cookieSecureResolved, *webDir, *docsDir)
+	log.Printf("newtcon-server listening on %s://%s (newtron-url=%q newtron-timeout=%s newtron-ca-cert=%q newtron-skip-tls-verify=%t tls-cert=%q tls-key=%q cookie-secure=%s (resolved=%t) auth-required=%t web-dir=%q docs-dir=%q)",
+		scheme, *addr, *newtronURL, *newtronTimeout, *newtronCACert, *newtronSkipTLSVerify, *tlsCert, *tlsKey, *cookieSecure, cookieSecureResolved, *authRequired, *webDir, *docsDir)
 
 	var serveErr error
 	if tlsOn {
