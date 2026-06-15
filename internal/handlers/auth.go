@@ -30,18 +30,40 @@ import (
 // AuthDeps wires the three /api/auth/* endpoints. CookieSecure controls the
 // Set-Cookie Secure attribute — true when newtcon-server is serving HTTPS,
 // false when the operator explicitly opted into the dev escape hatch.
+//
+// AuthRequired (set from --auth-required on the server) flips the deployment
+// posture. When false (the dev/playground default), the three auth routes
+// return 404 with a "authentication not enabled" envelope so the frontend
+// can render the workspace in anonymous mode without bouncing off the gate.
+// When true, the full L2c login flow is active.
 type AuthDeps struct {
 	Client        *newtronc.Client
 	Store         *session.Store
 	CookieSecure  bool
+	AuthRequired  bool
 	CorrelationID func(context.Context) string
 }
 
 // RegisterAuthRoutes installs login / logout / whoami on mux.
+//
+// Routes are always registered (so 404 vs "endpoint missing" is a clear
+// signal); the anonymous-mode behaviour is implemented inside each handler
+// by inspecting deps.AuthRequired.
 func RegisterAuthRoutes(mux *http.ServeMux, deps AuthDeps) {
 	mux.Handle("POST /api/auth/login", handleAuthLogin(deps))
 	mux.Handle("POST /api/auth/logout", handleAuthLogout(deps))
 	mux.Handle("GET /api/auth/whoami", handleAuthWhoami(deps))
+}
+
+// writeAuthNotEnabled is the canned response for auth routes when
+// newtcon-server is running in anonymous mode (--auth-required=false).
+// 404 + KindPreconditionFailure conveys "this endpoint is not available
+// on this deployment" — the same envelope shape any other not-here route
+// returns, so the frontend's existing error path handles it uniformly.
+func writeAuthNotEnabled(w http.ResponseWriter, corrID string) {
+	types.WriteError(w, http.StatusNotFound, types.KindPreconditionFailure,
+		"authentication is not enabled on this newtcon-server (start with --auth-required to enable)",
+		map[string]any{"correlation_id": corrID})
 }
 
 type loginRequest struct {
@@ -60,6 +82,10 @@ func handleAuthLogin(deps AuthDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		corrID := deps.CorrelationID(ctx)
+		if !deps.AuthRequired {
+			writeAuthNotEnabled(w, corrID)
+			return
+		}
 
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -113,6 +139,10 @@ func handleAuthLogin(deps AuthDeps) http.HandlerFunc {
 
 func handleAuthLogout(deps AuthDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !deps.AuthRequired {
+			writeAuthNotEnabled(w, deps.CorrelationID(r.Context()))
+			return
+		}
 		c, err := r.Cookie(session.CookieName)
 		if err == nil && c.Value != "" {
 			// Best-effort upstream logout: success or failure, the local
@@ -130,6 +160,10 @@ func handleAuthLogout(deps AuthDeps) http.HandlerFunc {
 func handleAuthWhoami(deps AuthDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		corrID := deps.CorrelationID(r.Context())
+		if !deps.AuthRequired {
+			writeAuthNotEnabled(w, corrID)
+			return
+		}
 		c, err := r.Cookie(session.CookieName)
 		if err != nil || c.Value == "" {
 			types.WriteError(w, http.StatusUnauthorized, types.KindAuthenticationFailure,

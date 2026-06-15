@@ -26,6 +26,23 @@ func newAuthMux(t *testing.T, upstreamURL string, store *session.Store) *http.Se
 		Client:        newtronc.New(upstreamURL),
 		Store:         store,
 		CookieSecure:  false, // tests use plain HTTP
+		AuthRequired:  true,  // existing tests target the live auth path
+		CorrelationID: constCorrelationID(""),
+	})
+	return mux
+}
+
+// newAnonymousAuthMux builds the mux as it would be when newtcon-server
+// starts without --auth-required: every /api/auth/* route returns 404 with
+// an "authentication not enabled" envelope.
+func newAnonymousAuthMux(t *testing.T) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	handlers.RegisterAuthRoutes(mux, handlers.AuthDeps{
+		Client:        newtronc.New("http://unused"),
+		Store:         session.NewStore(),
+		CookieSecure:  false,
+		AuthRequired:  false,
 		CorrelationID: constCorrelationID(""),
 	})
 	return mux
@@ -206,5 +223,45 @@ func TestAuthWhoami_Expired(t *testing.T) {
 	}
 	if store.Len() != 0 {
 		t.Errorf("expected expired entry evicted, got Len=%d", store.Len())
+	}
+}
+
+// ---- Anonymous mode (--auth-required=false) -------------------------------
+
+func TestAuth_Anonymous_LoginReturns404(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		strings.NewReader(`{"username":"a","password":"b"}`))
+	w := httptest.NewRecorder()
+	newAnonymousAuthMux(t).ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404", w.Code)
+	}
+	var env map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	errMap, _ := env["error"].(map[string]any)
+	if errMap["kind"] != "precondition_failure" {
+		t.Errorf("kind=%v want precondition_failure", errMap["kind"])
+	}
+	msg, _ := errMap["message"].(string)
+	if !strings.Contains(msg, "not enabled") {
+		t.Errorf("message=%q should mention 'not enabled'", msg)
+	}
+}
+
+func TestAuth_Anonymous_LogoutReturns404(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	w := httptest.NewRecorder()
+	newAnonymousAuthMux(t).ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404", w.Code)
+	}
+}
+
+func TestAuth_Anonymous_WhoamiReturns404(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
+	w := httptest.NewRecorder()
+	newAnonymousAuthMux(t).ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404", w.Code)
 	}
 }

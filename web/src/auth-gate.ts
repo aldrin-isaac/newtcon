@@ -19,6 +19,7 @@
 // The overlay markup is owned by index.html — this module hydrates it.
 
 import { whoami, login, logout, type WhoamiResponse } from "./api/newtcon/auth.js";
+import { fetchConfig } from "./api/newtcon/config.js";
 import { ApiError } from "./api/newtcon/services.js";
 import { formatExpiryRelative, isNearExpiry } from "./auth-expiry.js";
 
@@ -46,9 +47,10 @@ export function userFromGate(): string | null {
 }
 
 /**
- * ensureSignedIn runs the boot gate. Resolves when there's a verified session
- * (currentUser populated). Never rejects on auth failure — the overlay stays
- * shown until the operator signs in.
+ * ensureSignedIn runs the boot gate. Resolves when the app is ready to mount
+ * — either because anonymous mode is on (newtcon-server started without
+ * --auth-required) or because the operator has signed in. Never rejects on
+ * auth failure — the overlay stays shown until the operator signs in.
  */
 export async function ensureSignedIn(): Promise<void> {
   const overlay = requireOverlay();
@@ -57,6 +59,28 @@ export async function ensureSignedIn(): Promise<void> {
   const userInput = overlay.querySelector<HTMLInputElement>("#auth-username")!;
   const pwInput = overlay.querySelector<HTMLInputElement>("#auth-password")!;
   const submit = overlay.querySelector<HTMLButtonElement>("#auth-submit")!;
+
+  // Posture check first: if newtcon-server is in anonymous mode (the
+  // playground/cold-start default), skip the gate entirely and let the
+  // workspace mount. User pill stays hidden — there is no operator
+  // identity to display.
+  try {
+    const cfg = await fetchConfig();
+    if (!cfg.auth_required) {
+      resolveSignedInOnce();
+      hideOverlay();
+      return;
+    }
+  } catch (err) {
+    // /api/config failed — newtcon-server isn't reachable. Show the overlay
+    // with the error so the operator can see what's wrong; they can still
+    // try to sign in once the server comes back.
+    error.textContent = `Cannot reach newtcon-server: ${describe(err)}`;
+    error.hidden = false;
+    showOverlay();
+    // Fall through to the sign-in form wiring below — if newtcon-server
+    // becomes reachable mid-form, the submit handler will exercise it.
+  }
 
   // Boot-time check: skip if we already see a session.
   try {
@@ -67,8 +91,6 @@ export async function ensureSignedIn(): Promise<void> {
       return;
     }
   } catch (err) {
-    // Network / unexpected status — show the overlay with the error visible,
-    // operator can still try to sign in.
     error.textContent = `Cannot reach newtcon-server: ${describe(err)}`;
     error.hidden = false;
   }
