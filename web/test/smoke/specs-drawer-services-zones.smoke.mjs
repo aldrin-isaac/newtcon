@@ -49,9 +49,11 @@ async function signIn() {
 }
 
 async function openSpecRow(facetLabel, rowName) {
-  // Switch to the facet (e.g. "Services" / "Zones") via the subnav.
+  // Switch to the facet (e.g. "Services" / "Zones") via the subnav. Match
+  // against the rendered label text since the smoke is keyed on the
+  // operator-visible title rather than the internal kind id.
   await page.evaluate((label) => {
-    const btn = Array.from(document.querySelectorAll(".subnav-item, .facet-btn, button"))
+    const btn = Array.from(document.querySelectorAll(".specs-subnav-item"))
       .find((b) => (b.textContent || "").trim().startsWith(label));
     btn?.click();
   }, facetLabel);

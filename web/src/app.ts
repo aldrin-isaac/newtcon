@@ -226,6 +226,23 @@ function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
   return displaySpecForms[kind] ?? specForms[kind];
 }
 
+// subRuleWireField maps a spec kind to the wire-field name newtron returns
+// the child rules under in the detail payload. Used by openDetail to keep
+// that field out of the tailored body's "All fields" disclosure — the
+// children render separately via renderSubRuleDeleteSection below, and
+// double-displaying them is just noise.
+//
+// Notably, prefix-lists's wire field is "prefixes" — not "entries" (which is
+// the sub-rule endpoint verb suffix). The two diverge for historical reasons
+// on newtron's side. Confirmed from newtron docs/newtron/api.md §FilterDetail/
+// QoSPolicyDetail and from the existing switch in renderSubRuleDeleteSection.
+const subRuleWireField: Partial<Record<SpecKind, string>> = {
+  "qos-policies":   "queues",
+  "filters":        "rules",
+  "prefix-lists":   "prefixes",
+  "route-policies": "rules",
+};
+
 // subRuleForms defines the form fields for adding sub-rules to spec types
 // that support child entries.
 const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; fields: FieldDef[] }>> = {
@@ -765,11 +782,15 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
     content.removeChild(loading);
 
     // Schema-aware rendering when a display schema knows this kind; generic
-    // recursive tree as the fallback so unknown kinds still render.
+    // recursive tree as the fallback so unknown kinds still render. Exclude
+    // the sub-rule wire field (if any) so child rules don't double-display
+    // — they get a dedicated section below via renderSubRuleDeleteSection.
     const fields = displaySchemaFor(kind);
     if (fields) {
       const body = el("div");
-      renderSpecDetailInto(body, fields, detail);
+      const subField = subRuleWireField[kind];
+      const extraExcludes = subField ? [subField] : [];
+      renderSpecDetailInto(body, fields, detail, extraExcludes);
       content.appendChild(body);
     } else {
       const body = renderValue(detail);
@@ -1253,17 +1274,22 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
 // visibility of newtron data — even fields the schema hasn't been updated
 // to cover (e.g. ssh_pass, additions made after this build).
 //
+// extraExcludes is for fields already rendered elsewhere in the drawer
+// (e.g. sub-rule children for kinds that have a dedicated rules / queues /
+// prefixes section below the body). Pass [] for the default.
+//
 // Falls back to renderValueInto when data is not an object (defensive
 // against newtron returning a primitive or null).
-function renderSpecDetailInto(container: HTMLElement, fields: FieldDef[], data: unknown): void {
+function renderSpecDetailInto(container: HTMLElement, fields: FieldDef[], data: unknown, extraExcludes: string[] = []): void {
   container.textContent = "";
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     renderValueInto(container, data);
     return;
   }
   // "name" is rendered in the drawer header already (drawer-name); skip it
-  // here to avoid a redundant row in the body.
-  const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name"]);
+  // here to avoid a redundant row in the body. extraExcludes adds caller-
+  // supplied fields (typically a sub-rule's wire-field name).
+  const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name", ...extraExcludes]);
 
   // Empty-state: the schema is just `name` (zones today) AND newtron returned
   // nothing else. Operator gets an honest "nothing more to see" rather than
