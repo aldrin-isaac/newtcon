@@ -126,6 +126,11 @@ interface FieldDef {
 // specForms maps each SpecKind to the form fields needed to create that spec.
 // Field names and types are taken verbatim from the newtron request types in
 // pkg/newtron/types.go (CreateServiceRequest, CreateIPVPNRequest, etc.).
+//
+// NOTE: this schema drives the CREATE form. The DETAIL-display layout uses
+// `displaySchemaFor(kind)` (further down) which defaults to this schema but
+// overrides where newtron's GET-detail wire shape diverges from the create
+// request shape (e.g., services: "service_type" on detail, "type" on create).
 const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
   services: [
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. transit" },
@@ -187,6 +192,39 @@ const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. datacenter-a" },
   ],
 };
+
+// displaySpecForms is a per-kind override for the DETAIL-display layout
+// (renderSpecDetailInto). For most spec kinds the create-form schema in
+// specForms matches what newtron returns on GET — those kinds aren't listed
+// here and fall through to specForms via displaySchemaFor().
+//
+// Listed kinds are the ones where the wire-detail shape diverges from the
+// create-request shape:
+//
+//   services: newtron returns "service_type" on GET but accepts "type" on
+//             create. The display schema lists "service_type" so the value
+//             lands in the prominent row labeled "Type" rather than in the
+//             "All fields" disclosure. Heavier sub-fields (ipvpn, macvpn,
+//             vrf_type, qos_policy, ingress_filter, egress_filter) appear
+//             only when newtron returns them set — the disclosure surfaces
+//             them automatically, no display-schema entry needed unless we
+//             want them prominent.
+const displaySpecForms: Partial<Record<SpecKind, FieldDef[]>> = {
+  services: [
+    { name: "name", label: "Name", type: "text" },
+    { name: "service_type", label: "Type", type: "text" },
+    { name: "description", label: "Description", type: "text" },
+  ],
+};
+
+// displaySchemaFor returns the schema renderSpecDetailInto should use to
+// render the GET-detail response for a spec kind. Falls back to the create
+// form schema (specForms) when there is no override — that covers profiles
+// (wire shape matches create shape) and zones (just `name`, excluded from
+// the body — yielding the empty-state render).
+function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
+  return displaySpecForms[kind] ?? specForms[kind];
+}
 
 // subRuleForms defines the form fields for adding sub-rules to spec types
 // that support child entries.
@@ -726,9 +764,9 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
     const detail = await fetchSpecDetail(kind, name);
     content.removeChild(loading);
 
-    // Schema-aware rendering when specForms knows this kind; generic
+    // Schema-aware rendering when a display schema knows this kind; generic
     // recursive tree as the fallback so unknown kinds still render.
-    const fields = specForms[kind];
+    const fields = displaySchemaFor(kind);
     if (fields) {
       const body = el("div");
       renderSpecDetailInto(body, fields, detail);
@@ -1226,6 +1264,15 @@ function renderSpecDetailInto(container: HTMLElement, fields: FieldDef[], data: 
   // "name" is rendered in the drawer header already (drawer-name); skip it
   // here to avoid a redundant row in the body.
   const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name"]);
+
+  // Empty-state: the schema is just `name` (zones today) AND newtron returned
+  // nothing else. Operator gets an honest "nothing more to see" rather than
+  // a blank drawer body that looks like a render failure.
+  if (shape.rows.length === 0 && shape.extras.length === 0) {
+    container.appendChild(el("p", { className: "spec-detail-empty-state" },
+      "This spec has no additional fields."));
+    return;
+  }
 
   const dl = el("dl", { className: "spec-detail drawer-detail" });
   for (const row of shape.rows) {
@@ -1953,7 +2000,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       // generic recursive tree — the profile schema is known to specForms.
       fetchSpecDetail("profiles", device)
         .then((data) => {
-          const fields = specForms["profiles"];
+          const fields = displaySchemaFor("profiles");
           if (fields) renderSpecDetailInto(container, fields, data);
           else renderValueInto(container, data);
         })
