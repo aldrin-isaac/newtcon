@@ -142,6 +142,7 @@
 .spec-detail-extras-summary { cursor: pointer; font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-2xs) 0; }
 .spec-detail-extras-summary:hover { color: var(--color-text-secondary); }
 .spec-detail-extras[open] .spec-detail-extras-summary { color: var(--color-text-secondary); }
+.spec-detail-empty-state { font-size: var(--text-sm); color: var(--color-text-muted); font-style: italic; font-family: var(--font-system); margin: 0; }
 
 /* Forms */
 .form-stack { display: flex; flex-direction: column; gap: var(--space-md); }
