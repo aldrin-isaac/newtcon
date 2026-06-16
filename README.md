@@ -60,9 +60,27 @@ Layers each binary exposes:
 |---|---|---|
 | Encrypted listener | `--tls-cert` / `--tls-key` | `--tls-cert` / `--tls-key` |
 | Verified upstream cert | (n/a) | `--newtron-ca-cert` (default: system roots) |
+| Outbound mTLS client cert | (n/a) | `--newtron-client-cert` / `--newtron-client-key` |
 | User authentication | `--auth-pam-service NAME` | `--auth-required` (drives the login overlay) |
 | Permission enforcement | `--enforce-authorization` | (consumes 403s as `authorization_failure`) |
 | Audit log | `--audit-log PATH` | (n/a — newtron owns the audit boundary) |
+
+### TLS env-var convention
+
+All five TLS paths above also resolve from environment variables, matching
+newtron PR #179. Flags always win when both are set:
+
+| Direction | Env var | Equivalent flag |
+|---|---|---|
+| Outbound (newtcon → newtron) | `NEWTRON_TLS_CA`   | `--newtron-ca-cert` |
+| Outbound (newtcon → newtron) | `NEWTRON_TLS_CERT` | `--newtron-client-cert` |
+| Outbound (newtcon → newtron) | `NEWTRON_TLS_KEY`  | `--newtron-client-key` |
+| Inbound (browser → newtcon)  | `NEWTCON_TLS_CERT` | `--tls-cert` |
+| Inbound (browser → newtcon)  | `NEWTCON_TLS_KEY`  | `--tls-key` |
+
+`NEWTRON_TLS_*` matches the convention `bin/newtron`, `bin/newtrun`, and
+`bin/newtlab` already honour — operators with those env vars set get the
+same outbound TLS posture in newtcon-server for free.
 
 ### One alignment to keep in mind
 

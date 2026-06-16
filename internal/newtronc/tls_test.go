@@ -46,7 +46,7 @@ func writeTestCAPEM(t *testing.T, caPath string) string {
 }
 
 func TestBuildTLSConfig_Defaults(t *testing.T) {
-	cfg, err := newtronc.BuildTLSConfig("", false)
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestBuildTLSConfig_Defaults(t *testing.T) {
 
 func TestBuildTLSConfig_CACert(t *testing.T) {
 	caPath := writeTestCAPEM(t, filepath.Join(t.TempDir(), "ca.pem"))
-	cfg, err := newtronc.BuildTLSConfig(caPath, false)
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CAPath: caPath})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestBuildTLSConfig_CACert(t *testing.T) {
 }
 
 func TestBuildTLSConfig_SkipVerify(t *testing.T) {
-	cfg, err := newtronc.BuildTLSConfig("", true)
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{SkipVerify: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestBuildTLSConfig_SkipVerify(t *testing.T) {
 
 func TestBuildTLSConfig_CACertWinsOverSkipVerify(t *testing.T) {
 	caPath := writeTestCAPEM(t, filepath.Join(t.TempDir(), "ca.pem"))
-	cfg, err := newtronc.BuildTLSConfig(caPath, true)
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CAPath: caPath, SkipVerify: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,9 +97,107 @@ func TestBuildTLSConfig_CACertWinsOverSkipVerify(t *testing.T) {
 }
 
 func TestBuildTLSConfig_MissingFile(t *testing.T) {
-	_, err := newtronc.BuildTLSConfig(filepath.Join(t.TempDir(), "absent.pem"), false)
+	_, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CAPath: filepath.Join(t.TempDir(), "absent.pem")})
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+// writeTestKeyPair mints a self-signed EC cert + key and writes them to
+// the supplied paths in PEM. Used to exercise the client-cert pair path.
+func writeTestKeyPair(t *testing.T, certPath, keyPath string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "newtronc-test-client"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating cert: %v", err)
+	}
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("writing cert: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshalling key: %v", err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatalf("writing key: %v", err)
+	}
+}
+
+func TestBuildTLSConfig_ClientCertPair(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	writeTestKeyPair(t, certPath, keyPath)
+
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{
+		CertPath: certPath,
+		KeyPath:  keyPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil || len(cfg.Certificates) != 1 {
+		t.Fatalf("expected one client cert installed, got %#v", cfg)
+	}
+}
+
+func TestBuildTLSConfig_ClientCertPair_MergedWithCA(t *testing.T) {
+	dir := t.TempDir()
+	caPath := writeTestCAPEM(t, filepath.Join(dir, "ca.pem"))
+	certPath := filepath.Join(dir, "client.crt")
+	keyPath := filepath.Join(dir, "client.key")
+	writeTestKeyPair(t, certPath, keyPath)
+
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{
+		CAPath:   caPath,
+		CertPath: certPath,
+		KeyPath:  keyPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil || cfg.RootCAs == nil {
+		t.Errorf("expected RootCAs populated")
+	}
+	if cfg == nil || len(cfg.Certificates) != 1 {
+		t.Errorf("expected client cert installed alongside RootCAs")
+	}
+}
+
+func TestBuildTLSConfig_ClientCertWithoutKey_Errors(t *testing.T) {
+	_, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CertPath: "/x"})
+	if err == nil {
+		t.Fatal("expected error when only --newtron-client-cert is set")
+	}
+}
+
+func TestBuildTLSConfig_ClientKeyWithoutCert_Errors(t *testing.T) {
+	_, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{KeyPath: "/x"})
+	if err == nil {
+		t.Fatal("expected error when only --newtron-client-key is set")
+	}
+}
+
+func TestBuildTLSConfig_ClientCertMissingFiles_Errors(t *testing.T) {
+	dir := t.TempDir()
+	_, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{
+		CertPath: filepath.Join(dir, "absent.crt"),
+		KeyPath:  filepath.Join(dir, "absent.key"),
+	})
+	if err == nil {
+		t.Fatal("expected error when cert/key files don't exist")
 	}
 }
 
@@ -108,7 +206,7 @@ func TestBuildTLSConfig_FileWithoutCerts(t *testing.T) {
 	if err := os.WriteFile(junk, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatalf("writing junk file: %v", err)
 	}
-	_, err := newtronc.BuildTLSConfig(junk, false)
+	_, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CAPath: junk})
 	if err == nil {
 		t.Fatal("expected error for file without certs, got nil")
 	}
@@ -118,7 +216,7 @@ func TestBuildTLSConfig_FileWithoutCerts(t *testing.T) {
 // supplied *tls.Config onto the client's outbound transport.
 func TestWithTLSConfig_AppliedToTransport(t *testing.T) {
 	caPath := writeTestCAPEM(t, filepath.Join(t.TempDir(), "ca.pem"))
-	cfg, err := newtronc.BuildTLSConfig(caPath, false)
+	cfg, err := newtronc.BuildTLSConfig(newtronc.OutboundTLSOptions{CAPath: caPath})
 	if err != nil {
 		t.Fatalf("BuildTLSConfig: %v", err)
 	}
