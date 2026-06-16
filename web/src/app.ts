@@ -138,7 +138,38 @@ interface FieldDef {
   // for routed traffic; unique per IPVPN"). Rendered as a "?" affordance
   // next to the label that toggles an inline help line.
   help?: string;
+
+  // Regex source string for input[pattern]. The browser enforces it when
+  // form.reportValidity() runs. patternTitle becomes the input[title]
+  // attribute which the browser surfaces as the per-field error bubble
+  // ("must look like …") rather than the default "Please match the
+  // requested format." Only meaningful for type="text".
+  pattern?: string;
+  patternTitle?: string;
 }
+
+// PATTERNS — named regex sources for fields that share a constraint.
+// Each is a string (HTML pattern attribute), not a RegExp literal, so it
+// flows verbatim into the input[pattern] attr.
+//
+// Deliberately permissive: catch typos (commas, missing digits, dashes
+// where dots belong) without rejecting valid edge cases. The substrate
+// is authoritative for range / semantic checks — these patterns are the
+// first-line filter that saves a backend round-trip on obvious wrong
+// shapes.
+//
+//   IPV4         — single IPv4 address (no CIDR). No 0–255 enforcement.
+//   IPV4_CIDR    — IPv4 address with optional /prefix. Prefix range not enforced.
+//   MAC          — six octets, colon- or dash-separated, hex.
+//
+// IPv6 deferred: a single permissive regex that accepts every valid form
+// (compressed, dual, zone-id) is too gnarly; field-level help nudges
+// operators toward correctness, and the substrate validates.
+const PATTERNS = {
+  IPV4: String.raw`^(\d{1,3}\.){3}\d{1,3}$`,
+  IPV4_CIDR: String.raw`^(\d{1,3}\.){3}\d{1,3}(/\d{1,2})?$`,
+  MAC: String.raw`^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$`,
+} as const;
 
 // specForms maps each SpecKind to the form fields needed to create that spec.
 // Field names and types are taken verbatim from the newtron request types in
@@ -185,8 +216,18 @@ const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
       placeholder: "e.g. 100", min: 1, max: 4094,
       help: "Local VLAN ID on each device the MAC VPN binds to. 802.1Q range is 1–4094.",
     },
-    { name: "anycast_ip", label: "Anycast IP", type: "text", placeholder: "e.g. 10.0.100.1/24" },
-    { name: "anycast_mac", label: "Anycast MAC", type: "text", placeholder: "e.g. 00:00:00:00:01:00" },
+    {
+      name: "anycast_ip", label: "Anycast IP", type: "text",
+      placeholder: "e.g. 10.0.100.1/24",
+      pattern: PATTERNS.IPV4_CIDR,
+      patternTitle: "IPv4 address with optional /prefix (e.g. 10.0.100.1 or 10.0.100.0/24)",
+    },
+    {
+      name: "anycast_mac", label: "Anycast MAC", type: "text",
+      placeholder: "e.g. 00:00:00:00:01:00",
+      pattern: PATTERNS.MAC,
+      patternTitle: "Six hex octets separated by colons or dashes (e.g. 00:00:00:00:01:00)",
+    },
     { name: "description", label: "Description", type: "text" },
   ],
   "qos-policies": [
@@ -210,8 +251,18 @@ const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
   ],
   profiles: [
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. spine-1" },
-    { name: "mgmt_ip", label: "Management IP", type: "text", required: true, placeholder: "e.g. 192.168.1.1" },
-    { name: "loopback_ip", label: "Loopback IP", type: "text", required: true, placeholder: "e.g. 10.0.0.1" },
+    {
+      name: "mgmt_ip", label: "Management IP", type: "text", required: true,
+      placeholder: "e.g. 192.168.1.1",
+      pattern: PATTERNS.IPV4,
+      patternTitle: "IPv4 address (e.g. 192.168.1.1)",
+    },
+    {
+      name: "loopback_ip", label: "Loopback IP", type: "text", required: true,
+      placeholder: "e.g. 10.0.0.1",
+      pattern: PATTERNS.IPV4,
+      patternTitle: "IPv4 address (e.g. 10.0.0.1)",
+    },
     { name: "zone", label: "Zone", type: "text", required: true, placeholder: "Zone name" },
     { name: "platform", label: "Platform", type: "text", placeholder: "Platform name (optional)" },
     {
@@ -406,8 +457,18 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
         name: "action", label: "Action", type: "select", required: true,
         options: ["permit", "deny"],
       },
-      { name: "src_ip", label: "Source IP/prefix", type: "text", placeholder: "e.g. 10.0.0.0/8" },
-      { name: "dst_ip", label: "Destination IP/prefix", type: "text", placeholder: "e.g. 0.0.0.0/0" },
+      {
+        name: "src_ip", label: "Source IP/prefix", type: "text",
+        placeholder: "e.g. 10.0.0.0/8",
+        pattern: PATTERNS.IPV4_CIDR,
+        patternTitle: "IPv4 address with optional /prefix (e.g. 10.0.0.0/8)",
+      },
+      {
+        name: "dst_ip", label: "Destination IP/prefix", type: "text",
+        placeholder: "e.g. 0.0.0.0/0",
+        pattern: PATTERNS.IPV4_CIDR,
+        patternTitle: "IPv4 address with optional /prefix (e.g. 0.0.0.0/0)",
+      },
       { name: "protocol", label: "Protocol", type: "text", placeholder: "e.g. tcp, udp" },
       { name: "src_port", label: "Source port", type: "text", placeholder: "e.g. 80" },
       { name: "dst_port", label: "Destination port", type: "text", placeholder: "e.g. 443" },
@@ -417,7 +478,12 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     endpoint: "entries",
     label: "Add prefix",
     fields: [
-      { name: "prefix", label: "Prefix (CIDR)", type: "text", required: true, placeholder: "e.g. 10.0.0.0/8" },
+      {
+        name: "prefix", label: "Prefix (CIDR)", type: "text", required: true,
+        placeholder: "e.g. 10.0.0.0/8",
+        pattern: PATTERNS.IPV4_CIDR,
+        patternTitle: "IPv4 prefix in CIDR form (e.g. 10.0.0.0/8). IPv6 entries are accepted by newtron but not validated here yet.",
+      },
     ],
   },
   "route-policies": {
@@ -538,6 +604,11 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
       if (field.type === "number") {
         if (field.min !== undefined) input.min = String(field.min);
         if (field.max !== undefined) input.max = String(field.max);
+      }
+      if (field.type === "text" && field.pattern) {
+        input.pattern = field.pattern;
+        // title becomes the browser's per-field invalid-bubble text.
+        if (field.patternTitle) input.title = field.patternTitle;
       }
       if (prefillStr) input.value = prefillStr;
       group.appendChild(input);
