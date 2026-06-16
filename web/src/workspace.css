@@ -1155,6 +1155,16 @@
 .topology-graph--panning { cursor: grabbing; }
 .topology-graph--panning .topo-node { pointer-events: none; }
 
+/* Node drag cursor + visual lift when actively dragging. */
+.topo-node { cursor: move; }
+.topo-node--dragging { opacity: 0.85; }
+.topo-node--dragging > rect { filter: drop-shadow(0 4px 8px rgb(28 25 23 / 0.18)); }
+
+/* Reset-positions button gets a slightly muted treatment so it doesn't
+ * compete with the primary zoom controls. */
+.topology-zoom-btn--reset { color: var(--color-text-muted); }
+.topology-zoom-btn--reset:hover { color: var(--color-text-primary); }
+
 /* ---- Topology: docked action panel ----------------------------------- */
 
 .topo-action-panel {
