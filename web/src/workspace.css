@@ -1109,6 +1109,7 @@
   align-items: start;
 }
 .topology-graph-slot {
+  position: relative;
   min-height: 360px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-subtle);
@@ -1116,6 +1117,43 @@
   padding: var(--space-md);
   overflow: auto;
 }
+
+/* Zoom toolbar — floats top-right inside the graph slot. */
+.topology-zoom-toolbar {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  z-index: 10;
+  display: flex;
+  gap: 2px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  box-shadow: var(--shadow-sm);
+}
+.topology-zoom-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-system);
+  font-size: var(--text-base);
+  line-height: 1;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.topology-zoom-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+/* Pan cursor — applied during an active drag-pan. */
+.topology-graph { cursor: grab; }
+.topology-graph--panning { cursor: grabbing; }
+.topology-graph--panning .topo-node { pointer-events: none; }
 
 /* ---- Topology: docked action panel ----------------------------------- */
 
