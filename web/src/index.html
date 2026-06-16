@@ -29,6 +29,10 @@
             <span class="nav-icon" data-icon="network"></span>
             <span class="nav-label">Topology</span>
           </button>
+          <button type="button" id="tab-permissions" class="nav-item" role="tab" aria-selected="false">
+            <span class="nav-icon" data-icon="shield-check"></span>
+            <span class="nav-label">Permissions</span>
+          </button>
         </nav>
         <div class="sidebar-footer">
           <button type="button" class="palette-trigger" id="palette-trigger" title="Open command palette">
@@ -90,6 +94,9 @@
           </section>
           <section class="view view-topology" id="panel-topology" hidden>
             <!-- mounted by app.ts mountTopologyTab() -->
+          </section>
+          <section class="view view-permissions" id="panel-permissions" hidden>
+            <!-- mounted by authorization.ts mountAuthorizationTab() -->
           </section>
         </main>
       </div>

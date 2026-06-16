@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json && node scripts/copy-static.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/services/services.test.js test/api/newtcon/services.test.js test/api/newtcon/nodes.test.js test/api/newtcon/auth.test.js test/api/newtcon/config.test.js test/api/newtcon/network.test.js test/render-error.test.js test/auth-expiry.test.js test/spec-detail-shape.test.js",
+    "test": "node --test test/services/services.test.js test/api/newtcon/services.test.js test/api/newtcon/nodes.test.js test/api/newtcon/auth.test.js test/api/newtcon/config.test.js test/api/newtcon/network.test.js test/api/newtcon/authorization.test.js test/render-error.test.js test/auth-expiry.test.js test/spec-detail-shape.test.js",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
