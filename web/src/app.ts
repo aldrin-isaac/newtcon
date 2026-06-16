@@ -19,6 +19,14 @@ import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
 import {
+  type ViewState,
+  ZOOM_STEP,
+  fitToBounds,
+  panBy,
+  viewBoxStr,
+  zoomAt,
+} from "./topology-viewport.js";
+import {
   fetchLabStatus,
   postLabDeploy,
   postLabDestroy,
@@ -1231,6 +1239,15 @@ interface TopologyRenderOpts {
   // Staging overlays — render device cards in green/red according to queue state.
   isPendingAdd?: (name: string) => boolean;
   isPendingRemove?: (name: string) => boolean;
+
+  // Viewport — pan/zoom state persisted across re-renders by the caller
+  // (mountTopologyTab). When provided, the SVG renders with the supplied
+  // viewBox + wheel/drag listeners that mutate the state through
+  // onViewStateChange. When omitted, the SVG uses its natural viewBox
+  // (no pan/zoom interactivity) — kept as the fallback shape so tests /
+  // ad-hoc callers don't need to opt in.
+  viewState?: ViewState | undefined;
+  onViewStateChange?: (next: ViewState) => void;
 }
 
 interface TopologyRenderResult {
@@ -1258,10 +1275,13 @@ function renderTopologySVG(
   const svgW = (cellW + H_GAP) * cols + H_GAP;
   const svgH = (NODE_H + V_GAP) * rowCount + V_GAP;
 
+  const naturalViewBox = `0 0 ${svgW} ${svgH}`;
+  const initialViewBox = opts.viewState ? viewBoxStr(opts.viewState) : naturalViewBox;
+
   const svg = svgEl("svg", {
     width: String(svgW),
     height: String(svgH),
-    viewBox: `0 0 ${svgW} ${svgH}`,
+    viewBox: initialViewBox,
     "class": "topology-graph",
     role: "img",
     "aria-label": "Network topology diagram",
@@ -1470,6 +1490,62 @@ function renderTopologySVG(
     });
     msg.textContent = "No devices in topology";
     svg.appendChild(msg);
+  }
+
+  // Pan + zoom interactivity. Only wired when the caller threads
+  // viewState through opts so re-renders don't re-init the listeners
+  // (the SVG is recreated each render; the caller persists state).
+  if (opts.viewState && opts.onViewStateChange) {
+    const onChange = opts.onViewStateChange;
+    let view: ViewState = opts.viewState;
+
+    // Wheel → zoom around cursor. preventDefault stops the page from
+    // scrolling while the operator is zooming the graph.
+    svg.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      // Each wheel notch in or out multiplies by ZOOM_STEP. e.deltaY is
+      // positive on scroll-down (zoom out) and negative on scroll-up
+      // (zoom in) on most browsers / OSes; respect that.
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      view = zoomAt(view, factor, cx, cy, rect.width, rect.height, svgW);
+      svg.setAttribute("viewBox", viewBoxStr(view));
+      onChange(view);
+    }, { passive: false });
+
+    // Drag-empty-canvas → pan. A drag that lands on a node still
+    // reaches the node click/contextmenu handlers because the listener
+    // bails when the target is a node descendant.
+    svg.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      // Bail if the click landed inside any element with .topo-node — the
+      // node handlers own those interactions.
+      if (e.target instanceof Element && e.target.closest(".topo-node")) return;
+      const dragStart = { clientX: e.clientX, clientY: e.clientY, view };
+      svg.classList.add("topology-graph--panning");
+      e.preventDefault();
+
+      // Bind on window so the drag continues even if the cursor leaves
+      // the SVG. Detach in onUp so the listeners don't leak across the
+      // SVG's lifetime (renderGraph recreates the SVG on each call).
+      const onMove = (em: MouseEvent): void => {
+        const rect = svg.getBoundingClientRect();
+        const dx = em.clientX - dragStart.clientX;
+        const dy = em.clientY - dragStart.clientY;
+        view = panBy(dragStart.view, dx, dy, rect.width, rect.height);
+        svg.setAttribute("viewBox", viewBoxStr(view));
+      };
+      const onUp = (): void => {
+        svg.classList.remove("topology-graph--panning");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        onChange(view);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
   }
 
   return { svg, positions, width: svgW, height: svgH };
@@ -2957,14 +3033,28 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // this and renders the action set + Save/Discard for the selection.
     const selected: Set<string> = new Set();
 
-    // Topology view: layout is a split — left = SVG diagram, right = docked
-    // action panel. Both stay in sync via re-renders driven by `selected`.
+    // Pan/zoom viewport state — persists across renderGraph() calls so
+    // the operator's view doesn't snap back to natural after every
+    // selection / pending-bar / status tick.
+    let viewState: ViewState | undefined;
+
+    // Topology view: layout is a split — left = SVG diagram + toolbar,
+    // right = docked action panel.
     const split = el("div", { className: "topology-split" });
     const graphSlot = el("div", { className: "topology-graph-slot" });
     const panelRoot = el("aside", { className: "topo-action-panel" });
     split.appendChild(graphSlot);
     split.appendChild(panelRoot);
     root.appendChild(split);
+
+    // Floating zoom toolbar — absolute-positioned over the SVG via
+    // .topology-zoom-toolbar styling; outlives renderGraph() calls.
+    const zoomToolbar = el("div", { className: "topology-zoom-toolbar", role: "toolbar", ariaLabel: "Topology zoom" });
+    const zoomOutBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Zoom out" }, "−") as HTMLButtonElement;
+    const zoomInBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Zoom in" }, "+") as HTMLButtonElement;
+    const fitBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Fit to view" }, "⊡") as HTMLButtonElement;
+    zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn);
+    graphSlot.appendChild(zoomToolbar);
 
     // Interface lists pulled from the topology declaration (works offline);
     // live-fetched lists merge in via the panel module's source cache.
@@ -3005,8 +3095,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       return "device";
     };
 
-    const renderGraph = (): void => {
-      graphSlot.textContent = "";
+    let renderGraph: () => void;
+    renderGraph = (): void => {
+      // Preserve the zoom toolbar across re-renders; only clear the SVG.
+      const oldSvg = graphSlot.querySelector("svg.topology-graph");
+      if (oldSvg) oldSvg.remove();
       const result = renderTopologySVG(topoData, {
         onNodeClick: (deviceName, ev) => {
           if (ev.shiftKey) {
@@ -3040,9 +3133,42 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         selected,
         isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
         isPendingRemove: (n) => isDevicePendingRemove(n),
+        viewState,
+        onViewStateChange: (next) => { viewState = next; },
       });
-      graphSlot.appendChild(result.svg);
+      // SVG sits behind the toolbar (toolbar is z-indexed above).
+      graphSlot.insertBefore(result.svg, zoomToolbar);
+      // Remember the natural width so the toolbar handlers can compute
+      // zoom bounds + fit relative to a stable reference.
+      lastNaturalWidth = result.width;
+      lastResultBounds = { minX: 0, minY: 0, maxX: result.width, maxY: result.height };
     };
+    let lastNaturalWidth = 1;
+    let lastResultBounds = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+
+    // Toolbar handlers — apply to the current SVG via setAttribute,
+    // then notify viewState so the next renderGraph keeps the change.
+    const applyZoom = (factor: number): void => {
+      const svgEl = graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
+      if (!svgEl) return;
+      const rect = svgEl.getBoundingClientRect();
+      const base = viewState ?? {
+        x: 0, y: 0, w: lastNaturalWidth,
+        h: (lastResultBounds.maxY - lastResultBounds.minY),
+      };
+      viewState = zoomAt(base, factor, rect.width / 2, rect.height / 2,
+        rect.width, rect.height, lastNaturalWidth);
+      svgEl.setAttribute("viewBox", viewBoxStr(viewState));
+    };
+    zoomInBtn.addEventListener("click", () => applyZoom(ZOOM_STEP));
+    zoomOutBtn.addEventListener("click", () => applyZoom(1 / ZOOM_STEP));
+    fitBtn.addEventListener("click", () => {
+      const svgEl = graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
+      if (!svgEl) return;
+      const rect = svgEl.getBoundingClientRect();
+      viewState = fitToBounds(lastResultBounds, rect.width, rect.height);
+      svgEl.setAttribute("viewBox", viewBoxStr(viewState));
+    });
 
     // Re-render the graph + panel when the pending queue changes — but do
     // NOT remount: that would clear the current selection. The panel reads
