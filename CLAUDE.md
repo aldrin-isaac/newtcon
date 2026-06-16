@@ -89,6 +89,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-actions-ui.ts    → floating right-click context menu
     icons.ts                  → inline-SVG icon set (Lucide)
     render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
+    form-error-binding.ts     → extractFieldFromValidationError + attachServerValidationToForm + clearFieldErrors (per-field server-error display; slice #172.B)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
