@@ -262,6 +262,34 @@ func TestAddRoutePolicyRule_Success(t *testing.T) {
 	}
 }
 
+// TestUpdateSpec_Success verifies UpdateSpec posts to the update-<kind>
+// verb with the supplied body and returns the decoded data field.
+func TestUpdateSpec_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/update-service" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{"data":{"name":"transit"},"error":""}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	raw, err := c.UpdateSpec(context.Background(), "default", "service", map[string]string{
+		"name":        "transit",
+		"description": "updated description",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if raw == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
 // TestShowSpec_UsesPluralKindInURL pins the bug fixed in the
 // "view profile from Topology" slice: ShowSpec must use the plural form of
 // the kind in the URL path ("profiles", not "profile"). Before the fix every

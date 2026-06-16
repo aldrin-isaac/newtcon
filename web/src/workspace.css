@@ -144,6 +144,16 @@
 .spec-detail-extras[open] .spec-detail-extras-summary { color: var(--color-text-secondary); }
 .spec-detail-empty-state { font-size: var(--text-sm); color: var(--color-text-muted); font-style: italic; font-family: var(--font-system); margin: 0; }
 
+/* Drawer Edit-mode controls — small row above the spec body, plus the
+ * Save / Cancel pair at the bottom of the form. Both reuse existing
+ * button classes (form-submit-btn / form-cancel-btn) where available. */
+.drawer-controls { display: flex; justify-content: flex-end; gap: var(--space-2xs); margin: 0 0 var(--space-sm); }
+.drawer-edit-btn { padding: var(--space-2xs) var(--space-sm); font-size: var(--text-xs); background: var(--color-surface-sunken); border: 1px solid var(--color-border-subtle); border-radius: 4px; color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); }
+.drawer-edit-btn:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.form-button-row { display: flex; gap: var(--space-sm); margin-top: var(--space-sm); }
+.form-cancel-btn { padding: var(--space-2xs) var(--space-md); background: transparent; border: 1px solid var(--color-border-default); border-radius: 4px; color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); font-size: var(--text-sm); }
+.form-cancel-btn:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+
 /* Forms */
 .form-stack { display: flex; flex-direction: column; gap: var(--space-md); }
 .form-row { display: flex; flex-direction: column; gap: var(--space-2xs); }

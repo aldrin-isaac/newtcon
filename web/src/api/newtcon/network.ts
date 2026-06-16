@@ -49,6 +49,19 @@ export async function deleteSpec(kind: SpecKind, name: string, network?: string)
   return apiSend(pathFor(`${kind}/${encodeURIComponent(name)}`, network), "DELETE");
 }
 
+// updateSpec calls PUT /api/networks/{netID}/{kind}/{name} which forwards
+// to newtron's POST /update-<kind> verb (newtron PR #172). Body shape
+// mirrors createSpec — top-level fields only. Sub-collections (queues,
+// rules, statements) are preserved by newtron and managed via addSubRule
+// / remove* — do NOT include them in the body here.
+//
+// The URL path-param identifies the spec to update; any "name" in body
+// is overwritten server-side with the path value so an operator can't
+// rename via this verb. To rename a spec, delete + create.
+export async function updateSpec(kind: SpecKind, name: string, body: Record<string, unknown>, network?: string): Promise<unknown> {
+  return apiSend(pathFor(`${kind}/${encodeURIComponent(name)}`, network), "PUT", body);
+}
+
 // addSubRule calls POST /api/networks/{netID}/{kind}/{name}/queues|rules|entries with the body.
 // endpoint is the sub-collection segment: "queues", "rules", or "entries".
 export async function addSubRule(kind: SpecKind, name: string, endpoint: string, body: Record<string, unknown>, network?: string): Promise<unknown> {

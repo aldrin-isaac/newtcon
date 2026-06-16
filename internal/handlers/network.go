@@ -183,6 +183,41 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "name": name})
 		}))
+
+		// PUT /api/networks/{netID}/{kind}/{name} → in-place update (newtron PR #172)
+		// Body shape mirrors create. Sub-collections (queues/rules/statements)
+		// are preserved by newtron and managed via add-X/remove-X — callers
+		// must NOT include them in the request body.
+		mux.Handle("PUT /api/networks/{netID}/"+uk+"/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			netID := r.PathValue("netID")
+			name := r.PathValue("name")
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+					"reading request body: "+err.Error(), nil)
+				return
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+					"invalid JSON: "+err.Error(), nil)
+				return
+			}
+			// Identifier comes from the URL — overwrite any client-supplied
+			// "name" so the operator can't ask "update foo" while sending
+			// {"name":"bar",…}; newtron would 404 silently or update the wrong
+			// spec depending on its own validation.
+			decoded["name"] = name
+			result, err := c.UpdateSpec(ctx, netID, nk, decoded)
+			if err != nil {
+				writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/"+uk+"/"+name, nil)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(result)
+		}))
 	}
 
 	// ---- Sub-rule: QoS queues ------------------------------------------------
