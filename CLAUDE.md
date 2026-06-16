@@ -53,6 +53,7 @@ internal/handlers/            → one file per resource family
   health.go                   → /api/health
   config.go                   → /api/config (deployment posture descriptor — auth_required, …)
   auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store; returns 404 when --auth-required is off)
+  authorization.go            → /api/networks/{netID}/authorization (read-only inspector for newtron's grant table; slice 2.2)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
@@ -62,6 +63,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   client.go                   → http.Client, base URL, engine-base helpers
   tls.go                      → outbound TLS config (BuildTLSConfig: --newtron-ca-cert / --newtron-skip-tls-verify)
   auth.go                     → Login/Logout RPCs + WithBearer context plumbing + bearer-injecting RoundTripper
+  authorization.go            → GetAuthorization (read newtron's live grant table; slice 2.2)
   errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
@@ -89,6 +91,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
+    authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
       services.ts             → /api/networks/{netID}/services
@@ -97,6 +100,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
       lab.ts                  → /api/labs/{name}/... (newtlab — not network-scoped)
       auth.ts                 → /api/auth/{login,logout,whoami}
       config.ts               → /api/config (deployment posture — auth_required, …)
+      authorization.ts        → /api/networks/{netID}/authorization (super_users + user_groups + permissions)
     services/                 → Specs-tab service detail views
   test/                       → node:test files + puppeteer smokes (web/test/smoke/)
   dist/                       → tsc output (served by --web-dir)

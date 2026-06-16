@@ -16,6 +16,7 @@ import {
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
+import { mountAuthorizationTab } from "./authorization.js";
 import {
   fetchLabStatus,
   postLabDeploy,
@@ -2958,26 +2959,33 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 function setupTabs(): void {
   const tabSpecs = document.getElementById("tab-specs");
   const tabTopology = document.getElementById("tab-topology");
+  const tabPermissions = document.getElementById("tab-permissions");
   const panelSpecs = document.getElementById("panel-specs");
   const panelTopology = document.getElementById("panel-topology");
+  const panelPermissions = document.getElementById("panel-permissions");
 
-  if (!tabSpecs || !tabTopology || !panelSpecs || !panelTopology) return;
+  if (!tabSpecs || !tabTopology || !tabPermissions ||
+      !panelSpecs || !panelTopology || !panelPermissions) return;
 
   let topologyMounted = false;
 
-  type TabName = "specs" | "topology";
+  type TabName = "specs" | "topology" | "permissions";
 
   const activateTab = (name: TabName): void => {
     const isSpecs = name === "specs";
     const isTopology = name === "topology";
+    const isPermissions = name === "permissions";
 
     tabSpecs.classList.toggle("workspace-tab--active", isSpecs);
     tabSpecs.setAttribute("aria-selected", isSpecs ? "true" : "false");
     tabTopology.classList.toggle("workspace-tab--active", isTopology);
     tabTopology.setAttribute("aria-selected", isTopology ? "true" : "false");
+    tabPermissions.classList.toggle("workspace-tab--active", isPermissions);
+    tabPermissions.setAttribute("aria-selected", isPermissions ? "true" : "false");
 
     (panelSpecs as HTMLElement).hidden = !isSpecs;
     (panelTopology as HTMLElement).hidden = !isTopology;
+    (panelPermissions as HTMLElement).hidden = !isPermissions;
 
     if (isTopology && !topologyMounted) {
       topologyMounted = true;
@@ -2987,10 +2995,17 @@ function setupTabs(): void {
       // Stop polling newtlab status when leaving the Topology tab.
       stopTopologyPoll();
     }
+    if (isPermissions) {
+      // Always re-mount so the operator sees the live authorization table —
+      // a change upstream (network.json edit + reload) shouldn't surface
+      // stale here.
+      void mountAuthorizationTab(panelPermissions as HTMLElement);
+    }
   };
 
   tabSpecs.addEventListener("click", () => activateTab("specs"));
   tabTopology.addEventListener("click", () => activateTab("topology"));
+  tabPermissions.addEventListener("click", () => activateTab("permissions"));
 }
 
 // ---- Entry ------------------------------------------------------------------

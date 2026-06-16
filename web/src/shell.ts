@@ -88,6 +88,7 @@ function setupBreadcrumb(): void {
   const labelByTab: Record<string, string> = {
     "tab-specs": "Specs",
     "tab-topology": "Topology",
+    "tab-permissions": "Permissions",
   };
   const crumb = document.getElementById("crumb-view");
   for (const id of Object.keys(labelByTab)) {
@@ -105,7 +106,7 @@ function setupBreadcrumb(): void {
 // ---- Sidebar nav active-state ---------------------------------------------
 
 function setupSidebarActiveStates(): void {
-  const ids = ["tab-specs", "tab-topology"];
+  const ids = ["tab-specs", "tab-topology", "tab-permissions"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     btn?.addEventListener(

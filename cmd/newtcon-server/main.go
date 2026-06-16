@@ -159,6 +159,13 @@ func main() {
 	// without a server restart.
 	handlers.NewNetworksHandler(mux, nc, server.CorrelationIDFromContext)
 
+	// Read-only inspector for newtron's authorization table (super_users +
+	// user_groups + permissions). Backs the Permissions tab in the SPA.
+	handlers.RegisterAuthorizationRoutes(mux, handlers.AuthorizationDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Operator-identity endpoints: /api/auth/{login,logout,whoami}.
 	// Cookie.Secure is auto-derived from tlsOn — production HTTPS deployments
 	// get Secure cookies; plain-HTTP dev gets non-Secure (so the browser will
