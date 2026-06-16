@@ -118,12 +118,25 @@ const PANELS: Panel[] = [
 // Each field definition describes one HTML input in the "Add" form drawer.
 
 interface FieldDef {
-  name: string;      // JSON field name sent to newtron
-  label: string;     // Operator-visible label (domain language)
+  name: string;        // JSON field name sent to newtron
+  label: string;       // Operator-visible label (domain language)
   type: "text" | "number" | "select";
   required?: boolean;
-  options?: string[];   // for type "select"
+  options?: string[];  // for type "select"
   placeholder?: string;
+
+  // Numeric bounds — rendered as input[min] / input[max] HTML attributes;
+  // the browser's native constraint UI fires on form.reportValidity() at
+  // submit time. Use for fields with well-known wire-shape bounds (VLAN
+  // ID 1-4094, ASN 1-4294967295, L3 VNI 1-16777215, etc.).
+  min?: number;
+  max?: number;
+
+  // Contextual help — one short sentence explaining what the field means
+  // when the label alone isn't enough (e.g. "L3 VNI" → "24-bit VXLAN ID
+  // for routed traffic; unique per IPVPN"). Rendered as a "?" affordance
+  // next to the label that toggles an inline help line.
+  help?: string;
 }
 
 // specForms maps each SpecKind to the form fields needed to create that spec.
@@ -151,14 +164,26 @@ const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
   ],
   ipvpns: [
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. corp-l3vpn" },
-    { name: "l3vni", label: "L3 VNI", type: "number", required: true, placeholder: "e.g. 10001" },
+    {
+      name: "l3vni", label: "L3 VNI", type: "number", required: true,
+      placeholder: "e.g. 10001", min: 1, max: 16777215,
+      help: "24-bit VXLAN VNI for routed traffic. Must be unique across IP VPNs in this network.",
+    },
     { name: "vrf", label: "VRF", type: "text", placeholder: "VRF name (optional)" },
     { name: "description", label: "Description", type: "text" },
   ],
   macvpns: [
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. vlan100-vpn" },
-    { name: "vni", label: "VNI", type: "number", required: true, placeholder: "e.g. 100" },
-    { name: "vlan_id", label: "VLAN ID", type: "number", placeholder: "e.g. 100" },
+    {
+      name: "vni", label: "VNI", type: "number", required: true,
+      placeholder: "e.g. 100", min: 1, max: 16777215,
+      help: "24-bit VXLAN VNI for bridged traffic. Must be unique across MAC VPNs in this network.",
+    },
+    {
+      name: "vlan_id", label: "VLAN ID", type: "number",
+      placeholder: "e.g. 100", min: 1, max: 4094,
+      help: "Local VLAN ID on each device the MAC VPN binds to. 802.1Q range is 1–4094.",
+    },
     { name: "anycast_ip", label: "Anycast IP", type: "text", placeholder: "e.g. 10.0.100.1/24" },
     { name: "anycast_mac", label: "Anycast MAC", type: "text", placeholder: "e.g. 00:00:00:00:01:00" },
     { name: "description", label: "Description", type: "text" },
@@ -188,7 +213,11 @@ const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
     { name: "loopback_ip", label: "Loopback IP", type: "text", required: true, placeholder: "e.g. 10.0.0.1" },
     { name: "zone", label: "Zone", type: "text", required: true, placeholder: "Zone name" },
     { name: "platform", label: "Platform", type: "text", placeholder: "Platform name (optional)" },
-    { name: "underlay_asn", label: "Underlay ASN", type: "number", placeholder: "e.g. 65001" },
+    {
+      name: "underlay_asn", label: "Underlay ASN", type: "number",
+      placeholder: "e.g. 65001", min: 1, max: 4294967295,
+      help: "Autonomous System Number for the device's underlay BGP session. Private-use range: 64512–65535 (16-bit) or 4200000000–4294967294 (32-bit).",
+    },
     { name: "ssh_user", label: "SSH user", type: "text", placeholder: "e.g. admin" },
   ],
   zones: [
@@ -280,7 +309,7 @@ function enterSpecEditMode(
   const fields = specForms[kind];
   if (!fields) return;
 
-  const { form, getValues } = buildFormFields(fields, {
+  const { form, getValues, validate } = buildFormFields(fields, {
     prefill: prefillFromDetail(kind, detail),
     // Identifier comes from the URL on the server side; rendering it in
     // the form would imply renames are supported here (they aren't).
@@ -303,6 +332,7 @@ function enterSpecEditMode(
   });
 
   saveBtn.addEventListener("click", async () => {
+    if (!validate()) return;
     errOut.textContent = "";
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving…";
@@ -341,20 +371,32 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     endpoint: "queues",
     label: "Add queue",
     fields: [
-      { name: "queue_id", label: "Queue ID", type: "number", required: true },
+      {
+        name: "queue_id", label: "Queue ID", type: "number", required: true,
+        min: 0, help: "Hardware queue index. Range and reserved IDs depend on the platform.",
+      },
       { name: "name", label: "Queue name", type: "text", required: true },
       {
         name: "type", label: "Scheduling type", type: "select", required: true,
         options: ["strict", "wrr", "wfq", "dwrr"],
+        help: "strict = highest-priority-first. wrr / wfq / dwrr = weighted round-robin variants; weight matters.",
       },
-      { name: "weight", label: "Weight", type: "number", placeholder: "0 = strict" },
+      {
+        name: "weight", label: "Weight", type: "number",
+        placeholder: "0 = strict", min: 0,
+        help: "Round-robin weight. Ignored when scheduling type is strict.",
+      },
     ],
   },
   filters: {
     endpoint: "rules",
     label: "Add rule",
     fields: [
-      { name: "seq", label: "Sequence", type: "number", required: true, placeholder: "e.g. 10" },
+      {
+        name: "seq", label: "Sequence", type: "number", required: true,
+        placeholder: "e.g. 10", min: 1,
+        help: "Rules evaluate in ascending sequence order. Conventionally start at 10 and step by 10 so inserts don't require renumbering.",
+      },
       {
         name: "action", label: "Action", type: "select", required: true,
         options: ["permit", "deny"],
@@ -377,7 +419,11 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     endpoint: "rules",
     label: "Add rule",
     fields: [
-      { name: "seq", label: "Sequence", type: "number", required: true, placeholder: "e.g. 10" },
+      {
+        name: "seq", label: "Sequence", type: "number", required: true,
+        placeholder: "e.g. 10", min: 1,
+        help: "Statements evaluate in ascending sequence order. Conventionally start at 10 and step by 10 so inserts don't require renumbering.",
+      },
       {
         name: "action", label: "Action", type: "select", required: true,
         options: ["permit", "deny"],
@@ -413,7 +459,16 @@ interface FormOptions {
 }
 
 // buildFormFields renders input elements for each field definition.
-function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HTMLFormElement; getValues: () => Record<string, unknown> } {
+function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
+  form: HTMLFormElement;
+  getValues: () => Record<string, unknown>;
+  // validate runs the browser's native constraint UI (required, min, max,
+  // pattern) and returns true iff every field passes. Save / Add handlers
+  // should call this before getValues() so the operator sees the
+  // browser's per-field "must be N–M" message rather than a backend
+  // round-trip failure.
+  validate: () => boolean;
+} {
   const form = el("form", { className: "spec-form" });
   const prefill = opts.prefill ?? {};
   const exclude = new Set(opts.excludeNames ?? []);
@@ -423,11 +478,33 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HT
 
   for (const field of renderFields) {
     const group = el("div", { className: "form-group" });
+    const labelRow = el("div", { className: "form-label-row" });
     const label = el("label", { className: "form-label" }, field.label);
     if (field.required) {
       label.appendChild(el("span", { className: "form-required" }, " *"));
     }
-    group.appendChild(label);
+    label.setAttribute("for", "field-" + field.name);
+    labelRow.appendChild(label);
+
+    // Help affordance — "?" icon → click toggles the inline help line.
+    // Click here doesn't blur the field, so the operator can read help
+    // mid-typing without losing place.
+    let helpEl: HTMLElement | null = null;
+    if (field.help) {
+      const helpBtn = el("button", {
+        type: "button",
+        className: "form-help-btn",
+        title: "Show help",
+      }, "?") as HTMLButtonElement;
+      helpEl = el("p", { className: "form-help-text" }, field.help);
+      helpEl.hidden = true;
+      helpBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (helpEl) helpEl.hidden = !helpEl.hidden;
+      });
+      labelRow.appendChild(helpBtn);
+    }
+    group.appendChild(labelRow);
 
     const prefillStr = field.name in prefill && prefill[field.name] != null
       ? String(prefill[field.name])
@@ -443,7 +520,6 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HT
         if (opt === prefillStr) o.selected = true;
         select.appendChild(o);
       }
-      label.setAttribute("for", "field-" + field.name);
       group.appendChild(select);
     } else {
       const input = el("input", {
@@ -454,10 +530,15 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HT
         placeholder: field.placeholder ?? "",
       }) as HTMLInputElement;
       if (field.required) input.required = true;
+      if (field.type === "number") {
+        if (field.min !== undefined) input.min = String(field.min);
+        if (field.max !== undefined) input.max = String(field.max);
+      }
       if (prefillStr) input.value = prefillStr;
-      label.setAttribute("for", "field-" + field.name);
       group.appendChild(input);
     }
+
+    if (helpEl) group.appendChild(helpEl);
 
     form.appendChild(group);
   }
@@ -479,7 +560,7 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HT
     return values;
   };
 
-  return { form, getValues };
+  return { form, getValues, validate: () => form.reportValidity() };
 }
 
 // openCreateDrawer opens the drawer for creating a new spec of the given kind.
@@ -502,7 +583,7 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
     return;
   }
 
-  const { form, getValues } = buildFormFields(fields);
+  const { form, getValues, validate } = buildFormFields(fields);
   content.appendChild(form);
 
   const errorOut = el("div", { className: "form-error-out" });
@@ -512,6 +593,7 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   content.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", () => {
+    if (!validate()) return;
     errorOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Queued";
@@ -705,7 +787,7 @@ function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLEle
 
   formArea.hidden = true;
 
-  const { form, getValues } = buildFormFields(subRuleConf.fields);
+  const { form, getValues, validate } = buildFormFields(subRuleConf.fields);
   formArea.appendChild(form);
 
   const errOut = el("div", { className: "form-error-out" });
@@ -715,6 +797,7 @@ function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLEle
   formArea.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", async () => {
+    if (!validate()) return;
     errOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Saving…";
@@ -1484,7 +1567,7 @@ function openBindServiceDrawer(
     { name: "peer_as", label: "Peer AS", type: "number", placeholder: "e.g. 65001 (optional)" },
   ];
 
-  const { form, getValues } = buildFormFields(fields);
+  const { form, getValues, validate } = buildFormFields(fields);
   content.appendChild(form);
 
   const errorOut = el("div", { className: "form-error-out" });
@@ -1494,6 +1577,7 @@ function openBindServiceDrawer(
   content.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", async () => {
+    if (!validate()) return;
     errorOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Binding…";
@@ -2338,7 +2422,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     { name: "platform",     label: "Platform",          type: "select",                  options: [""] },
     { name: "ssh_user",     label: "SSH user (opt)",    type: "text",   placeholder: "e.g. admin" },
   ];
-  const { form, getValues } = buildFormFields(fields);
+  const { form, getValues, validate } = buildFormFields(fields);
   content.appendChild(form);
 
   const errorOut = el("div", { className: "form-error-out" });
@@ -2375,6 +2459,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   })();
 
   submitBtn.addEventListener("click", () => {
+    if (!validate()) return;
     errorOut.textContent = "";
     try {
       const values = getValues();
