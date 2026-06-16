@@ -303,3 +303,72 @@ func TestAddRoutePolicyRule_Handler_Success(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestUpdateSpec_Handler_Success verifies PUT /api/networks/.../{kind}/{name}
+// forwards to newtron's update-<kind> and returns the upstream payload.
+func TestUpdateSpec_Handler_Success(t *testing.T) {
+	var gotBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/update-service" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"name":"transit"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNetworkRoutes(mux, handlers.NetworkDeps{Client: newtronc.New(upstream.URL)})
+
+	body, _ := json.Marshal(map[string]string{"name": "transit", "description": "updated"})
+	req := httptest.NewRequest(http.MethodPut, "/api/networks/default/services/transit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotBody["name"] != "transit" {
+		t.Errorf("forwarded name=%v want transit", gotBody["name"])
+	}
+	if gotBody["description"] != "updated" {
+		t.Errorf("forwarded description=%v want updated", gotBody["description"])
+	}
+}
+
+// TestUpdateSpec_Handler_URLNameOverridesBody verifies the handler ignores
+// any "name" in the request body and uses the URL path-param instead.
+// Pins the safety check: an operator asking to "update foo" while sending
+// {"name":"bar",…} must update foo, not bar.
+func TestUpdateSpec_Handler_URLNameOverridesBody(t *testing.T) {
+	var gotName string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if n, ok := body["name"].(string); ok {
+			gotName = n
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"name":"foo"},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNetworkRoutes(mux, handlers.NetworkDeps{Client: newtronc.New(upstream.URL)})
+
+	body, _ := json.Marshal(map[string]string{"name": "bar-attempted-injection", "description": "x"})
+	req := httptest.NewRequest(http.MethodPut, "/api/networks/default/services/foo", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotName != "foo" {
+		t.Errorf("URL-name override failed: upstream got name=%q want foo", gotName)
+	}
+}

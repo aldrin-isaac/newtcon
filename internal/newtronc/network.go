@@ -176,6 +176,23 @@ func (c *Client) DeleteSpec(ctx context.Context, network, kind, name string) err
 	return err
 }
 
+// UpdateSpec sends POST /network/{netID}/update-<kind> with the given body.
+// kind is the newtron URL segment (e.g. "service", "ipvpn", "profile") —
+// the singular create-/delete-/update- verb suffix, NOT the plural URL
+// collection name.
+//
+// Body shape mirrors create-<kind>: name identifies the existing spec;
+// other fields are the new top-level values. Sub-collections (qos
+// queues, filter rules, route-policy statements) are preserved by newtron
+// and managed via their own add-X / remove-X endpoints — DO NOT include
+// them in update-<kind> request bodies.
+//
+// Returns the decoded "data" field on success ({"name": "<name>"} today;
+// shape may grow additively per DESIGN_PRINCIPLES_NEWTRON §46).
+func (c *Client) UpdateSpec(ctx context.Context, network, kind string, body any) (json.RawMessage, error) {
+	return c.networkPost(ctx, network, "update-"+kind, body)
+}
+
 // ============================================================================
 // QoS queue sub-rules
 // ============================================================================

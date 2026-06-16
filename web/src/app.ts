@@ -7,6 +7,7 @@ import {
   fetchSpecList,
   fetchSpecDetail,
   addSubRule,
+  updateSpec,
   removeQoSQueue,
   removeFilterRule,
   removePrefixListEntry,
@@ -14,6 +15,7 @@ import {
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
+import { formatErrorBrief } from "./render-error.js";
 import {
   fetchLabStatus,
   postLabDeploy,
@@ -226,6 +228,94 @@ function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
   return displaySpecForms[kind] ?? specForms[kind];
 }
 
+// isEditableKind returns true when a spec kind has any top-level field
+// beyond the identifier — those are the kinds where the Edit button shows
+// up in the detail drawer. Schemas that are just `name` (zones, prefix-
+// lists today) have nothing edit-worthy at the top level; their content
+// lives in sub-rules, managed via the existing sub-rule UI.
+function isEditableKind(kind: SpecKind): boolean {
+  const fields = specForms[kind];
+  if (!fields) return false;
+  return fields.some((f) => f.name !== "name");
+}
+
+// prefillFromDetail maps the GET-detail wire shape to the create-form
+// field names so the Edit form starts with the operator's current values.
+//
+// Most kinds are 1:1 — pass-through. Asymmetric kinds need explicit
+// mappings; today services is the only one (wire `service_type` ↔ form
+// `type`, same diversion already handled by displaySpecForms for the
+// read-only render).
+function prefillFromDetail(kind: SpecKind, detail: unknown): Record<string, unknown> {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return {};
+  const d = detail as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...d };
+  if (kind === "services" && "service_type" in d) {
+    out["type"] = d["service_type"];
+  }
+  return out;
+}
+
+// enterSpecEditMode replaces the drawer body with an edit form pre-filled
+// from the current detail. On Save: PUT /api/networks/.../{kind}/{name}
+// (newtron's update-<kind>) → re-open the drawer to read the fresh values.
+// On Cancel: re-open the drawer (discards changes).
+//
+// Why re-open instead of swap-back? Newtron's update can synthesize fields
+// (timestamps, derived names) we don't know about. Re-fetching is the
+// honest path that surfaces the new state verbatim.
+function enterSpecEditMode(
+  kind: SpecKind,
+  kindTitle: string,
+  name: string,
+  detail: unknown,
+  content: HTMLElement,
+): void {
+  // Clear the body but keep the kind / name header.
+  content.textContent = "";
+  content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
+  content.appendChild(el("h2", { className: "drawer-name" }, name));
+
+  const fields = specForms[kind];
+  if (!fields) return;
+
+  const { form, getValues } = buildFormFields(fields, {
+    prefill: prefillFromDetail(kind, detail),
+    // Identifier comes from the URL on the server side; rendering it in
+    // the form would imply renames are supported here (they aren't).
+    excludeNames: ["name"],
+  });
+  content.appendChild(form);
+
+  const errOut = el("div", { className: "form-error-out" });
+  content.appendChild(errOut);
+
+  const buttons = el("div", { className: "form-button-row" });
+  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Save");
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(saveBtn);
+  buttons.appendChild(cancelBtn);
+  content.appendChild(buttons);
+
+  cancelBtn.addEventListener("click", () => {
+    void openDetail(kind, kindTitle, name);
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    errOut.textContent = "";
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      await updateSpec(kind, name, getValues());
+      void openDetail(kind, kindTitle, name);
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+    }
+  });
+}
+
 // subRuleWireField maps a spec kind to the wire-field name newtron returns
 // the child rules under in the detail payload. Used by openDetail to keep
 // that field out of the tailored body's "All fields" disclosure — the
@@ -310,13 +400,27 @@ function translateErrorKind(kind: string): string {
 
 // ---- Form drawer (create spec) ---------------------------------------------
 
+// FormOptions controls how buildFormFields renders + reads values.
+//   prefill — initial values, keyed by FieldDef.name. Used by edit mode to
+//             populate the form from the current spec detail.
+//   excludeNames — fields to skip rendering entirely (e.g. "name" in edit
+//                  mode — identifier can't be changed via update-X; the
+//                  drawer header still shows it).
+interface FormOptions {
+  prefill?: Record<string, unknown>;
+  excludeNames?: string[];
+}
+
 // buildFormFields renders input elements for each field definition.
-function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues: () => Record<string, unknown> } {
+function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): { form: HTMLFormElement; getValues: () => Record<string, unknown> } {
   const form = el("form", { className: "spec-form" });
+  const prefill = opts.prefill ?? {};
+  const exclude = new Set(opts.excludeNames ?? []);
+  const renderFields = fields.filter((f) => !exclude.has(f.name));
 
   form.addEventListener("submit", (e) => e.preventDefault());
 
-  for (const field of fields) {
+  for (const field of renderFields) {
     const group = el("div", { className: "form-group" });
     const label = el("label", { className: "form-label" }, field.label);
     if (field.required) {
@@ -324,13 +428,19 @@ function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues
     }
     group.appendChild(label);
 
+    const prefillStr = field.name in prefill && prefill[field.name] != null
+      ? String(prefill[field.name])
+      : "";
+
     if (field.type === "select" && field.options) {
       const select = el("select", { className: "form-control", id: "field-" + field.name, name: field.name }) as HTMLSelectElement;
       if (!field.required) {
         select.appendChild(el("option", { value: "" }, "— optional —") as HTMLOptionElement);
       }
       for (const opt of field.options) {
-        select.appendChild(el("option", { value: opt }, opt) as HTMLOptionElement);
+        const o = el("option", { value: opt }, opt) as HTMLOptionElement;
+        if (opt === prefillStr) o.selected = true;
+        select.appendChild(o);
       }
       label.setAttribute("for", "field-" + field.name);
       group.appendChild(select);
@@ -343,6 +453,7 @@ function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues
         placeholder: field.placeholder ?? "",
       }) as HTMLInputElement;
       if (field.required) input.required = true;
+      if (prefillStr) input.value = prefillStr;
       label.setAttribute("for", "field-" + field.name);
       group.appendChild(input);
     }
@@ -352,7 +463,7 @@ function buildFormFields(fields: FieldDef[]): { form: HTMLFormElement; getValues
 
   const getValues = (): Record<string, unknown> => {
     const values: Record<string, unknown> = {};
-    for (const field of fields) {
+    for (const field of renderFields) {
       const el2 = form.querySelector(`#field-${field.name}`) as HTMLInputElement | HTMLSelectElement | null;
       if (!el2) continue;
       const raw = el2.value.trim();
@@ -780,6 +891,20 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
   try {
     const detail = await fetchSpecDetail(kind, name);
     content.removeChild(loading);
+
+    // Edit-mode controls — Edit button if the kind has any top-level field
+    // beyond the identifier. Kinds whose schema is just `name` (zones,
+    // prefix-lists) get no Edit button — their meaningful content lives in
+    // sub-rules and is managed via the existing sub-rule UI.
+    if (isEditableKind(kind)) {
+      const controls = el("div", { className: "drawer-controls" });
+      const editBtn = el("button", { type: "button", className: "drawer-edit-btn" }, "Edit");
+      editBtn.addEventListener("click", () => {
+        enterSpecEditMode(kind, kindTitle, name, detail, content);
+      });
+      controls.appendChild(editBtn);
+      content.appendChild(controls);
+    }
 
     // Schema-aware rendering when a display schema knows this kind; generic
     // recursive tree as the fallback so unknown kinds still render. Exclude
