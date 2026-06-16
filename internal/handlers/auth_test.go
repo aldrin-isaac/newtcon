@@ -152,7 +152,7 @@ func TestAuthLogout_NoCookie(t *testing.T) {
 func TestAuthLogout_WithCookie(t *testing.T) {
 	var loggedOut bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/newtron/v1/auth/logout" && r.Header.Get("Authorization") == "Bearer k1" {
+		if r.URL.Path == "/newt-server/v1/auth/logout" && r.Header.Get("Authorization") == "Bearer k1" {
 			loggedOut = true
 			w.WriteHeader(http.StatusNoContent)
 			return

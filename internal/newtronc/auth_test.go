@@ -14,7 +14,7 @@ import (
 
 func TestLogin_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/auth/login" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newt-server/v1/auth/login" {
 			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
 		}
 		user, pw, ok := r.BasicAuth()
@@ -93,7 +93,7 @@ func TestLogin_NotFound(t *testing.T) {
 
 func TestLogout_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/auth/logout" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newt-server/v1/auth/logout" {
 			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
 		}
 		auth := r.Header.Get("Authorization")

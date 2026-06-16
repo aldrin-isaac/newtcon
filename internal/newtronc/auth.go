@@ -50,7 +50,11 @@ type LoginResponse struct {
 //	404 (L2c disabled on server)     → *NotFoundError
 //	other                            → typed via classifyResponse
 func (c *Client) Login(ctx context.Context, username, password string) (*LoginResponse, error) {
-	url := c.newtronBase() + "/auth/login"
+	// L2c lives at the newt-server (transport) layer — not under
+	// /newtron/v1 (engine layer). Bearer tokens minted here authenticate
+	// against every engine (newtron/, newtlab/, newtrun/) mounted on the
+	// same newt-server.
+	url := c.newtServerBase() + "/auth/login"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
@@ -101,7 +105,7 @@ func (c *Client) Login(ctx context.Context, username, password string) (*LoginRe
 // caller is logging that bearer out — see internal/handlers/auth.go which
 // pulls the key from the server-side session store directly).
 func (c *Client) Logout(ctx context.Context, key string) error {
-	url := c.newtronBase() + "/auth/logout"
+	url := c.newtServerBase() + "/auth/logout"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
