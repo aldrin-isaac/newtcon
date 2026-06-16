@@ -1342,6 +1342,17 @@ function renderTopologySVG(
     const status = opts.statusByDevice?.get(node.name);
     // Phase 2: substrate-agnostic state class. Tooltip carries the detail.
     const stateClass = status ? ` topo-node--${status.state}` : "";
+    // Drift: count of out-of-sync items between intent and CONFIG_DB.
+    // Orthogonal to substrate state — a "running" device can have drift.
+    // The .topo-node--drifted class tints the node outline so the operator
+    // sees the drifted set at a glance, not just via the corner badge.
+    const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
+    const driftClass = driftCount > 0 ? " topo-node--drifted" : "";
+
+    const ariaLabelParts = [`Device ${node.name}`, status?.state ?? "unknown"];
+    if (driftCount > 0) {
+      ariaLabelParts.push(`drift: ${driftCount} item${driftCount === 1 ? "" : "s"}`);
+    }
 
     const g = svgEl("g", {
       "class": "topo-node"
@@ -1349,10 +1360,11 @@ function renderTopologySVG(
         + (pendingCount > 0 ? " topo-node--pending" : "")
         + (isPendingAdd ? " topo-node--pending-add" : "")
         + (isPendingRemove ? " topo-node--pending-del" : "")
-        + stateClass,
+        + stateClass
+        + driftClass,
       role: "button",
       tabindex: "0",
-      "aria-label": `Device ${node.name} — ${status?.state ?? "unknown"}`,
+      "aria-label": ariaLabelParts.join(" — "),
       "data-device": node.name,
     });
 
@@ -1509,7 +1521,8 @@ function renderTopologySVG(
     }
 
     // Drift badge: small dot in the top-right when the device has drift.
-    const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
+    // driftCount + driftClass were computed up top alongside the other
+    // node-level state classes; reuse that value here.
     if (driftCount > 0) {
       const badge = svgEl("g", { "class": "topo-drift-badge" });
       const cx = pos.cx + NODE_W / 2 - 8;
