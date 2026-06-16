@@ -27,6 +27,12 @@ import {
   zoomAt,
 } from "./topology-viewport.js";
 import {
+  type PinnedPosition,
+  clearPositions,
+  loadPositions,
+  savePosition,
+} from "./topology-positions.js";
+import {
   fetchLabStatus,
   postLabDeploy,
   postLabDestroy,
@@ -1196,7 +1202,12 @@ const V_GAP = 60;
 // layoutNodes assigns (cx, cy) to each node in a deterministic grid.
 // Up to 4 nodes per row; rows stacked with V_GAP spacing. cellW lets the
 // caller widen the column when interface bands are expanded.
-function layoutNodes(nodes: TopoNode[], cellW: number, perRowExtraH: number[]): Map<string, { cx: number; cy: number }> {
+function layoutNodes(
+  nodes: TopoNode[],
+  cellW: number,
+  perRowExtraH: number[],
+  pinned?: Map<string, PinnedPosition>,
+): Map<string, { cx: number; cy: number }> {
   const cols = Math.min(nodes.length, 4);
   const positions = new Map<string, { cx: number; cy: number }>();
   // Track the cumulative y-offset added by each row's tallest expansion band.
@@ -1206,10 +1217,19 @@ function layoutNodes(nodes: TopoNode[], cellW: number, perRowExtraH: number[]): 
     for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       if (i >= nodes.length) break;
-      positions.set(nodes[i].name, {
-        cx: (cellW + H_GAP) * c + cellW / 2 + H_GAP / 2,
-        cy: yCursor + NODE_H / 2,
-      });
+      const name = nodes[i].name;
+      // Pinned position wins when present; otherwise fall back to the
+      // grid slot. Pinned positions persist across re-renders via
+      // localStorage (loaded by mountTopologyTab).
+      const pin = pinned?.get(name);
+      if (pin) {
+        positions.set(name, { cx: pin.cx, cy: pin.cy });
+      } else {
+        positions.set(name, {
+          cx: (cellW + H_GAP) * c + cellW / 2 + H_GAP / 2,
+          cy: yCursor + NODE_H / 2,
+        });
+      }
     }
     yCursor += NODE_H + rowExtra + V_GAP;
   }
@@ -1248,6 +1268,13 @@ interface TopologyRenderOpts {
   // ad-hoc callers don't need to opt in.
   viewState?: ViewState | undefined;
   onViewStateChange?: (next: ViewState) => void;
+
+  // Per-device pinned positions overriding the grid layout. The caller
+  // (mountTopologyTab) loads them from localStorage at mount time;
+  // onNodeMoved fires when the operator drags + releases a node so the
+  // caller can persist the new position.
+  pinnedPositions?: Map<string, PinnedPosition>;
+  onNodeMoved?: (name: string, pos: PinnedPosition) => void;
 }
 
 interface TopologyRenderResult {
@@ -1287,7 +1314,7 @@ function renderTopologySVG(
     "aria-label": "Network topology diagram",
   });
 
-  const positions = layoutNodes(nodes, cellW, perRowExtraH);
+  const positions = layoutNodes(nodes, cellW, perRowExtraH, opts.pinnedPositions);
 
   // Draw links first (under nodes).
   for (const link of links) {
@@ -1367,8 +1394,68 @@ function renderTopologySVG(
       g.appendChild(typeLabel);
     }
 
+    // Drag-to-reposition wiring. Only active when the caller wired
+    // onNodeMoved. A drag of more than a few pixels suppresses the
+    // upcoming click — otherwise tiny-jitter clicks would feel like
+    // they dropped events.
+    let dragOccurred = false;
+    if (opts.onNodeMoved) {
+      const onNodeMoved = opts.onNodeMoved;
+      const startCx = pos.cx;
+      const startCy = pos.cy;
+      g.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();  // don't let the SVG-level pan handler see it
+        const startClientX = e.clientX;
+        const startClientY = e.clientY;
+        let dragging = false;
+        dragOccurred = false;
+
+        const pixelToSVG = (dx: number, dy: number): { sx: number; sy: number } => {
+          const rect = svg.getBoundingClientRect();
+          const vb = svg.viewBox.baseVal;
+          return {
+            sx: (dx / rect.width) * vb.width,
+            sy: (dy / rect.height) * vb.height,
+          };
+        };
+
+        const onMove = (em: MouseEvent): void => {
+          const dx = em.clientX - startClientX;
+          const dy = em.clientY - startClientY;
+          if (!dragging) {
+            if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+            dragging = true;
+            dragOccurred = true;
+            g.classList.add("topo-node--dragging");
+          }
+          const { sx, sy } = pixelToSVG(dx, dy);
+          g.setAttribute("transform", `translate(${sx}, ${sy})`);
+        };
+        const onUp = (em: MouseEvent): void => {
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+          g.classList.remove("topo-node--dragging");
+          if (dragging) {
+            const { sx, sy } = pixelToSVG(em.clientX - startClientX, em.clientY - startClientY);
+            onNodeMoved(node.name, { cx: startCx + sx, cy: startCy + sy });
+            // The caller's onNodeMoved will mutate the pinned-positions
+            // map + trigger renderGraph; the new SVG group will be at
+            // the new position, so the transform we set here is gone
+            // with the old element.
+          }
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+      });
+    }
+
     g.addEventListener("click", (e) => {
       e.stopPropagation();
+      if (dragOccurred) {
+        dragOccurred = false;
+        return;
+      }
       opts.onNodeClick(node.name, e);
     });
     g.addEventListener("contextmenu", (e) => {
@@ -3038,6 +3125,12 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // selection / pending-bar / status tick.
     let viewState: ViewState | undefined;
 
+    // Per-device pinned positions — loaded once at mount, mutated when
+    // the operator drag-drops a node, persisted to localStorage. Keyed
+    // by the active network so multiple operator topologies don't share.
+    const activeNet = activeNetwork();
+    const pinnedPositions = loadPositions(activeNet);
+
     // Topology view: layout is a split — left = SVG diagram + toolbar,
     // right = docked action panel.
     const split = el("div", { className: "topology-split" });
@@ -3053,7 +3146,12 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const zoomOutBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Zoom out" }, "−") as HTMLButtonElement;
     const zoomInBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Zoom in" }, "+") as HTMLButtonElement;
     const fitBtn = el("button", { type: "button", className: "topology-zoom-btn", title: "Fit to view" }, "⊡") as HTMLButtonElement;
-    zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn);
+    const resetPosBtn = el("button", {
+      type: "button",
+      className: "topology-zoom-btn topology-zoom-btn--reset",
+      title: "Reset node positions to grid layout",
+    }, "↺") as HTMLButtonElement;
+    zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, resetPosBtn);
     graphSlot.appendChild(zoomToolbar);
 
     // Interface lists pulled from the topology declaration (works offline);
@@ -3135,6 +3233,13 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         isPendingRemove: (n) => isDevicePendingRemove(n),
         viewState,
         onViewStateChange: (next) => { viewState = next; },
+        pinnedPositions,
+        onNodeMoved: (name, pos) => {
+          pinnedPositions.set(name, pos);
+          savePosition(activeNet, name, pos);
+          // Re-render to redraw links from the new node position.
+          renderGraph();
+        },
       });
       // SVG sits behind the toolbar (toolbar is z-indexed above).
       graphSlot.insertBefore(result.svg, zoomToolbar);
@@ -3168,6 +3273,13 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       const rect = svgEl.getBoundingClientRect();
       viewState = fitToBounds(lastResultBounds, rect.width, rect.height);
       svgEl.setAttribute("viewBox", viewBoxStr(viewState));
+    });
+    resetPosBtn.addEventListener("click", () => {
+      if (pinnedPositions.size === 0) return;
+      if (!window.confirm(`Reset ${pinnedPositions.size} pinned node position${pinnedPositions.size === 1 ? "" : "s"} to the grid layout?`)) return;
+      pinnedPositions.clear();
+      clearPositions(activeNet);
+      renderGraph();
     });
 
     // Re-render the graph + panel when the pending queue changes — but do
