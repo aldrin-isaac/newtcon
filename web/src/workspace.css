@@ -95,7 +95,9 @@
 .topology-canvas { display: flex; flex-direction: column; }
 .topology-graph-host { background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: var(--space-md); min-height: 360px; overflow: auto; }
 .topology-graph { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-.topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; }
+.topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; pointer-events: none; }
+.topo-link-hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
+.topo-link-hit:hover + .topo-link { stroke: var(--color-accent); stroke-width: 2; }
 .topo-node rect { fill: var(--color-surface); stroke: var(--color-border-strong); stroke-width: 1.5; transition: fill var(--duration-fast) var(--ease-standard), stroke var(--duration-fast) var(--ease-standard); }
 .topo-node:hover rect, .topo-node:focus-visible rect { fill: var(--color-accent-bg); stroke: var(--color-accent); cursor: pointer; }
 .topo-node text { font-family: var(--font-mono); font-size: 13px; font-weight: var(--weight-medium); fill: var(--color-text-primary); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
@@ -1171,6 +1173,34 @@
  * compete with the primary zoom controls. */
 .topology-zoom-btn--reset { color: var(--color-text-muted); }
 .topology-zoom-btn--reset:hover { color: var(--color-text-primary); }
+
+/* Link drawer (#174.D) — two-column side-by-side layout for the link
+ * endpoints; falls back to stacked when the drawer is narrow. */
+.link-drawer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+@media (max-width: 720px) {
+  .link-drawer-grid { grid-template-columns: 1fr; }
+}
+.link-drawer-endpoint {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+.link-drawer-endpoint-heading {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-sm);
+}
+.link-drawer-endpoint-body .drawer-kind {
+  margin-top: var(--space-sm);
+}
 
 /* ---- Topology: docked action panel ----------------------------------- */
 
