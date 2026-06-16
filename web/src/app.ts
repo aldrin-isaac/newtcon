@@ -17,6 +17,7 @@ import {
 import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
+import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
 import {
   fetchLabStatus,
   postLabDeploy,
@@ -332,6 +333,7 @@ function enterSpecEditMode(
   });
 
   saveBtn.addEventListener("click", async () => {
+    clearFieldErrors(form);
     if (!validate()) return;
     errOut.textContent = "";
     saveBtn.disabled = true;
@@ -342,7 +344,10 @@ function enterSpecEditMode(
     } catch (err) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
-      errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+      // validation_failure: attach to the field if newtron named one.
+      if (!attachServerValidationToForm(form, err)) {
+        errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+      }
     }
   });
 }
@@ -797,6 +802,7 @@ function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLEle
   formArea.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", async () => {
+    clearFieldErrors(form);
     if (!validate()) return;
     errOut.textContent = "";
     submitBtn.disabled = true;
@@ -816,11 +822,13 @@ function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLEle
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = subRuleConf.label;
-      if (err instanceof ApiError) {
-        errOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      if (!attachServerValidationToForm(form, err)) {
+        if (err instanceof ApiError) {
+          errOut.appendChild(el("p", { className: "panel-error" },
+            translateErrorKind(err.kind) + ": " + err.message));
+        } else {
+          errOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+        }
       }
     }
   });
@@ -1577,6 +1585,7 @@ function openBindServiceDrawer(
   content.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", async () => {
+    clearFieldErrors(form);
     if (!validate()) return;
     errorOut.textContent = "";
     submitBtn.disabled = true;
@@ -1600,11 +1609,13 @@ function openBindServiceDrawer(
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Bind service";
-      if (err instanceof ApiError) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          translateErrorKind(err.kind) + ": " + err.message));
-      } else {
-        errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      if (!attachServerValidationToForm(form, err)) {
+        if (err instanceof ApiError) {
+          errorOut.appendChild(el("p", { className: "panel-error" },
+            translateErrorKind(err.kind) + ": " + err.message));
+        } else {
+          errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+        }
       }
     }
   });

@@ -185,6 +185,8 @@
 .form-help-btn { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; background: var(--color-surface-sunken); border: 1px solid var(--color-border-subtle); border-radius: 50%; font-size: 10px; font-weight: var(--weight-medium); color: var(--color-text-muted); cursor: pointer; font-family: var(--font-system); line-height: 1; }
 .form-help-btn:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .form-help-text { font-size: var(--text-xs); color: var(--color-text-secondary); margin: var(--space-2xs) 0 0; padding: var(--space-2xs) var(--space-xs); background: var(--color-surface-sunken); border-left: 2px solid var(--color-border-default); border-radius: 0 4px 4px 0; line-height: 1.4; }
+.form-field-error { font-size: var(--text-xs); color: var(--color-danger); margin: var(--space-2xs) 0 0; line-height: 1.4; }
+.form-control[aria-invalid="true"] { border-color: var(--color-danger); box-shadow: 0 0 0 1px var(--color-danger); }
 .form-hint { font-size: var(--text-xs); color: var(--color-text-muted); }
 .form-actions { display: flex; gap: var(--space-sm); justify-content: flex-end; padding-top: var(--space-sm); border-top: 1px solid var(--color-border-subtle); margin-top: var(--space-sm); }
 .form-error { padding: var(--space-sm) var(--space-md); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); color: var(--color-danger); border-radius: var(--radius-sm); font-size: var(--text-sm); }
