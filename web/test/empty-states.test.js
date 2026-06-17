@@ -4,7 +4,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { emptyStateFor, hasEmptyState, TOPOLOGY_EMPTY } from "../dist/empty-states.js";
+import {
+  emptyStateFor,
+  hasEmptyState,
+  TOPOLOGY_EMPTY,
+  PERMISSIONS_EMPTY,
+} from "../dist/empty-states.js";
 
 // The kinds covered by the curated COPY map. Keep this list in sync
 // with COPY in empty-states.ts so a missing or added entry is caught
@@ -99,5 +104,36 @@ describe("TOPOLOGY_EMPTY (slice #169.B)", () => {
                       (TOPOLOGY_EMPTY.hint ?? "")).toLowerCase();
     assert.ok(!/\bspec\b/.test(haystack),
       "topology empty state should not use 'spec' as bare jargon: " + haystack);
+  });
+});
+
+describe("PERMISSIONS_EMPTY (slice #169.C)", () => {
+  test("has non-empty title + body", () => {
+    assert.ok(PERMISSIONS_EMPTY.title && PERMISSIONS_EMPTY.title.length > 0);
+    assert.ok(PERMISSIONS_EMPTY.body && PERMISSIONS_EMPTY.body.length > 0);
+  });
+
+  test("body names every section the operator will see", () => {
+    const haystack = PERMISSIONS_EMPTY.body.toLowerCase();
+    assert.ok(/super-users?/.test(haystack), "should mention super-users");
+    assert.ok(/user groups?/.test(haystack), "should mention user groups");
+    assert.ok(/permissions?/.test(haystack), "should mention permissions");
+  });
+
+  test("body explains where the data comes from (newtron network.json + /reload)", () => {
+    const haystack = PERMISSIONS_EMPTY.body.toLowerCase();
+    assert.ok(/network\.json/.test(haystack), "should reference network.json");
+    assert.ok(/reload/.test(haystack), "should reference the /reload upstream verb");
+  });
+
+  test("hint is honest about newtcon being read-only here today", () => {
+    assert.ok(PERMISSIONS_EMPTY.hint && /read-only/i.test(PERMISSIONS_EMPTY.hint));
+  });
+
+  test("uses 'user groups' not 'roles' (vocab discipline)", () => {
+    const haystack = (PERMISSIONS_EMPTY.title + " " + PERMISSIONS_EMPTY.body + " " +
+                      (PERMISSIONS_EMPTY.hint ?? "")).toLowerCase();
+    assert.ok(!/\broles?\b/.test(haystack),
+      "Permissions copy must say 'user groups' not 'roles': " + haystack);
   });
 });
