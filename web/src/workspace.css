@@ -504,6 +504,15 @@
   font-style: italic;
 }
 
+/* Topology empty state (slice #169.B) — same shape as .panel-empty but
+ * widens the column slightly because the surrounding view is roomier
+ * than a single spec panel. */
+.topology-empty-state {
+  max-width: 560px;
+  padding: var(--space-xl) var(--space-md);
+}
+
+
 /* Existing tab buttons — hide (replaced by sidebar nav). The IDs still exist
    for app.ts setupTabs() to wire to; but they live in the sidebar now via
    index.html. The old tab strip CSS is no longer needed. */

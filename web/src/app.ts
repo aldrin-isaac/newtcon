@@ -18,7 +18,7 @@ import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
-import { emptyStateFor } from "./empty-states.js";
+import { emptyStateFor, TOPOLOGY_EMPTY } from "./empty-states.js";
 import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
 import {
   type ViewState,
@@ -911,6 +911,21 @@ function renderPanelEmpty(kind: SpecKind, canAdd: boolean): HTMLElement {
   }
   if (copy.hint) {
     block.appendChild(el("p", { className: "panel-empty-hint" }, copy.hint));
+  }
+  return block;
+}
+
+// renderTopologyEmptyState renders the teaching block for an empty
+// Topology view (slice #169.B). The action buttons (Create node, Bring
+// up as lab) are already in the toolbar above this block — the text
+// here explains what Topology is and what those buttons do, not where
+// to find them.
+function renderTopologyEmptyState(): HTMLElement {
+  const block = el("div", { className: "panel-empty topology-empty-state" });
+  block.appendChild(el("p", { className: "panel-empty-headline" }, TOPOLOGY_EMPTY.title));
+  block.appendChild(el("p", { className: "panel-empty-body" }, TOPOLOGY_EMPTY.body));
+  if (TOPOLOGY_EMPTY.hint) {
+    block.appendChild(el("p", { className: "panel-empty-hint" }, TOPOLOGY_EMPTY.hint));
   }
   return block;
 }
@@ -3320,6 +3335,16 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     toolbar.appendChild(tearDownBtn);
 
     root.appendChild(toolbar);
+
+    // Teaching empty state (slice #169.B). When the topology has zero
+    // committed devices AND no pending add-device in the queue, skip
+    // the graph + filter + panel and render an explanatory block. The
+    // toolbar above already carries the action buttons (Create node /
+    // Bring up as lab) so the operator's CTAs stay visible.
+    if (deviceNames.length === 0 && pendingTopologyDeviceAdds().length === 0) {
+      root.appendChild(renderTopologyEmptyState());
+      return;
+    }
 
     // Layered filter (slice #174.E): fetch profiles → build device→zone
     // metadata → render zone chips above the SVG. Filter state persists
