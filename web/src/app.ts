@@ -71,6 +71,14 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape } from "./spec-detail-shape.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
+import {
+  type DeviceMetadata,
+  type TopologyFilter,
+  applyFilter,
+  emptyFilter,
+  isActive as filterIsActive,
+  uniqueZones,
+} from "./topology-filters.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
@@ -1296,6 +1304,12 @@ interface TopologyRenderOpts {
   // When wired, links become interactive: cursor flips to pointer + a
   // wider invisible hit target is drawn under each visible link line.
   onLinkClick?: (link: TopoLink) => void;
+
+  // Layered filter dimming (#174.E): devices in this set keep their
+  // layout slot but render at reduced opacity so the operator sees the
+  // filtered subset against the full topology context. Links touching
+  // any dimmed endpoint are dimmed too.
+  dimmedNames?: Set<string>;
 }
 
 interface TopologyRenderResult {
@@ -1341,10 +1355,13 @@ function renderTopologySVG(
   // visible line gets a wider invisible hit-target sibling so clicking
   // on or near the line is reliable — bare 1.5px strokes are nearly
   // impossible to hit.
+  const dimmed = opts.dimmedNames ?? new Set<string>();
   for (const link of links) {
     const from = link.local_device ? positions.get(link.local_device) : undefined;
     const to = link.remote_device ? positions.get(link.remote_device) : undefined;
     if (!from || !to) continue;
+    const linkDimmed = (link.local_device !== undefined && dimmed.has(link.local_device))
+      || (link.remote_device !== undefined && dimmed.has(link.remote_device));
     if (opts.onLinkClick) {
       const hit = svgEl("line", {
         "class": "topo-link-hit",
@@ -1361,7 +1378,7 @@ function renderTopologySVG(
       svg.appendChild(hit);
     }
     const line = svgEl("line", {
-      "class": "topo-link",
+      "class": "topo-link" + (linkDimmed ? " topo-link--dimmed" : ""),
       x1: String(from.cx),
       y1: String(from.cy),
       x2: String(to.cx),
@@ -1393,10 +1410,12 @@ function renderTopologySVG(
       ariaLabelParts.push(`drift: ${driftCount} item${driftCount === 1 ? "" : "s"}`);
     }
 
+    const isDimmed = dimmed.has(node.name);
     const g = svgEl("g", {
       "class": "topo-node"
         + (isSelected ? " topo-node--selected" : "")
         + (pendingCount > 0 ? " topo-node--pending" : "")
+        + (isDimmed ? " topo-node--dimmed" : "")
         + (isPendingAdd ? " topo-node--pending-add" : "")
         + (isPendingRemove ? " topo-node--pending-del" : "")
         + stateClass
@@ -3228,6 +3247,69 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     root.appendChild(toolbar);
 
+    // Layered filter (slice #174.E): fetch profiles → build device→zone
+    // metadata → render zone chips above the SVG. Filter state persists
+    // across renderGraph() calls. Profiles fetch is best-effort: failure
+    // just means the chip row stays empty (filter is a power affordance,
+    // not on the critical path).
+    const deviceMetadata = new Map<string, DeviceMetadata>();
+    let filterState: TopologyFilter = emptyFilter();
+    try {
+      const profileNames = await fetchSpecList("profiles");
+      const profileDetails = await Promise.all(
+        profileNames.map((n) => fetchSpecDetail("profiles", n).catch(() => null)),
+      );
+      for (let i = 0; i < profileNames.length; i++) {
+        const d = profileDetails[i];
+        const zone = (d && typeof d === "object" && !Array.isArray(d))
+          ? (d as Record<string, unknown>).zone
+          : null;
+        deviceMetadata.set(profileNames[i]!, {
+          zone: typeof zone === "string" && zone !== "" ? zone : null,
+        });
+      }
+    } catch { /* profiles unavailable — chip row stays empty */ }
+
+    // Filter chip row — rendered as its own row below the toolbar. Only
+    // mounted when there's more than one distinct zone to pick from; a
+    // single-zone topology has nothing to filter by, so the row stays
+    // out of the way. The mount target is captured so toggling can
+    // re-render the row without disturbing other DOM.
+    const zones = uniqueZones(deviceMetadata);
+    const filterRow = el("div", { className: "topology-filter-row" });
+    if (zones.length > 1) root.appendChild(filterRow);
+    const renderFilterRow = (): void => {
+      filterRow.textContent = "";
+      const label = el("span", { className: "topology-filter-label" }, "Zone:");
+      filterRow.appendChild(label);
+      for (const z of zones) {
+        const active = filterState.zones.has(z);
+        const chip = el("button", {
+          type: "button",
+          className: "topology-filter-chip" + (active ? " topology-filter-chip--active" : ""),
+        }, z) as HTMLButtonElement;
+        chip.addEventListener("click", () => {
+          const next = new Set(filterState.zones);
+          if (next.has(z)) next.delete(z);
+          else next.add(z);
+          filterState = { zones: next };
+          renderFilterRow();
+          renderGraph();
+        });
+        filterRow.appendChild(chip);
+      }
+      if (filterIsActive(filterState)) {
+        const clear = el("button", { type: "button", className: "topology-filter-clear" }, "clear");
+        clear.addEventListener("click", () => {
+          filterState = emptyFilter();
+          renderFilterRow();
+          renderGraph();
+        });
+        filterRow.appendChild(clear);
+      }
+    };
+    if (zones.length > 1) renderFilterRow();
+
     // Persistent UI state: which nodes are selected; the docked panel reads
     // this and renders the action set + Save/Discard for the selection.
     const selected: Set<string> = new Set();
@@ -3310,7 +3392,12 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       // Preserve the zoom toolbar across re-renders; only clear the SVG.
       const oldSvg = graphSlot.querySelector("svg.topology-graph");
       if (oldSvg) oldSvg.remove();
+      // Compute dimmed set from the current filter; passed through to
+      // renderTopologySVG which applies the dim class to nodes + links.
+      const allNames = (topoData.nodes ?? []).map((n) => n.name);
+      const dimmed = applyFilter(filterState, allNames, deviceMetadata).hidden;
       const result = renderTopologySVG(topoData, {
+        dimmedNames: dimmed,
         onNodeClick: (deviceName, ev) => {
           if (ev.shiftKey) {
             if (selected.has(deviceName)) selected.delete(deviceName);
