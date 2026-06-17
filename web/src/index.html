@@ -33,6 +33,10 @@
             <span class="nav-icon" data-icon="shield-check"></span>
             <span class="nav-label">Permissions</span>
           </button>
+          <button type="button" id="tab-history" class="nav-item" role="tab" aria-selected="false">
+            <span class="nav-icon" data-icon="activity"></span>
+            <span class="nav-label">History</span>
+          </button>
         </nav>
         <div class="sidebar-footer">
           <button type="button" class="palette-trigger" id="palette-trigger" title="Open command palette">
@@ -97,6 +101,9 @@
           </section>
           <section class="view view-permissions" id="panel-permissions" hidden>
             <!-- mounted by authorization.ts mountAuthorizationTab() -->
+          </section>
+          <section class="view view-history" id="panel-history" hidden>
+            <!-- mounted by history.ts mountHistoryTab() -->
           </section>
         </main>
       </div>
