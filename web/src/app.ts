@@ -19,6 +19,11 @@ import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
 import { emptyStateFor, TOPOLOGY_EMPTY } from "./empty-states.js";
+import {
+  SAMPLE_SEEDS,
+  planLoad,
+  summarisePlan,
+} from "./sample-network.js";
 import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
 import {
   type ViewState,
@@ -912,7 +917,84 @@ function renderPanelEmpty(kind: SpecKind, canAdd: boolean): HTMLElement {
   if (copy.hint) {
     block.appendChild(el("p", { className: "panel-empty-hint" }, copy.hint));
   }
+  // Sample-seed quickstart (slice #169.E). Surface a "Load sample"
+  // affordance on the Services facet — the most common landing point
+  // for a new operator — so they can stage a representative pair of
+  // specs (IP VPN + service) and see the apply workflow without
+  // authoring from scratch.
+  if (kind === "services" && canAdd) {
+    block.appendChild(renderSampleSeedAffordance());
+  }
   return block;
+}
+
+// renderSampleSeedAffordance renders the "Load sample" link + its
+// post-click status line. Idempotent — repeated clicks plan against
+// the current spec names so previously-loaded seeds are skipped, not
+// duplicated.
+function renderSampleSeedAffordance(): HTMLElement {
+  const wrap = el("div", { className: "panel-empty-sample" });
+  const link = el("button", {
+    type: "button",
+    className: "panel-empty-sample-link",
+    title: "Stage a small IP VPN + service so you can see the apply workflow",
+  }, "Or load a sample IP VPN + service");
+  wrap.appendChild(link);
+  const status = el("p", { className: "panel-empty-sample-status" });
+  status.hidden = true;
+  wrap.appendChild(status);
+
+  link.addEventListener("click", async () => {
+    link.setAttribute("disabled", "");
+    link.textContent = "Loading…";
+    try {
+      const existing = await loadSampleConflictMap();
+      const plan = planLoad(existing);
+      const summary = summarisePlan(plan);
+      for (const p of plan) {
+        if (p.action === "queue") {
+          enqueueSpecCreate(p.seed.kind as StagingSpecKind, p.seed.name, p.seed.body);
+        }
+      }
+      status.textContent = "";
+      const head = el("strong", { className: "panel-empty-sample-status-head" },
+        summary.queued > 0
+          ? `Staged ${summary.queued} change${summary.queued === 1 ? "" : "s"} — click Save in the header to apply.`
+          : "Nothing to load — all sample specs already exist.");
+      status.appendChild(head);
+      const list = el("ul", { className: "panel-empty-sample-status-list" });
+      for (const line of summary.lines) {
+        list.appendChild(el("li", { className: "panel-empty-sample-status-line" }, line));
+      }
+      status.appendChild(list);
+      status.hidden = false;
+      link.remove();
+    } catch (err) {
+      link.removeAttribute("disabled");
+      link.textContent = "Or load a sample IP VPN + service";
+      status.textContent = "Couldn't load sample: " + formatErrorBrief(err);
+      status.hidden = false;
+    }
+  });
+  return wrap;
+}
+
+// loadSampleConflictMap fetches the current name lists for each
+// SAMPLE_SEEDS kind in parallel, then builds the existing-names map
+// planLoad expects. A list fetch failure is tolerated (the kind is
+// treated as empty — planLoad will queue the seed; if it duplicates,
+// newtron's create will reject with a conflict the operator sees).
+async function loadSampleConflictMap(): Promise<Map<SpecKind, Set<string>>> {
+  const kinds = Array.from(new Set(SAMPLE_SEEDS.map((s) => s.kind)));
+  const results = await Promise.all(
+    kinds.map((kind) =>
+      fetchSpecList(kind).then(
+        (names) => [kind, new Set(names)] as const,
+        () => [kind, new Set<string>()] as const,
+      ),
+    ),
+  );
+  return new Map(results);
 }
 
 // renderTopologyEmptyState renders the teaching block for an empty
