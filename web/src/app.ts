@@ -72,6 +72,13 @@ import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape } from "./spec-detail-shape.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
+  type SubRuleColumn,
+  type SubRuleItemType,
+  extractRowCells,
+  getSubRuleItems,
+  itemKey,
+} from "./subrule-table.js";
+import {
   type DeviceMetadata,
   type TopologyFilter,
   applyFilter,
@@ -426,30 +433,44 @@ function enterSpecEditMode(
   });
 }
 
-// subRuleWireField maps a spec kind to the wire-field name newtron returns
-// the child rules under in the detail payload. Used by openDetail to keep
-// that field out of the tailored body's "All fields" disclosure — the
-// children render separately via renderSubRuleDeleteSection below, and
-// double-displaying them is just noise.
+// subRuleTables is the single source of truth for every sub-rule kind.
+// Each entry carries enough info to render the new unified inline table
+// (slice #173.A): the wire field on the spec detail, the POST endpoint,
+// the singular item label, the item shape (object vs string for prefix-
+// lists), the keyField used to delete an item, the table columns, and
+// the FieldDefs for the inline Add form.
 //
-// Notably, prefix-lists's wire field is "prefixes" — not "entries" (which is
-// the sub-rule endpoint verb suffix). The two diverge for historical reasons
-// on newtron's side. Confirmed from newtron docs/newtron/api.md §FilterDetail/
-// QoSPolicyDetail and from the existing switch in renderSubRuleDeleteSection.
-const subRuleWireField: Partial<Record<SpecKind, string>> = {
-  "qos-policies":   "queues",
-  "filters":        "rules",
-  "prefix-lists":   "prefixes",
-  "route-policies": "rules",
-};
+// Replaces the earlier split between subRuleWireField + subRuleForms +
+// the hard-coded switch in renderSubRuleDeleteSection — three places
+// went out of sync, so they're consolidated here.
+//
+// Notably, prefix-lists's wire field is "prefixes" but its add endpoint
+// is "entries" — historical newtron divergence. Both stay accurate
+// because they're declared separately.
+interface SubRuleTable {
+  wireField: string;
+  endpoint: string;
+  itemLabel: string;
+  itemType: SubRuleItemType;
+  keyField?: string;
+  columns: SubRuleColumn[];
+  addFields: FieldDef[];
+}
 
-// subRuleForms defines the form fields for adding sub-rules to spec types
-// that support child entries.
-const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; fields: FieldDef[] }>> = {
+const subRuleTables: Partial<Record<SpecKind, SubRuleTable>> = {
   "qos-policies": {
+    wireField: "queues",
     endpoint: "queues",
-    label: "Add queue",
-    fields: [
+    itemLabel: "queue",
+    itemType: "object",
+    keyField: "queue_id",
+    columns: [
+      { field: "queue_id", label: "ID" },
+      { field: "name",     label: "Name" },
+      { field: "type",     label: "Type" },
+      { field: "weight",   label: "Weight" },
+    ],
+    addFields: [
       {
         name: "queue_id", label: "Queue ID", type: "number", required: true,
         min: 0, help: "Hardware queue index. Range and reserved IDs depend on the platform.",
@@ -468,9 +489,21 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     ],
   },
   filters: {
+    wireField: "rules",
     endpoint: "rules",
-    label: "Add rule",
-    fields: [
+    itemLabel: "rule",
+    itemType: "object",
+    keyField: "seq",
+    columns: [
+      { field: "seq",       label: "Seq" },
+      { field: "action",    label: "Action" },
+      { field: "src_ip",    label: "Src IP" },
+      { field: "dst_ip",    label: "Dst IP" },
+      { field: "protocol",  label: "Proto" },
+      { field: "src_port",  label: "Src port" },
+      { field: "dst_port",  label: "Dst port" },
+    ],
+    addFields: [
       {
         name: "seq", label: "Sequence", type: "number", required: true,
         placeholder: "e.g. 10", min: 1,
@@ -498,9 +531,14 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     ],
   },
   "prefix-lists": {
+    wireField: "prefixes",
     endpoint: "entries",
-    label: "Add prefix",
-    fields: [
+    itemLabel: "prefix",
+    itemType: "string",
+    columns: [
+      { field: "", label: "Prefix" },
+    ],
+    addFields: [
       {
         name: "prefix", label: "Prefix (CIDR)", type: "text", required: true,
         placeholder: "e.g. 10.0.0.0/8",
@@ -510,9 +548,18 @@ const subRuleForms: Partial<Record<SpecKind, { endpoint: string; label: string; 
     ],
   },
   "route-policies": {
+    wireField: "rules",
     endpoint: "rules",
-    label: "Add rule",
-    fields: [
+    itemLabel: "rule",
+    itemType: "object",
+    keyField: "seq",
+    columns: [
+      { field: "seq",         label: "Seq" },
+      { field: "action",      label: "Action" },
+      { field: "prefix_list", label: "Prefix list" },
+      { field: "community",   label: "Community" },
+    ],
+    addFields: [
       {
         name: "seq", label: "Sequence", type: "number", required: true,
         placeholder: "e.g. 10", min: 1,
@@ -879,36 +926,145 @@ export function renderValue(value: unknown): HTMLElement | Text {
 
 // ---- Detail drawer (spec) ---------------------------------------------------
 
-// renderSubRuleSection renders the "Add rule/entry/queue" section inside the
-// detail drawer for spec types that support child entries.
-function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLElement, subRuleConf: typeof subRuleForms[SpecKind]): void {
-  if (!subRuleConf) return;
+// renderSubRuleTable renders the unified inline-table section
+// (slice #173.A): one heading, one table for existing items with a
+// per-row delete affordance, and one "+ Add <item>" button at the
+// bottom that expands an inline form. Replaces the earlier two-section
+// pattern (separate "Existing X" list + collapsed "Add X" form).
+function renderSubRuleTable(
+  kind: SpecKind,
+  specName: string,
+  detail: unknown,
+  content: HTMLElement,
+  conf: SubRuleTable,
+): void {
+  const items = getSubRuleItems(detail, conf.wireField);
 
   const section = el("section", { className: "subrule-section" });
-  const heading = el("h3", { className: "subrule-heading" }, subRuleConf.label);
-  section.appendChild(heading);
+  // Plural heading — "Rules" / "Queues" / "Prefixes". The earlier UI
+  // wrote "Existing rules" + "Add rule" as two separate concerns; one
+  // section with the items + an Add affordance reads as the same
+  // concern.
+  const headingText = pluralize(conf.itemLabel);
+  section.appendChild(el("h3", { className: "subrule-heading" },
+    headingText.charAt(0).toUpperCase() + headingText.slice(1)));
 
-  const formArea = el("div", { className: "subrule-form-area" });
-  let formVisible = false;
+  // Table
+  const table = el("table", { className: "subrule-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const col of conf.columns) {
+    headRow.appendChild(el("th", { className: "subrule-th" }, col.label));
+  }
+  // Trailing column for the per-row delete button.
+  headRow.appendChild(el("th", { className: "subrule-th subrule-th--actions" }, ""));
+  thead.appendChild(headRow);
+  table.appendChild(thead);
 
-  const toggleBtn = el("button", { type: "button", className: "subrule-toggle-btn" }, "Show form");
-  toggleBtn.addEventListener("click", () => {
-    formVisible = !formVisible;
-    formArea.hidden = !formVisible;
-    toggleBtn.textContent = formVisible ? "Hide form" : "Show form";
-  });
-  section.appendChild(toggleBtn);
+  const tbody = el("tbody");
+  if (items.length === 0) {
+    const emptyRow = el("tr", { className: "subrule-row-empty" });
+    const cell = el("td", { className: "subrule-td subrule-td--empty" }, "(none)") as HTMLTableCellElement;
+    cell.colSpan = conf.columns.length + 1;
+    emptyRow.appendChild(cell);
+    tbody.appendChild(emptyRow);
+  } else {
+    for (const item of items) {
+      tbody.appendChild(renderSubRuleRow(kind, specName, item, conf));
+    }
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
 
+  // Add affordance — button below the table; click expands the form
+  // inline within the section.
+  section.appendChild(renderSubRuleAdd(kind, specName, conf));
+  content.appendChild(section);
+}
+
+function renderSubRuleRow(
+  kind: SpecKind,
+  specName: string,
+  item: unknown,
+  conf: SubRuleTable,
+): HTMLElement {
+  const row = el("tr", { className: "subrule-row" });
+  const cells = extractRowCells(item, conf.columns, conf.itemType);
+  for (const v of cells) {
+    const td = el("td", { className: "subrule-td" });
+    if (v === "") {
+      td.appendChild(el("span", { className: "subrule-empty-cell" }, "—"));
+    } else {
+      td.appendChild(document.createTextNode(v));
+    }
+    row.appendChild(td);
+  }
+  const actionsCell = el("td", { className: "subrule-td subrule-td--actions" });
+  const key = itemKey(item, conf.itemType, conf.keyField);
+  if (key !== null) {
+    const delBtn = el("button", {
+      type: "button",
+      className: "subrule-delete-btn",
+      title: `Remove ${conf.itemLabel} ${key}`,
+    }, "×");
+    delBtn.addEventListener("click", async () => {
+      if (!window.confirm(`Remove ${conf.itemLabel} ${key} from ${specName}?`)) return;
+      delBtn.disabled = true;
+      try {
+        await deleteSubRuleItem(kind, specName, key);
+        openDetail(kind, kindTitleFor(kind), specName);
+      } catch (err) {
+        delBtn.disabled = false;
+        const msg = err instanceof ApiError
+          ? translateErrorKind(err.kind) + ": " + err.message
+          : String(err);
+        alert("Remove failed: " + msg);
+      }
+    });
+    actionsCell.appendChild(delBtn);
+  }
+  row.appendChild(actionsCell);
+  return row;
+}
+
+function renderSubRuleAdd(
+  kind: SpecKind,
+  specName: string,
+  conf: SubRuleTable,
+): HTMLElement {
+  const wrap = el("div", { className: "subrule-add" });
+  const addBtn = el("button", { type: "button", className: "subrule-add-btn" },
+    "+ Add " + conf.itemLabel);
+  wrap.appendChild(addBtn);
+
+  const formArea = el("div", { className: "subrule-add-form" });
   formArea.hidden = true;
+  wrap.appendChild(formArea);
 
-  const { form, getValues, validate } = buildFormFields(subRuleConf.fields);
+  const { form, getValues, validate } = buildFormFields(conf.addFields);
   formArea.appendChild(form);
 
   const errOut = el("div", { className: "form-error-out" });
   formArea.appendChild(errOut);
 
-  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, subRuleConf.label);
-  formArea.appendChild(submitBtn);
+  const buttons = el("div", { className: "form-button-row" });
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" },
+    "Add " + conf.itemLabel);
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(submitBtn);
+  buttons.appendChild(cancelBtn);
+  formArea.appendChild(buttons);
+
+  addBtn.addEventListener("click", () => {
+    addBtn.hidden = true;
+    formArea.hidden = false;
+  });
+  cancelBtn.addEventListener("click", () => {
+    formArea.hidden = true;
+    addBtn.hidden = false;
+    clearFieldErrors(form);
+    errOut.textContent = "";
+  });
 
   submitBtn.addEventListener("click", async () => {
     clearFieldErrors(form);
@@ -918,32 +1074,40 @@ function renderSubRuleSection(kind: SpecKind, specName: string, content: HTMLEle
     submitBtn.textContent = "Saving…";
     try {
       const values = getValues();
-      // Inject the parent spec name into the request body for sub-rule verbs
-      // that require it (e.g. filter requires "filter": name, policy requires
-      // "policy": name, etc.).
       const bodyWithParent = injectParentName(kind, specName, values);
-      await addSubRule(kind, specName, subRuleConf.endpoint, bodyWithParent);
-      submitBtn.textContent = subRuleConf.label;
-      submitBtn.disabled = false;
-      errOut.textContent = "";
-      // Re-open the detail to refresh the spec payload.
+      await addSubRule(kind, specName, conf.endpoint, bodyWithParent);
       openDetail(kind, kindTitleFor(kind), specName);
     } catch (err) {
       submitBtn.disabled = false;
-      submitBtn.textContent = subRuleConf.label;
+      submitBtn.textContent = "Add " + conf.itemLabel;
       if (!attachServerValidationToForm(form, err)) {
-        if (err instanceof ApiError) {
-          errOut.appendChild(el("p", { className: "panel-error" },
-            translateErrorKind(err.kind) + ": " + err.message));
-        } else {
-          errOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-        }
+        errOut.appendChild(el("p", { className: "panel-error" },
+          err instanceof ApiError
+            ? translateErrorKind(err.kind) + ": " + err.message
+            : String(err)));
       }
     }
   });
 
-  section.appendChild(formArea);
-  content.appendChild(section);
+  return wrap;
+}
+
+// deleteSubRuleItem dispatches to the per-kind delete function.
+function deleteSubRuleItem(kind: SpecKind, specName: string, key: string | number): Promise<unknown> {
+  switch (kind) {
+    case "qos-policies":   return removeQoSQueue(specName, Number(key));
+    case "filters":        return removeFilterRule(specName, Number(key));
+    case "prefix-lists":   return removePrefixListEntry(specName, String(key));
+    case "route-policies": return removeRoutePolicyRule(specName, Number(key));
+    default: return Promise.reject(new Error("no delete for " + kind));
+  }
+}
+
+// pluralize handles the singular item labels in subRuleTables — all
+// English-regular except "prefix" → "prefixes".
+function pluralize(noun: string): string {
+  if (noun.endsWith("x") || noun.endsWith("s") || noun.endsWith("z")) return noun + "es";
+  return noun + "s";
 }
 
 // injectParentName adds the parent spec's name to the sub-rule request body
@@ -963,117 +1127,6 @@ function injectParentName(kind: SpecKind, specName: string, values: Record<strin
 function kindTitleFor(kind: SpecKind): string {
   const panel = PANELS.find((p) => p.kind === kind);
   return panel?.title ?? kind;
-}
-
-// renderSubRuleDeleteSection renders existing rules/entries/queues with
-// per-item delete affordances. Called after the detail renders.
-function renderSubRuleDeleteSection(kind: SpecKind, specName: string, detail: unknown, content: HTMLElement): void {
-  let items: unknown[] = [];
-  let itemField = "";
-  let removeKey = "";
-
-  switch (kind) {
-    case "qos-policies": {
-      const d = detail as { queues?: unknown[] };
-      items = d.queues ?? [];
-      itemField = "queue_id";
-      removeKey = "queue";
-      break;
-    }
-    case "filters": {
-      const d = detail as { rules?: unknown[] };
-      items = d.rules ?? [];
-      itemField = "seq";
-      removeKey = "rule";
-      break;
-    }
-    case "prefix-lists": {
-      const d = detail as { prefixes?: unknown[] };
-      items = d.prefixes ?? [];
-      itemField = "";
-      removeKey = "prefix";
-      break;
-    }
-    case "route-policies": {
-      const d = detail as { rules?: unknown[] };
-      items = d.rules ?? [];
-      itemField = "seq";
-      removeKey = "rule";
-      break;
-    }
-    default:
-      return;
-  }
-
-  if (items.length === 0) return;
-
-  const section = el("section", { className: "subrule-delete-section" });
-  section.appendChild(el("h3", { className: "subrule-heading" }, "Existing " + removeKey + "s"));
-
-  const list = el("ul", { className: "subrule-list" });
-
-  for (const item of items) {
-    const row = el("li", { className: "subrule-row" });
-
-    // Identify the item: for array-of-strings (prefix-lists) the item is the
-    // string itself; for objects use the itemField or show seq/queue_id.
-    let label: string;
-    let key: string | number;
-
-    if (typeof item === "string") {
-      label = item;
-      key = item;
-    } else {
-      const obj = item as Record<string, unknown>;
-      if (itemField && obj[itemField] !== undefined) {
-        key = obj[itemField] as string | number;
-        label = `${removeKey} ${key}`;
-        if (obj["name"]) label += ` (${obj["name"]})`;
-        if (obj["action"]) label += ` — ${obj["action"]}`;
-      } else {
-        label = JSON.stringify(item);
-        key = label;
-      }
-    }
-
-    row.appendChild(el("span", { className: "subrule-label" }, label));
-
-    const delBtn = el("button", { type: "button", className: "subrule-delete-btn", title: "Remove " + label }, "×");
-    delBtn.addEventListener("click", async () => {
-      if (!window.confirm(`Remove ${label} from ${specName}?`)) return;
-      delBtn.disabled = true;
-      try {
-        switch (kind) {
-          case "qos-policies":
-            await removeQoSQueue(specName, Number(key));
-            break;
-          case "filters":
-            await removeFilterRule(specName, Number(key));
-            break;
-          case "prefix-lists":
-            await removePrefixListEntry(specName, String(key));
-            break;
-          case "route-policies":
-            await removeRoutePolicyRule(specName, Number(key));
-            break;
-        }
-        // Re-open the detail to refresh.
-        openDetail(kind, kindTitleFor(kind), specName);
-      } catch (err) {
-        delBtn.disabled = false;
-        const msg = err instanceof ApiError
-          ? translateErrorKind(err.kind) + ": " + err.message
-          : String(err);
-        alert("Remove failed: " + msg);
-      }
-    });
-
-    row.appendChild(delBtn);
-    list.appendChild(row);
-  }
-
-  section.appendChild(list);
-  content.appendChild(section);
 }
 
 async function openDetail(kind: SpecKind, kindTitle: string, name: string): Promise<void> {
@@ -1110,12 +1163,12 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
     // Schema-aware rendering when a display schema knows this kind; generic
     // recursive tree as the fallback so unknown kinds still render. Exclude
     // the sub-rule wire field (if any) so child rules don't double-display
-    // — they get a dedicated section below via renderSubRuleDeleteSection.
+    // — they get a dedicated section below via renderSubRuleTable.
     const fields = displaySchemaFor(kind);
+    const subRuleConf = subRuleTables[kind];
     if (fields) {
       const body = el("div");
-      const subField = subRuleWireField[kind];
-      const extraExcludes = subField ? [subField] : [];
+      const extraExcludes = subRuleConf ? [subRuleConf.wireField] : [];
       renderSpecDetailInto(body, fields, detail, extraExcludes);
       content.appendChild(body);
     } else {
@@ -1126,11 +1179,9 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
       content.appendChild(body);
     }
 
-    // Render existing sub-rule items with delete affordances.
-    const subRuleConf = subRuleForms[kind];
+    // Sub-rules: one unified inline-table section per kind (#173.A).
     if (subRuleConf) {
-      renderSubRuleDeleteSection(kind, name, detail, content);
-      renderSubRuleSection(kind, name, content, subRuleConf);
+      renderSubRuleTable(kind, name, detail, content, subRuleConf);
     }
   } catch (err) {
     content.removeChild(loading);
