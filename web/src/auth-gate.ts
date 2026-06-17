@@ -27,6 +27,7 @@ let currentUser: string | null = null;
 let currentExpiresAt: Date | null = null;
 let expiryTickHandle: ReturnType<typeof setInterval> | null = null;
 let resolveSignedInOnce: () => void = () => { /* replaced below */ };
+let anonymousMode = false;
 
 /**
  * signedInOnce resolves the first time the operator successfully authenticates
@@ -44,6 +45,16 @@ export const signedInOnce: Promise<void> = new Promise<void>((resolve) => {
 /** UserFromGate returns the signed-in operator's display name, or null. */
 export function userFromGate(): string | null {
   return currentUser;
+}
+
+/**
+ * isAnonymous returns true when newtcon-server's boot posture check
+ * reported auth_required: false (slice #169.D). Other modules can use
+ * this to render honest pedagogy ("you are not signed in") rather than
+ * implying an identity that doesn't exist.
+ */
+export function isAnonymous(): boolean {
+  return anonymousMode;
 }
 
 /**
@@ -67,6 +78,8 @@ export async function ensureSignedIn(): Promise<void> {
   try {
     const cfg = await fetchConfig();
     if (!cfg.auth_required) {
+      anonymousMode = true;
+      showAnonymousPill();
       resolveSignedInOnce();
       hideOverlay();
       return;
@@ -270,6 +283,32 @@ function requireOverlay(): HTMLElement {
   const el = document.getElementById("auth-overlay");
   if (!el) throw new Error("auth-overlay element missing from index.html");
   return el;
+}
+
+// showAnonymousPill mounts the persistent anonymous-mode indicator in
+// the header (slice #169.D). Replaces the would-be user-pill so the
+// header reads honestly when no operator identity is attached. Click →
+// dropdown explaining what anonymous mode is and how to enable
+// --auth-required.
+function showAnonymousPill(): void {
+  const wrap = document.getElementById("anon-pill-wrap");
+  const trigger = document.getElementById("anon-pill-trigger");
+  const dropdown = document.getElementById("anon-pill-dropdown");
+  if (!wrap || !trigger || !dropdown) return;
+  wrap.hidden = false;
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.hidden = !dropdown.hidden;
+  });
+  // Click anywhere else → close.
+  document.addEventListener("click", (e) => {
+    if (dropdown.hidden) return;
+    if (!wrap.contains(e.target as Node)) dropdown.hidden = true;
+  });
+  // Escape → close.
+  document.addEventListener("keydown", (e) => {
+    if (!dropdown.hidden && e.key === "Escape") dropdown.hidden = true;
+  });
 }
 
 function showOverlay(): void {

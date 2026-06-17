@@ -166,3 +166,83 @@
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
 }
+
+/* Anonymous-mode pill (slice #169.D) — persistent indicator in the
+ * header where the user-pill would normally render. Reads as a
+ * subdued/honest "no identity here" rather than a loud warning; the
+ * goal is awareness without alarm. */
+.anon-pill-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.anon-pill-wrap[hidden] { display: none; }
+
+.anon-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 1px var(--space-xs);
+  background: var(--color-surface-sunken);
+  border: 1px dashed var(--color-border-default);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: var(--font-system);
+}
+
+.anon-pill:hover { background: var(--color-surface-hover); color: var(--color-text-secondary); }
+
+.anon-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  display: inline-block;
+}
+
+.anon-pill-label { font-weight: 500; }
+
+.anon-pill-chevron { display: inline-flex; }
+.anon-pill-chevron svg { width: 12px; height: 12px; }
+
+.anon-pill-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2xs));
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-overlay);
+  padding: var(--space-md);
+  width: 320px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.anon-pill-dropdown[hidden] { display: none; }
+
+.anon-pill-dropdown-headline {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.anon-pill-dropdown-body {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.anon-pill-dropdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  padding: 0 4px;
+  background: var(--color-surface-sunken);
+  border-radius: 3px;
+  color: var(--color-text-primary);
+}
