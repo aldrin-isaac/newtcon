@@ -68,6 +68,14 @@
               <button type="button" id="pending-bar-save" class="btn btn-primary btn-sm">Save</button>
             </div>
             <div id="pending-bar-list" class="pending-bar-list" hidden></div>
+            <!-- Compact persistent palette hint (slice #169.F).
+                 Click opens the same command palette as the sidebar
+                 footer trigger; the always-visible kbd hint teaches
+                 the shortcut without depending on the sidebar. -->
+            <button type="button" class="palette-hint" id="palette-hint" title="Open command palette" aria-label="Open command palette">
+              <span class="palette-hint-icon" data-icon="search"></span>
+              <span class="kbd-group palette-hint-kbd"><span class="kbd" id="palette-hint-mod">⌘</span><span class="kbd">K</span></span>
+            </button>
             <span class="status-pill" id="newtron-pill" title="newtron connection">
               <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
               <span id="newtron-target">checking…</span>

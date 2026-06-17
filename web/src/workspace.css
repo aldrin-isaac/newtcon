@@ -62,6 +62,17 @@
 .crumb { color: var(--color-text-primary); font-weight: var(--weight-medium); }
 .crumb-sep { color: var(--color-text-muted); }
 .header-status { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-sm); }
+
+/* Compact persistent palette hint (slice #169.F) — sits in the header
+ * status row. Reads as a discoverable shortcut chip without competing
+ * with status/identity pills next to it. Click acts as a palette
+ * trigger (mirrors the sidebar footer button). */
+.palette-hint { display: inline-flex; align-items: center; gap: var(--space-2xs); padding: 2px var(--space-xs); background: transparent; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-full); color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); }
+.palette-hint:hover { background: var(--color-surface-hover); color: var(--color-text-primary); border-color: var(--color-border-default); }
+.palette-hint-icon { display: inline-flex; }
+.palette-hint-icon svg { width: 13px; height: 13px; }
+.palette-hint-kbd { margin-left: 0; }
+
 .status-pill { display: inline-flex; align-items: center; gap: var(--space-2xs); padding: 2px var(--space-sm); background: var(--color-surface-sunken); border-radius: var(--radius-full); font-size: var(--text-xs); color: var(--color-text-secondary); }
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .status-dot--ok { background: var(--color-success); }
