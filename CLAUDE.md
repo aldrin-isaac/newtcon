@@ -98,6 +98,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     apply-preview.ts          → previewQueue — pure derivation that turns the pending queue into a per-change preview (effect / kind / title / scope / danger / body) in apply order; powers the confirm-Apply-All modal (slice #171.A)
     smart-defaults.ts         → strategiesFor + nextAvailable + computePrefillForKind — async next-available-integer suggestion for create-form integer-ID fields (l3vni on ipvpns, vni on macvpns; slice #172.D)
     topology-filters.ts       → emptyFilter + isActive + applyFilter + uniqueZones — pure layered-filter helpers for the Topology view; zone dimension shipped, filter shape extensible to VRF / service (slice #174.E)
+    subrule-table.ts          → getSubRuleItems + extractRowCells + itemKey — pure helpers for the unified sub-rule inline table; backs the single-section table-then-add UI for qos-policies / filters / prefix-lists / route-policies (slice #173.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
