@@ -16,6 +16,7 @@
 // this view becomes the inspector half of the editor.
 
 import { fetchAuthorization, type AuthorizationDetail } from "./api/newtcon/authorization.js";
+import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import {
   type PermissionGroupId,
@@ -48,6 +49,20 @@ export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
     renderAuthorization(root, data);
   } catch (err) {
     root.textContent = "";
+    // Pedagogical treatment of the auth.read 403 (newtron PR #188).
+    // When an operator engages the engage-when-configured gate, the
+    // detail line already carries the typed "alice lacks auth.read on
+    // default" string; the headline should explain WHY this happens
+    // rather than read as a generic load failure.
+    if (err instanceof ApiError && err.kind === "authorization_failure") {
+      root.appendChild(el("h2", { className: "view-heading" }, "Permissions"));
+      root.appendChild(el("p", { className: "panel-error" },
+        "auth.read permission required to view this network's grant table"));
+      root.appendChild(el("p", { className: "panel-error-detail" }, formatErrorBrief(err)));
+      root.appendChild(el("p", { className: "view-intro" },
+        "This deployment engages newtron's auth.read gate. Ask an operator with super-user privileges or matching grant in network.json to add your group to the auth.read permission."));
+      return;
+    }
     root.appendChild(el("p", { className: "panel-error" }, "Couldn't load authorization table"));
     root.appendChild(el("p", { className: "panel-error-detail" }, formatErrorBrief(err)));
   }
