@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json && node scripts/copy-static.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/services/services.test.js test/api/newtcon/services.test.js test/api/newtcon/nodes.test.js test/api/newtcon/auth.test.js test/api/newtcon/config.test.js test/api/newtcon/network.test.js test/api/newtcon/authorization.test.js test/render-error.test.js test/auth-expiry.test.js test/spec-detail-shape.test.js test/form-error-binding.test.js test/topology-viewport.test.js test/topology-positions.test.js test/permission-catalog.test.js test/permission-derivations.test.js test/permission-search.test.js test/apply-preview.test.js test/smart-defaults.test.js test/topology-filters.test.js test/subrule-table.test.js test/action-history.test.js",
+    "test": "node --test test/services/services.test.js test/api/newtcon/services.test.js test/api/newtcon/nodes.test.js test/api/newtcon/auth.test.js test/api/newtcon/config.test.js test/api/newtcon/network.test.js test/api/newtcon/authorization.test.js test/render-error.test.js test/auth-expiry.test.js test/spec-detail-shape.test.js test/form-error-binding.test.js test/topology-viewport.test.js test/topology-positions.test.js test/permission-catalog.test.js test/permission-derivations.test.js test/permission-search.test.js test/apply-preview.test.js test/smart-defaults.test.js test/topology-filters.test.js test/subrule-table.test.js test/action-history.test.js test/empty-states.test.js",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {

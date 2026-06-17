@@ -18,6 +18,7 @@ import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
+import { emptyStateFor } from "./empty-states.js";
 import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
 import {
   type ViewState,
@@ -828,7 +829,7 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
     }
 
     if (allRows.length === 0) {
-      container.appendChild(el("p", { className: "panel-empty" }, "none defined"));
+      container.appendChild(renderPanelEmpty(panel.kind, !!specForms[panel.kind]));
     } else {
       const list = el("ul", { className: "panel-list" });
       for (const r of allRows) {
@@ -891,6 +892,27 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
 
 function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
   return buildPanel(panel, result);
+}
+
+// renderPanelEmpty renders the pedagogical empty-state block for a spec
+// facet (slice #169.A). Replaces the previous bare "none defined" line
+// with copy that tells the operator what the kind is and what to do
+// next.
+function renderPanelEmpty(kind: SpecKind, canAdd: boolean): HTMLElement {
+  const copy = emptyStateFor(kind);
+  const block = el("div", { className: "panel-empty" });
+  block.appendChild(el("p", { className: "panel-empty-headline" }, copy.title));
+  if (copy.body) {
+    block.appendChild(el("p", { className: "panel-empty-body" }, copy.body));
+  }
+  if (canAdd) {
+    block.appendChild(el("p", { className: "panel-empty-cta" },
+      "Click + Add above to create one."));
+  }
+  if (copy.hint) {
+    block.appendChild(el("p", { className: "panel-empty-hint" }, copy.hint));
+  }
+  return block;
 }
 
 // ---- Shared recursive value renderer ----------------------------------------
