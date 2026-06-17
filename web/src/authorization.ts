@@ -23,6 +23,15 @@ import {
   groupLabelFor,
   groupPermissions,
 } from "./permission-catalog.js";
+import {
+  type EffectivePermission,
+  type ExpandedGrant,
+  type PermissionSummary,
+  type UserSummary,
+  allUsers,
+  summarizePermission,
+  summarizeUser,
+} from "./permission-derivations.js";
 
 /** mountAuthorizationTab clears `root` and renders the Permissions view. */
 export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
@@ -48,9 +57,240 @@ function renderAuthorization(root: HTMLElement, data: AuthorizationDetail): void
   root.appendChild(heading);
   root.appendChild(intro);
 
+  root.appendChild(renderLookup(data));
   root.appendChild(renderSuperUsers(data.super_users ?? []));
   root.appendChild(renderUserGroups(data.user_groups ?? {}));
   root.appendChild(renderPermissions(data.permissions ?? {}));
+}
+
+// ---- Lookup: forward + inverse member-of views (slice #170.B) -------------
+//
+// Two affordances at the top of the Permissions tab:
+//
+//   "What can <user> do?"   — pick a user → list of effective permissions
+//                             grouped by operator-domain, each row showing
+//                             how the user holds it (super-user / direct /
+//                             via group: ops) and any where-clause scope.
+//
+//   "Who has <permission>?" — pick a permission → super-users + per-grant
+//                             rows showing direct users + groups expanded
+//                             to their members + where-clause scope.
+//
+// Pure derivation from the same AuthorizationDetail payload; no extra
+// HTTP work.
+
+function renderLookup(data: AuthorizationDetail): HTMLElement {
+  const section = el("section", { className: "authz-section authz-lookup" });
+  section.appendChild(el("h3", { className: "authz-section-heading" }, "Lookup"));
+
+  const users = allUsers(data);
+  const perms = Object.keys(data.permissions ?? {}).sort();
+
+  section.appendChild(renderUserLookup(users, data));
+  section.appendChild(renderPermissionLookup(perms, data));
+  return section;
+}
+
+function renderUserLookup(users: string[], data: AuthorizationDetail): HTMLElement {
+  const box = el("div", { className: "authz-lookup-block" });
+  const prompt = el("label", { className: "authz-lookup-prompt" });
+  prompt.appendChild(document.createTextNode("What can "));
+  const sel = el("select", { className: "authz-lookup-select" });
+  sel.appendChild(el("option", { value: "" }, "—"));
+  for (const u of users) {
+    sel.appendChild(el("option", { value: u }, u));
+  }
+  prompt.appendChild(sel);
+  prompt.appendChild(document.createTextNode(" do?"));
+  box.appendChild(prompt);
+
+  const result = el("div", { className: "authz-lookup-result" });
+  box.appendChild(result);
+
+  sel.addEventListener("change", () => {
+    result.textContent = "";
+    if (!sel.value) return;
+    result.appendChild(renderUserSummary(summarizeUser(sel.value, data)));
+  });
+
+  if (users.length === 0) {
+    const empty = el("p", { className: "authz-empty" }, "(no users in this network)");
+    box.appendChild(empty);
+  }
+  return box;
+}
+
+function renderPermissionLookup(perms: string[], data: AuthorizationDetail): HTMLElement {
+  const box = el("div", { className: "authz-lookup-block" });
+  const prompt = el("label", { className: "authz-lookup-prompt" });
+  prompt.appendChild(document.createTextNode("Who has "));
+  const sel = el("select", { className: "authz-lookup-select" });
+  sel.appendChild(el("option", { value: "" }, "—"));
+  for (const p of perms) {
+    const d = describePermission(p);
+    const label = d.title === p ? p : `${d.title}  (${p})`;
+    sel.appendChild(el("option", { value: p }, label));
+  }
+  prompt.appendChild(sel);
+  prompt.appendChild(document.createTextNode("?"));
+  box.appendChild(prompt);
+
+  const result = el("div", { className: "authz-lookup-result" });
+  box.appendChild(result);
+
+  sel.addEventListener("change", () => {
+    result.textContent = "";
+    if (!sel.value) return;
+    result.appendChild(renderPermissionSummary(summarizePermission(sel.value, data)));
+  });
+  return box;
+}
+
+function renderUserSummary(s: UserSummary): HTMLElement {
+  const box = el("div", { className: "authz-summary" });
+  const head = el("div", { className: "authz-summary-head" });
+  head.appendChild(el("strong", { className: "authz-summary-name" }, s.user));
+  if (s.isSuperUser) {
+    head.appendChild(el("span", { className: "authz-summary-badge" }, "super-user"));
+  }
+  box.appendChild(head);
+
+  if (s.groups.length > 0) {
+    const groupsRow = el("div", { className: "authz-summary-row" });
+    groupsRow.appendChild(el("span", { className: "authz-summary-row-label" }, "member of"));
+    groupsRow.appendChild(renderMemberList(s.groups));
+    box.appendChild(groupsRow);
+  }
+
+  if (s.permissions.length === 0) {
+    box.appendChild(el("p", { className: "authz-empty" }, "(holds no permissions)"));
+    return box;
+  }
+
+  // Group effective permissions by operator-domain for the same scanning
+  // affordance the main Permissions section uses.
+  const namesByGroup = new Map<string, EffectivePermission[]>();
+  const namesList = s.permissions.map((p) => p.name);
+  const partition = groupPermissions(namesList);
+  for (const [groupId, names] of partition) {
+    const inGroup: EffectivePermission[] = [];
+    for (const n of names) {
+      for (const p of s.permissions) if (p.name === n) inGroup.push(p);
+    }
+    namesByGroup.set(groupId, inGroup);
+  }
+
+  const heading = el("p", { className: "authz-summary-row-label" }, "effective permissions");
+  box.appendChild(heading);
+
+  for (const [groupId, eps] of namesByGroup) {
+    const sub = el("section", { className: "authz-subsection" });
+    sub.appendChild(el("h4", { className: "authz-subsection-heading" }, groupLabelFor(groupId as PermissionGroupId)));
+    const dl = el("dl", { className: "authz-grants" });
+    for (const ep of eps) {
+      const desc = describePermission(ep.name);
+      const dt = el("dt", { className: "authz-grant-name" });
+      dt.appendChild(el("span", { className: "authz-grant-title" }, desc.title));
+      if (desc.title !== ep.name) {
+        dt.appendChild(el("span", { className: "authz-grant-wire-name" }, ep.name));
+      }
+      dl.appendChild(dt);
+      const dd = el("dd", { className: "authz-grant-value" });
+      dd.appendChild(renderEffectiveSource(ep));
+      dl.appendChild(dd);
+    }
+    sub.appendChild(dl);
+    box.appendChild(sub);
+  }
+  return box;
+}
+
+function renderEffectiveSource(ep: EffectivePermission): HTMLElement {
+  const box = el("div", { className: "authz-grant-typed" });
+  const row = el("div", { className: "authz-grant-row" });
+  row.appendChild(el("span", { className: "authz-grant-row-label" }, "via"));
+  if (ep.source === "super_user") {
+    row.appendChild(el("span", { className: "authz-source-tag" }, "super-user"));
+  } else if (ep.source === "direct") {
+    row.appendChild(el("span", { className: "authz-source-tag" }, "direct grant"));
+  } else {
+    const tag = el("span", { className: "authz-source-tag" });
+    tag.appendChild(document.createTextNode("group: "));
+    tag.appendChild(el("code", { className: "authz-source-group" }, ep.source.viaGroup));
+    row.appendChild(tag);
+  }
+  box.appendChild(row);
+  if (ep.where && Object.keys(ep.where).length > 0) {
+    const w = el("div", { className: "authz-grant-row" });
+    w.appendChild(el("span", { className: "authz-grant-row-label" }, "where"));
+    w.appendChild(renderWhereScope(ep.where));
+    box.appendChild(w);
+  }
+  return box;
+}
+
+function renderPermissionSummary(s: PermissionSummary): HTMLElement {
+  const box = el("div", { className: "authz-summary" });
+  const desc = describePermission(s.permission);
+  const head = el("div", { className: "authz-summary-head" });
+  head.appendChild(el("strong", { className: "authz-summary-name" }, desc.title));
+  if (desc.title !== s.permission) {
+    head.appendChild(el("span", { className: "authz-grant-wire-name" }, s.permission));
+  }
+  box.appendChild(head);
+  if (desc.body) {
+    box.appendChild(el("p", { className: "authz-summary-body" }, desc.body));
+  }
+
+  if (s.superUsers.length > 0) {
+    const row = el("div", { className: "authz-summary-row" });
+    row.appendChild(el("span", { className: "authz-summary-row-label" }, "super-users"));
+    row.appendChild(renderMemberList(s.superUsers));
+    box.appendChild(row);
+  }
+
+  if (s.grants.length === 0) {
+    box.appendChild(el("p", { className: "authz-empty" }, "(no explicit grants — only super-users hold it)"));
+    return box;
+  }
+
+  for (let i = 0; i < s.grants.length; i++) {
+    box.appendChild(renderExpandedGrant(s.grants[i]!, s.grants.length > 1 ? i + 1 : null));
+  }
+  return box;
+}
+
+function renderExpandedGrant(g: ExpandedGrant, index: number | null): HTMLElement {
+  const box = el("div", { className: "authz-grant-typed authz-grant-expanded" });
+  if (index !== null) {
+    box.appendChild(el("p", { className: "authz-grant-row-label" }, `grant #${index}`));
+  }
+  if (g.directUsers.length > 0) {
+    const row = el("div", { className: "authz-grant-row" });
+    row.appendChild(el("span", { className: "authz-grant-row-label" }, "users"));
+    row.appendChild(renderMemberList(g.directUsers));
+    box.appendChild(row);
+  }
+  for (const grp of g.groups) {
+    const row = el("div", { className: "authz-grant-row" });
+    const label = el("span", { className: "authz-grant-row-label" });
+    label.appendChild(document.createTextNode("group "));
+    label.appendChild(el("code", { className: "authz-source-group" }, grp.name));
+    row.appendChild(label);
+    if (grp.members.length === 0) {
+      row.appendChild(el("span", { className: "authz-empty" }, "(no members)"));
+    } else {
+      row.appendChild(renderMemberList(grp.members));
+    }
+    box.appendChild(row);
+  }
+  if (g.where && Object.keys(g.where).length > 0) {
+    const row = el("div", { className: "authz-grant-row" });
+    row.appendChild(el("span", { className: "authz-grant-row-label" }, "where"));
+    row.appendChild(renderWhereScope(g.where));
+    box.appendChild(row);
+  }
+  return box;
 }
 
 function renderSuperUsers(users: string[]): HTMLElement {
