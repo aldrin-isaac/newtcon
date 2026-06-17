@@ -33,6 +33,7 @@ import {
   summarizeUser,
 } from "./permission-derivations.js";
 import { filterAuthorization } from "./permission-search.js";
+import { PERMISSIONS_EMPTY } from "./empty-states.js";
 
 /** mountAuthorizationTab clears `root` and renders the Permissions view. */
 export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
@@ -53,9 +54,20 @@ export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
 
 function renderAuthorization(root: HTMLElement, data: AuthorizationDetail): void {
   const heading = el("h2", { className: "view-heading" }, "Permissions");
+  root.appendChild(heading);
+
+  // Teaching empty state (slice #169.C). When the whole authorization
+  // payload is empty (no super-users, no groups, no permissions),
+  // render one teaching block instead of the standard intro + three
+  // "(none)" lines. The Lookup section and search bar would have
+  // nothing to operate on either, so suppress them too.
+  if (isAuthorizationEmpty(data)) {
+    root.appendChild(renderPermissionsEmptyState());
+    return;
+  }
+
   const intro = el("p", { className: "view-intro" },
     "Live authorization table read from newtron. Edit by changing network.json + POST /reload upstream.");
-  root.appendChild(heading);
   root.appendChild(intro);
 
   root.appendChild(renderLookup(data));
@@ -324,6 +336,31 @@ function renderExpandedGrant(g: ExpandedGrant, index: number | null): HTMLElemen
     box.appendChild(row);
   }
   return box;
+}
+
+// isAuthorizationEmpty returns true when newtron's authorization
+// payload has nothing populated — no super-users, no user groups, no
+// permissions. The teaching empty state (slice #169.C) gates on this.
+function isAuthorizationEmpty(data: AuthorizationDetail): boolean {
+  const superUsers = data.super_users ?? [];
+  const groups = data.user_groups ?? {};
+  const permissions = data.permissions ?? {};
+  return superUsers.length === 0
+    && Object.keys(groups).length === 0
+    && Object.keys(permissions).length === 0;
+}
+
+// renderPermissionsEmptyState renders the teaching block for an empty
+// authorization payload. Same panel-empty styling as the Specs +
+// Topology empty states so the operator recognises the pattern.
+function renderPermissionsEmptyState(): HTMLElement {
+  const block = el("div", { className: "panel-empty topology-empty-state" });
+  block.appendChild(el("p", { className: "panel-empty-headline" }, PERMISSIONS_EMPTY.title));
+  block.appendChild(el("p", { className: "panel-empty-body" }, PERMISSIONS_EMPTY.body));
+  if (PERMISSIONS_EMPTY.hint) {
+    block.appendChild(el("p", { className: "panel-empty-hint" }, PERMISSIONS_EMPTY.hint));
+  }
+  return block;
 }
 
 function renderSuperUsers(users: string[], total: number): HTMLElement {

@@ -105,3 +105,9 @@ export const TOPOLOGY_EMPTY: EmptyStateCopy = {
   body: "Topology shows the devices newtron knows about and the links between them. Add one with Create node, or bring up the whole network as a VM lab with the toolbar above.",
   hint: "Each device needs a matching profile in Specs → Inventory → Profiles before it can be registered.",
 };
+
+export const PERMISSIONS_EMPTY: EmptyStateCopy = {
+  title: "No authorization grants in this network yet",
+  body: "Permissions shows newtron's live grant table: super-users with every permission, user groups for reusable membership, and per-permission grants scoping who can do what. Newtron sources this from network.json — edit there and POST /reload upstream to populate it.",
+  hint: "newtcon is read-only for the grant table today; the editor surface waits on newtron exposing a grant-write API.",
+};
