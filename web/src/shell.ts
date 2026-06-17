@@ -12,6 +12,7 @@ import {
   discardAll,
   applyAll,
 } from "./staging.js";
+import { previewQueue, type ApplyPreview, type PendingPreview } from "./apply-preview.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
 import { ensureSignedIn, setupAuthGate } from "./auth-gate.js";
 
@@ -319,9 +320,9 @@ function setupPendingBar(): void {
   });
 
   saveBtn.addEventListener("click", async () => {
-    const n = pendingCount();
-    if (n === 0) return;
-    if (!window.confirm(`Apply ${n} pending change${n === 1 ? "" : "s"} now?`)) return;
+    if (pendingCount() === 0) return;
+    const ok = await confirmApplyAll();
+    if (!ok) return;
     saveBtn.setAttribute("disabled", "");
     saveBtn.textContent = "Saving…";
     const r = await applyAll();
@@ -337,6 +338,150 @@ function setupPendingBar(): void {
 
   subscribePending(render);
   render();
+}
+
+// ---- Apply preview modal (slice #171.A) ----------------------------------
+//
+// Replaces the previous window.confirm() with a structured preview of
+// every pending change in the order it will execute. Operator can expand
+// each row to inspect the spec/action body, then commit or cancel.
+// Click-outside / Escape / Cancel = false; Apply = true.
+
+function confirmApplyAll(): Promise<boolean> {
+  const preview = previewQueue(getQueue());
+  if (preview.total === 0) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => mountApplyPreviewModal(preview, resolve));
+}
+
+function mountApplyPreviewModal(preview: ApplyPreview, resolve: (ok: boolean) => void): void {
+  const overlay = document.createElement("div");
+  overlay.className = "apply-preview-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Confirm apply of pending changes");
+
+  const card = document.createElement("div");
+  card.className = "apply-preview-card";
+
+  const head = document.createElement("header");
+  head.className = "apply-preview-head";
+  const title = document.createElement("h2");
+  title.className = "apply-preview-title";
+  title.textContent = `Apply ${preview.total} pending change${preview.total === 1 ? "" : "s"}?`;
+  head.appendChild(title);
+  const subtitle = document.createElement("p");
+  subtitle.className = "apply-preview-subtitle";
+  subtitle.textContent = "These will be applied in this order:";
+  head.appendChild(subtitle);
+  card.appendChild(head);
+
+  const list = document.createElement("ol");
+  list.className = "apply-preview-list";
+  for (const item of preview.items) {
+    list.appendChild(renderApplyPreviewItem(item));
+  }
+  card.appendChild(list);
+
+  if (preview.hasDangerous) {
+    const warn = document.createElement("p");
+    warn.className = "apply-preview-warn";
+    const n = preview.counts.danger;
+    warn.textContent = `${n} destructive change${n === 1 ? "" : "s"} flagged. Review before applying.`;
+    card.appendChild(warn);
+  }
+
+  const foot = document.createElement("footer");
+  foot.className = "apply-preview-foot";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn btn-ghost";
+  cancel.textContent = "Cancel";
+  const apply = document.createElement("button");
+  apply.type = "button";
+  apply.className = "btn btn-primary";
+  apply.textContent = `Apply ${preview.total} change${preview.total === 1 ? "" : "s"}`;
+  foot.appendChild(cancel);
+  foot.appendChild(apply);
+  card.appendChild(foot);
+
+  overlay.appendChild(card);
+
+  let done = false;
+  const close = (ok: boolean): void => {
+    if (done) return;
+    done = true;
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+    resolve(ok);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") { e.preventDefault(); close(false); }
+  };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close(false);
+  });
+  cancel.addEventListener("click", () => close(false));
+  apply.addEventListener("click", () => close(true));
+  document.addEventListener("keydown", onKey);
+
+  document.body.appendChild(overlay);
+  apply.focus();
+}
+
+function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
+  const row = document.createElement("li");
+  row.className = "apply-preview-item apply-preview-item--" + item.effect;
+  if (item.danger) row.classList.add("apply-preview-item--danger");
+
+  const main = document.createElement("div");
+  main.className = "apply-preview-item-main";
+
+  const marker = document.createElement("span");
+  marker.className = "apply-preview-marker";
+  marker.textContent = item.effect === "create" ? "+" : item.effect === "delete" ? "−" : "•";
+  marker.setAttribute("aria-hidden", "true");
+  main.appendChild(marker);
+
+  const kind = document.createElement("span");
+  kind.className = "apply-preview-kind";
+  kind.textContent = item.kind;
+  main.appendChild(kind);
+
+  const title = document.createElement("span");
+  title.className = "apply-preview-item-title";
+  title.textContent = item.title;
+  main.appendChild(title);
+
+  if (item.scope) {
+    const scope = document.createElement("span");
+    scope.className = "apply-preview-scope";
+    scope.textContent = item.scope;
+    main.appendChild(scope);
+  }
+
+  if (item.danger) {
+    const tag = document.createElement("span");
+    tag.className = "apply-preview-danger-tag";
+    tag.textContent = "destructive";
+    main.appendChild(tag);
+  }
+
+  row.appendChild(main);
+
+  if (item.body && Object.keys(item.body).length > 0) {
+    const details = document.createElement("details");
+    details.className = "apply-preview-details";
+    const summary = document.createElement("summary");
+    summary.className = "apply-preview-details-summary";
+    summary.textContent = "body";
+    details.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.className = "apply-preview-body";
+    pre.textContent = JSON.stringify(item.body, null, 2);
+    details.appendChild(pre);
+    row.appendChild(details);
+  }
+  return row;
 }
 
 async function boot(): Promise<void> {
