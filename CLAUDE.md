@@ -92,6 +92,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     form-error-binding.ts     → extractFieldFromValidationError + attachServerValidationToForm + clearFieldErrors (per-field server-error display; slice #172.B)
     topology-viewport.ts      → fitToBounds / zoomAt / panBy / viewBoxStr — pure SVG-viewBox pan/zoom math (Topology view; slice #174.A)
     topology-positions.ts     → loadPositions / savePosition / clearPositions — per-network node-position persistence in localStorage (Topology view; slice #174.B)
+    permission-catalog.ts     → describePermission + groupFor + groupPermissions — curated per-permission human descriptions + operator-domain grouping (Permissions tab; slice #170.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)

@@ -17,6 +17,12 @@
 
 import { fetchAuthorization, type AuthorizationDetail } from "./api/newtcon/authorization.js";
 import { formatErrorBrief } from "./render-error.js";
+import {
+  type PermissionGroupId,
+  describePermission,
+  groupLabelFor,
+  groupPermissions,
+} from "./permission-catalog.js";
 
 /** mountAuthorizationTab clears `root` and renders the Permissions view. */
 export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
@@ -85,21 +91,50 @@ function renderUserGroups(groups: Record<string, string[]>): HTMLElement {
 function renderPermissions(permissions: Record<string, unknown>): HTMLElement {
   const section = el("section", { className: "authz-section" });
   section.appendChild(el("h3", { className: "authz-section-heading" }, "Permissions"));
-  const entries = Object.entries(permissions);
-  if (entries.length === 0) {
+  const names = Object.keys(permissions);
+  if (names.length === 0) {
     section.appendChild(el("p", { className: "authz-empty" }, "(none)"));
     return section;
   }
-  entries.sort(([a], [b]) => a.localeCompare(b));
+
+  // Group by operator-domain category (Spec authoring / Services /
+  // Routing / …). Each group is its own subsection with a heading so
+  // the operator scans by concern, not alphabet.
+  const grouped = groupPermissions(names);
+  for (const [groupId, groupNames] of grouped) {
+    section.appendChild(renderPermissionGroup(groupId, groupNames, permissions));
+  }
+  return section;
+}
+
+function renderPermissionGroup(
+  groupId: PermissionGroupId,
+  names: string[],
+  permissions: Record<string, unknown>,
+): HTMLElement {
+  const sub = el("section", { className: "authz-subsection" });
+  sub.appendChild(el("h4", { className: "authz-subsection-heading" }, groupLabelFor(groupId)));
   const dl = el("dl", { className: "authz-grants" });
-  for (const [name, grant] of entries) {
-    dl.appendChild(el("dt", { className: "authz-grant-name" }, name));
+  for (const name of names) {
+    const desc = describePermission(name);
+    // dt has the friendly title + the wire name as a small caption so
+    // the operator who knows the API can still see exactly which
+    // permission they're looking at.
+    const dt = el("dt", { className: "authz-grant-name" });
+    dt.appendChild(el("span", { className: "authz-grant-title" }, desc.title));
+    if (desc.title !== name) {
+      dt.appendChild(el("span", { className: "authz-grant-wire-name" }, name));
+    }
+    if (desc.body) {
+      dt.appendChild(el("p", { className: "authz-grant-body" }, desc.body));
+    }
+    dl.appendChild(dt);
     const dd = el("dd", { className: "authz-grant-value" });
-    dd.appendChild(renderPermissionGrant(grant));
+    dd.appendChild(renderPermissionGrant(permissions[name]));
     dl.appendChild(dd);
   }
-  section.appendChild(dl);
-  return section;
+  sub.appendChild(dl);
+  return sub;
 }
 
 /**
