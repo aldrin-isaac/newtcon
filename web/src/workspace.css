@@ -514,6 +514,16 @@
   padding: var(--space-xl) var(--space-md);
 }
 
+/* Sample-seed quickstart link under the Services empty state (#169.E) */
+.panel-empty-sample { margin-top: var(--space-sm); display: flex; flex-direction: column; align-items: center; gap: var(--space-2xs); width: 100%; }
+.panel-empty-sample-link { background: transparent; border: none; padding: 4px var(--space-xs); font-size: var(--text-xs); color: var(--color-text-muted); cursor: pointer; font-family: var(--font-system); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+.panel-empty-sample-link:hover { color: var(--color-accent); text-decoration-style: solid; }
+.panel-empty-sample-link[disabled] { color: var(--color-text-muted); cursor: progress; text-decoration: none; }
+.panel-empty-sample-status { margin: var(--space-sm) 0 0; text-align: left; width: 100%; font-size: var(--text-xs); color: var(--color-text-secondary); }
+.panel-empty-sample-status-head { display: block; color: var(--color-text-primary); margin-bottom: var(--space-2xs); font-weight: var(--weight-medium); }
+.panel-empty-sample-status-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.panel-empty-sample-status-line { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary); }
+
 
 /* Existing tab buttons — hide (replaced by sidebar nav). The IDs still exist
    for app.ts setupTabs() to wire to; but they live in the sidebar now via

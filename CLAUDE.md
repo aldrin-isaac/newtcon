@@ -103,6 +103,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     history.ts                → mountHistoryTab — History tab view: expandable per-Apply entries with per-item outcome + error display (slice #175.A)
     empty-states.ts           → emptyStateFor + hasEmptyState — curated pedagogical empty-state copy (title + body + optional hint) for each spec facet; replaces the generic "(none defined)" with operator-language teaching (slice #169.A)
     projection-aggregator.ts  → groupByDevice + summarizeDiff — pure helpers backing the per-device projection in the apply-preview modal; fanout-and-aggregate over newtron's intent/projection-diff (slice #171.B)
+    sample-network.ts         → SAMPLE_SEEDS + planLoad + summarisePlan — quickstart pure data + planner for the "Load sample" link under the empty Services facet (slice #169.E)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
