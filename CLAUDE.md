@@ -94,6 +94,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-positions.ts     → loadPositions / savePosition / clearPositions — per-network node-position persistence in localStorage (Topology view; slice #174.B)
     permission-catalog.ts     → describePermission + groupFor + groupPermissions — curated per-permission human descriptions + operator-domain grouping (Permissions tab; slice #170.A)
     permission-derivations.ts → normalizeGrant + summarizeUser + summarizePermission + allUsers — forward + inverse member-of derivations on AuthorizationDetail (Permissions tab lookup; slice #170.B)
+    permission-search.ts      → filterAuthorization — single-query substring filter for the Permissions tab (super-users + groups + permissions; matches wire-name / title / body / grant members; slice #170.C)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
