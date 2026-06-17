@@ -67,7 +67,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
-  nodes.go                    → topology + per-device + per-interface calls
+  nodes.go                    → topology + per-device + per-interface calls (incl. NodeProjectionDiff for slice #171.B)
   newtlab.go                  → newtlab-engine calls (labs list/status/deploy/destroy/provision/events/node-lifecycle)
 internal/session/             → operator session store + cookie helpers + middleware (cookie ↔ {bearer,user,expires_at})
   session.go                  → Store, SetCookie/ClearCookie, Middleware, UserFromContext
@@ -102,6 +102,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     action-history.ts         → buildEntry + load/save/append/clear + prependEntry — client-side per-network Apply All history persisted to localStorage (slice #175.A); newtron audit-log viewer is a separate slice
     history.ts                → mountHistoryTab — History tab view: expandable per-Apply entries with per-item outcome + error display (slice #175.A)
     empty-states.ts           → emptyStateFor + hasEmptyState — curated pedagogical empty-state copy (title + body + optional hint) for each spec facet; replaces the generic "(none defined)" with operator-language teaching (slice #169.A)
+    projection-aggregator.ts  → groupByDevice + summarizeDiff — pure helpers backing the per-device projection in the apply-preview modal; fanout-and-aggregate over newtron's intent/projection-diff (slice #171.B)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)

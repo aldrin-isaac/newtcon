@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -490,5 +491,86 @@ func TestBindService_Unavailable(t *testing.T) {
 	}
 	if kind, _ := errBlock["kind"].(string); kind != "newtron_unavailable" {
 		t.Errorf("error.kind: want newtron_unavailable, got %q", kind)
+	}
+}
+
+// TestProjectionDiff_ForwardsBody verifies the projection-diff handler
+// forwards the request body verbatim to newtron and returns the diff
+// payload to the client. Covers slice #171.B.
+func TestProjectionDiff_ForwardsBody(t *testing.T) {
+	var seenBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/nodes/r1/intent/projection-diff" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		seenBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{"data":{"before":{},"after":{},"diff":[{"table":"VLAN","key":"100","change":"create"}]},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"operations": []map[string]any{
+			{"url": "/create-vlan", "params": map[string]any{"vlan_id": 100}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/networks/default/nodes/r1/projection-diff", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(seenBody, []byte("create-vlan")) {
+		t.Errorf("upstream did not see the operations body: got %s", seenBody)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"change":"create"`)) {
+		t.Errorf("response missing diff: %s", rec.Body.String())
+	}
+}
+
+// TestProjectionDiff_MalformedJSON verifies a 400 validation_failure
+// when the request body isn't JSON. Doesn't reach upstream.
+func TestProjectionDiff_MalformedJSON(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("upstream should not be called for malformed JSON; got %s %s", r.Method, r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/networks/default/nodes/r1/projection-diff",
+		bytes.NewReader([]byte("not-json")))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decoding error envelope: %v", err)
+	}
+	errBlock, _ := env["error"].(map[string]any)
+	if errBlock == nil {
+		t.Fatal("missing error block")
+	}
+	if kind, _ := errBlock["kind"].(string); kind != "validation_failure" {
+		t.Errorf("error.kind: want validation_failure, got %q", kind)
 	}
 }
