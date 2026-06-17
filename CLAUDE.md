@@ -96,6 +96,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     permission-derivations.ts → normalizeGrant + summarizeUser + summarizePermission + allUsers — forward + inverse member-of derivations on AuthorizationDetail (Permissions tab lookup; slice #170.B)
     permission-search.ts      → filterAuthorization — single-query substring filter for the Permissions tab (super-users + groups + permissions; matches wire-name / title / body / grant members; slice #170.C)
     apply-preview.ts          → previewQueue — pure derivation that turns the pending queue into a per-change preview (effect / kind / title / scope / danger / body) in apply order; powers the confirm-Apply-All modal (slice #171.A)
+    smart-defaults.ts         → strategiesFor + nextAvailable + computePrefillForKind — async next-available-integer suggestion for create-form integer-ID fields (l3vni on ipvpns, vni on macvpns; slice #172.D)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
