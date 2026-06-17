@@ -15,6 +15,14 @@ import {
 import { previewQueue, type ApplyPreview, type PendingPreview } from "./apply-preview.js";
 import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
+import {
+  type DeviceBatch,
+  type DeviceProjection,
+  type ProjectionDiffResult,
+  groupByDevice,
+  summarizeDiff,
+} from "./projection-aggregator.js";
+import { postProjectionDiff } from "./api/newtcon/nodes.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
 import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 
@@ -374,10 +382,19 @@ function setupPendingBar(): void {
 
 function confirmApplyAll(preview: ApplyPreview): Promise<boolean> {
   if (preview.total === 0) return Promise.resolve(false);
-  return new Promise<boolean>((resolve) => mountApplyPreviewModal(preview, resolve));
+  // Compute the per-device batches synchronously before opening the
+  // modal so the projection section renders immediately with one row
+  // per affected device (in "fetching…" state). The actual POSTs fire
+  // from inside the modal mount.
+  const batches = groupByDevice(getQueue());
+  return new Promise<boolean>((resolve) => mountApplyPreviewModal(preview, batches, resolve));
 }
 
-function mountApplyPreviewModal(preview: ApplyPreview, resolve: (ok: boolean) => void): void {
+function mountApplyPreviewModal(
+  preview: ApplyPreview,
+  batches: DeviceBatch[],
+  resolve: (ok: boolean) => void,
+): void {
   const overlay = document.createElement("div");
   overlay.className = "apply-preview-overlay";
   overlay.setAttribute("role", "dialog");
@@ -405,6 +422,14 @@ function mountApplyPreviewModal(preview: ApplyPreview, resolve: (ok: boolean) =>
     list.appendChild(renderApplyPreviewItem(item));
   }
   card.appendChild(list);
+
+  // Device-level projection (slice #171.B). For every affected device,
+  // newtron computes the projected per-device diff via in-memory replay
+  // + restore. Rendered as a per-device row that starts in "fetching…"
+  // state and updates when the parallel POST resolves.
+  if (batches.length > 0) {
+    card.appendChild(renderProjectionSection(batches, activeNetwork()));
+  }
 
   if (preview.hasDangerous) {
     const warn = document.createElement("p");
@@ -506,6 +531,126 @@ function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
     row.appendChild(details);
   }
   return row;
+}
+
+// renderProjectionSection renders the per-device projection block inside
+// the apply-preview modal (slice #171.B). For each batched device:
+//
+//   - Mounts a row in "fetching…" state immediately so the operator
+//     sees what's being computed.
+//   - Fires POST /projection-diff in parallel; updates the row in place
+//     with summary counts + a collapsed details panel for the full diff
+//     when the response arrives, or with the error message on failure.
+//
+// Fanout-and-aggregate per the newtron#193 analysis: ~50 LoC, no batch
+// endpoint required. Latency is N parallel calls; the operator can
+// click Apply before all projections resolve if they want.
+function renderProjectionSection(batches: DeviceBatch[], network: string): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "apply-preview-projection";
+  const heading = document.createElement("h3");
+  heading.className = "apply-preview-projection-heading";
+  heading.textContent = `Device-level projection (${batches.length} device${batches.length === 1 ? "" : "s"})`;
+  section.appendChild(heading);
+  const blurb = document.createElement("p");
+  blurb.className = "apply-preview-projection-blurb";
+  blurb.textContent = "newtron's projected per-device config diff if these ops apply. In-memory replay; no device writes.";
+  section.appendChild(blurb);
+
+  const list = document.createElement("ul");
+  list.className = "apply-preview-projection-list";
+  section.appendChild(list);
+
+  for (const batch of batches) {
+    const row = renderProjectionRow({ device: batch.device, opCount: batch.ops.length });
+    list.appendChild(row.element);
+    void postProjectionDiff(batch.device, batch.ops, network)
+      .then((raw) => {
+        const result = (raw && typeof raw === "object") ? raw as ProjectionDiffResult : {};
+        row.update({ device: batch.device, opCount: batch.ops.length, result });
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        row.update({ device: batch.device, opCount: batch.ops.length, error: msg });
+      });
+  }
+  return section;
+}
+
+// renderProjectionRow returns the row element + an `update` closure
+// that re-renders its contents when the fetch resolves. Keeping the
+// element identity stable lets us paint the row immediately and
+// replace its body when the result arrives.
+function renderProjectionRow(initial: DeviceProjection): {
+  element: HTMLElement;
+  update: (next: DeviceProjection) => void;
+} {
+  const li = document.createElement("li");
+  li.className = "apply-preview-projection-row";
+  const paint = (state: DeviceProjection): void => {
+    li.textContent = "";
+    const head = document.createElement("div");
+    head.className = "apply-preview-projection-head";
+    const name = document.createElement("span");
+    name.className = "apply-preview-projection-device";
+    name.textContent = state.device;
+    head.appendChild(name);
+    const ops = document.createElement("span");
+    ops.className = "apply-preview-projection-ops";
+    ops.textContent = `${state.opCount} op${state.opCount === 1 ? "" : "s"}`;
+    head.appendChild(ops);
+    if (state.result) {
+      const s = summarizeDiff(state.result.diff);
+      const summary = document.createElement("span");
+      summary.className = "apply-preview-projection-summary";
+      if (s.total === 0) {
+        summary.textContent = "no config-db change";
+        summary.classList.add("apply-preview-projection-summary--noop");
+      } else {
+        const parts = [];
+        if (s.create > 0) parts.push(`+${s.create}`);
+        if (s.modify > 0) parts.push(`~${s.modify}`);
+        if (s.delete > 0) parts.push(`−${s.delete}`);
+        summary.textContent = `${parts.join(" / ")} entries`;
+      }
+      head.appendChild(summary);
+    } else if (state.error) {
+      const err = document.createElement("span");
+      err.className = "apply-preview-projection-error";
+      err.textContent = "projection failed";
+      head.appendChild(err);
+    } else {
+      const spin = document.createElement("span");
+      spin.className = "apply-preview-projection-fetching";
+      spin.textContent = "fetching…";
+      head.appendChild(spin);
+    }
+    li.appendChild(head);
+
+    if (state.error) {
+      const errLine = document.createElement("p");
+      errLine.className = "apply-preview-projection-error-detail";
+      errLine.textContent = state.error;
+      li.appendChild(errLine);
+    } else if (state.result && state.result.diff && state.result.diff.length > 0) {
+      const details = document.createElement("details");
+      details.className = "apply-preview-details";
+      const summary = document.createElement("summary");
+      summary.className = "apply-preview-details-summary";
+      summary.textContent = "diff";
+      details.appendChild(summary);
+      const pre = document.createElement("pre");
+      pre.className = "apply-preview-body";
+      pre.textContent = JSON.stringify(state.result.diff, null, 2);
+      details.appendChild(pre);
+      li.appendChild(details);
+    }
+  };
+  paint(initial);
+  return {
+    element: li,
+    update: paint,
+  };
 }
 
 async function boot(): Promise<void> {

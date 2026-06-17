@@ -192,6 +192,20 @@ func (c *Client) NodeIntentTree(ctx context.Context, network, device string) (js
 	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/intent/tree", network, device))
 }
 
+// NodeProjectionDiff calls POST /networks/{netID}/nodes/{device}/intent/
+// projection-diff with a list of {url, params} operations and returns the
+// projected per-device diff. Operations apply in-memory only; newtron
+// restores state before returning (per pkg/newtron/api/handler_node.go).
+//
+// Powers the per-device projection in newtcon's apply-preview modal
+// (slice #171.B). One POST per affected device, fired in parallel by
+// the caller.
+func (c *Client) NodeProjectionDiff(ctx context.Context, network, device string, body any) (json.RawMessage, error) {
+	return c.nodePostBody(ctx,
+		fmt.Sprintf("/networks/%s/nodes/%s/intent/projection-diff", network, device),
+		body)
+}
+
 // NodeReconcile calls POST /networks/{netID}/nodes/{device}/intent/reconcile.
 // dryRun=true returns the drift as a preview; dryRun=false executes.
 // mode is one of "topology" or "" (defaults to delta).

@@ -271,6 +271,30 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		}, "/api/networks/"+netID+"/nodes/"+device+"/intent-tree")
 	}))
 
+	// Projection diff: POST a list of {url, params} ops, get back the
+	// projected per-device {before, after, diff}. Operations apply in-
+	// memory only; newtron restores state before returning. Powers the
+	// per-device projection in newtcon's apply-preview modal (slice #171.B).
+	mux.Handle("POST /api/networks/{netID}/nodes/{device}/projection-diff", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		netID := r.PathValue("netID")
+		device := r.PathValue("device")
+		body, _ := io.ReadAll(r.Body)
+		var parsed any
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+					"request body is not valid JSON: "+err.Error(),
+					map[string]any{"correlation_id": cid(r.Context())})
+				return
+			}
+		} else {
+			parsed = map[string]any{}
+		}
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeProjectionDiff(ctx, netID, device, parsed)
+		}, "/api/networks/"+netID+"/nodes/"+device+"/projection-diff")
+	}))
+
 	// Reconcile: dry_run=true returns the drift preview; dry_run=false executes
 	// the corrective intent push. mode=topology drives full reconcile.
 	mux.Handle("POST /api/networks/{netID}/nodes/{device}/reconcile", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

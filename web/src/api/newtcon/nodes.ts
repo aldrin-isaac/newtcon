@@ -252,3 +252,17 @@ export async function postInterfaceRPC(
   const url = pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(ifaceEnc)}/rpc/${subpath}`, network);
   return apiSend(url, "POST", body && Object.keys(body).length > 0 ? body : undefined);
 }
+
+// postProjectionDiff POSTs a list of {url, params} ops to newtron's
+// per-device intent/projection-diff endpoint via the newtcon-server
+// proxy. Powers the per-device projection in the apply-preview modal
+// (slice #171.B). Operations apply in-memory only on newtron and the
+// substrate state is restored before the response returns.
+export async function postProjectionDiff(
+  device: string,
+  ops: Array<{ url: string; params: Record<string, unknown> }>,
+  network?: string,
+): Promise<unknown> {
+  const url = pathFor(`nodes/${encodeURIComponent(device)}/projection-diff`, network);
+  return apiSend(url, "POST", { operations: ops });
+}
