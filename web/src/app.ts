@@ -70,6 +70,7 @@ import {
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape } from "./spec-detail-shape.js";
+import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
@@ -675,6 +676,21 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
 
   const { form, getValues, validate } = buildFormFields(fields);
   content.appendChild(form);
+
+  // Smart defaults (slice #172.D): asynchronously fetch existing specs of
+  // this kind and suggest the next-available value for integer-ID fields
+  // (l3vni on ipvpns, vni on macvpns). Fire-and-forget — the form is
+  // already usable, and any fetch failure leaves it unprefilled.
+  if (strategiesFor(kind)) {
+    void computePrefillForKind(kind).then((defaults) => {
+      for (const [name, value] of Object.entries(defaults)) {
+        const input = form.querySelector("#field-" + name) as HTMLInputElement | null;
+        // Only fill when the operator hasn't already started typing — the
+        // suggestion is a starting point, never an override.
+        if (input && input.value === "") input.value = String(value);
+      }
+    });
+  }
 
   const errorOut = el("div", { className: "form-error-out" });
   content.appendChild(errorOut);
