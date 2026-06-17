@@ -1275,6 +1275,11 @@ interface TopologyRenderOpts {
   // caller can persist the new position.
   pinnedPositions?: Map<string, PinnedPosition>;
   onNodeMoved?: (name: string, pos: PinnedPosition) => void;
+
+  // Link click → drawer with what's bound at each endpoint (#174.D).
+  // When wired, links become interactive: cursor flips to pointer + a
+  // wider invisible hit target is drawn under each visible link line.
+  onLinkClick?: (link: TopoLink) => void;
 }
 
 interface TopologyRenderResult {
@@ -1316,11 +1321,29 @@ function renderTopologySVG(
 
   const positions = layoutNodes(nodes, cellW, perRowExtraH, opts.pinnedPositions);
 
-  // Draw links first (under nodes).
+  // Draw links first (under nodes). When onLinkClick is wired, each
+  // visible line gets a wider invisible hit-target sibling so clicking
+  // on or near the line is reliable — bare 1.5px strokes are nearly
+  // impossible to hit.
   for (const link of links) {
     const from = link.local_device ? positions.get(link.local_device) : undefined;
     const to = link.remote_device ? positions.get(link.remote_device) : undefined;
     if (!from || !to) continue;
+    if (opts.onLinkClick) {
+      const hit = svgEl("line", {
+        "class": "topo-link-hit",
+        x1: String(from.cx),
+        y1: String(from.cy),
+        x2: String(to.cx),
+        y2: String(to.cy),
+      });
+      const onLinkClick = opts.onLinkClick;
+      hit.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onLinkClick(link);
+      });
+      svg.appendChild(hit);
+    }
     const line = svgEl("line", {
       "class": "topo-link",
       x1: String(from.cx),
@@ -2396,6 +2419,66 @@ function buildCopyRow(label: string, value: string): HTMLElement {
   return row;
 }
 
+// openLinkDrawer opens the detail drawer for a topology link, rendering
+// both endpoints' interface configs + service bindings side-by-side.
+// Wired by the Topology view (#174.D); the existing detail drawer is
+// reused — opening this overwrites whatever the drawer was showing.
+//
+// Both fetches run in parallel; each endpoint section renders
+// independently so a partial failure (one device unreachable) doesn't
+// hide the other side.
+function openLinkDrawer(link: TopoLink): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  const a = { device: link.local_device ?? "?", iface: link.local_interface ?? "?" };
+  const z = { device: link.remote_device ?? "?", iface: link.remote_interface ?? "?" };
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+  content.appendChild(el("p", { className: "drawer-kind" }, "Link"));
+  content.appendChild(el(
+    "h2",
+    { className: "drawer-name" },
+    `${a.device}:${a.iface} ↔ ${z.device}:${z.iface}`,
+  ));
+
+  const grid = el("div", { className: "link-drawer-grid" });
+  content.appendChild(grid);
+
+  for (const endpoint of [a, z]) {
+    const col = el("section", { className: "link-drawer-endpoint" });
+    col.appendChild(el("h3", { className: "link-drawer-endpoint-heading" }, `${endpoint.device}:${endpoint.iface}`));
+    const body = el("div", { className: "link-drawer-endpoint-body" });
+    body.appendChild(el("p", { className: "status-loading" }, "Loading…"));
+    col.appendChild(body);
+    grid.appendChild(col);
+
+    void Promise.allSettled([
+      fetchNodeInterface(endpoint.device, endpoint.iface),
+      fetchNodeInterfaceBinding(endpoint.device, endpoint.iface),
+    ]).then(([detailResult, bindingResult]) => {
+      body.textContent = "";
+      const detailHeading = el("p", { className: "drawer-kind" }, "Interface");
+      body.appendChild(detailHeading);
+      if (detailResult.status === "fulfilled") {
+        body.appendChild(renderValue(detailResult.value));
+      } else {
+        body.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(detailResult.reason)));
+      }
+      const bindHeading = el("p", { className: "drawer-kind" }, "Service binding");
+      body.appendChild(bindHeading);
+      if (bindingResult.status === "fulfilled") {
+        body.appendChild(renderValue(bindingResult.value));
+      } else {
+        body.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(bindingResult.reason)));
+      }
+    });
+  }
+}
+
 // openNodeDrawer opens the detail drawer for a device and renders node-inspector
 // sub-tabs. Each sub-tab fetches its data lazily on first activation.
 function openNodeDrawer(device: string): void {
@@ -3253,6 +3336,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           // Re-render to redraw links from the new node position.
           renderGraph();
         },
+        onLinkClick: (link) => openLinkDrawer(link),
       });
       // SVG sits behind the toolbar (toolbar is z-indexed above).
       graphSlot.insertBefore(result.svg, zoomToolbar);
