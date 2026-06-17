@@ -34,6 +34,7 @@ import {
 } from "./permission-derivations.js";
 import { filterAuthorization } from "./permission-search.js";
 import { PERMISSIONS_EMPTY } from "./empty-states.js";
+import { isAnonymous } from "./auth-gate.js";
 
 /** mountAuthorizationTab clears `root` and renders the Permissions view. */
 export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
@@ -69,6 +70,15 @@ function renderAuthorization(root: HTMLElement, data: AuthorizationDetail): void
   const intro = el("p", { className: "view-intro" },
     "Live authorization table read from newtron. Edit by changing network.json + POST /reload upstream.");
   root.appendChild(intro);
+
+  // Anonymous-mode pedagogy (slice #169.D). The grant table below
+  // describes who can do what for IDENTIFIED operators; in anonymous
+  // mode no identity reaches newtron, so the operator is effectively
+  // outside this table. Surface that honestly.
+  if (isAnonymous()) {
+    root.appendChild(el("p", { className: "view-note view-note--info" },
+      "newtcon is running in anonymous mode — requests reach newtron without an operator identity, so the grants below apply only to signed-in operators in other sessions."));
+  }
 
   root.appendChild(renderLookup(data));
 

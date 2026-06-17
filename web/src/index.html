@@ -72,6 +72,30 @@
               <span class="status-dot status-dot--unknown" id="newtron-dot"></span>
               <span id="newtron-target">checking…</span>
             </span>
+            <!-- Anonymous-mode indicator (slice #169.D). Mutually
+                 exclusive with the user-pill below: at most one
+                 surfaces at a time. Shown when newtcon-server runs
+                 without --auth-required. -->
+            <div class="anon-pill-wrap" id="anon-pill-wrap" hidden>
+              <button type="button" class="anon-pill" id="anon-pill-trigger" title="newtcon-server is running without authentication">
+                <span class="anon-pill-dot" aria-hidden="true"></span>
+                <span class="anon-pill-label">Anonymous</span>
+                <span class="anon-pill-chevron" data-icon="chevron-down"></span>
+              </button>
+              <div class="anon-pill-dropdown" id="anon-pill-dropdown" hidden role="menu">
+                <div class="anon-pill-dropdown-headline">Anonymous mode</div>
+                <p class="anon-pill-dropdown-body">
+                  newtcon-server is running without <code>--auth-required</code>. Every
+                  request reaches newtron without an operator identity, and the
+                  History tab records changes without a username.
+                </p>
+                <p class="anon-pill-dropdown-body">
+                  To require sign-in, restart newtcon-server with
+                  <code>--auth-required</code> and ensure newtron's authentication
+                  endpoint is reachable.
+                </p>
+              </div>
+            </div>
             <div class="user-pill-wrap" id="user-pill-wrap" hidden>
               <button type="button" class="user-pill" id="user-pill-trigger" title="Signed-in operator — click for details">
                 <span class="user-pill-name" id="user-pill-name"></span>
