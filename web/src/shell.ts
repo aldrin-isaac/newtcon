@@ -13,8 +13,10 @@ import {
   applyAll,
 } from "./staging.js";
 import { previewQueue, type ApplyPreview, type PendingPreview } from "./apply-preview.js";
+import { appendEntry, buildEntry } from "./action-history.js";
+import { activeNetwork } from "./network-switcher.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
-import { ensureSignedIn, setupAuthGate } from "./auth-gate.js";
+import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -90,6 +92,7 @@ function setupBreadcrumb(): void {
     "tab-specs": "Specs",
     "tab-topology": "Topology",
     "tab-permissions": "Permissions",
+    "tab-history": "History",
   };
   const crumb = document.getElementById("crumb-view");
   for (const id of Object.keys(labelByTab)) {
@@ -107,7 +110,7 @@ function setupBreadcrumb(): void {
 // ---- Sidebar nav active-state ---------------------------------------------
 
 function setupSidebarActiveStates(): void {
-  const ids = ["tab-specs", "tab-topology", "tab-permissions"];
+  const ids = ["tab-specs", "tab-topology", "tab-permissions", "tab-history"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     btn?.addEventListener(
@@ -321,13 +324,35 @@ function setupPendingBar(): void {
 
   saveBtn.addEventListener("click", async () => {
     if (pendingCount() === 0) return;
-    const ok = await confirmApplyAll();
+    // Compute the preview ONCE — used both for the confirm modal and the
+    // history capture below. applyAll() drains the queue, so we can't
+    // recompute after the fact.
+    const preview = previewQueue(getQueue());
+    const ok = await confirmApplyAll(preview);
     if (!ok) return;
     saveBtn.setAttribute("disabled", "");
     saveBtn.textContent = "Saving…";
+    const network = activeNetwork();
+    const timestamp = new Date().toISOString();
     const r = await applyAll();
     saveBtn.removeAttribute("disabled");
     saveBtn.textContent = "Save";
+
+    // History capture (slice #175.A): persist the {preview, result} pair
+    // to localStorage so the operator can browse "what did I just do"
+    // from the History tab. Best-effort; storage failures are swallowed
+    // by saveHistory.
+    const entryId = `apply-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+    const entry = buildEntry({
+      id: entryId,
+      timestamp,
+      user: userFromGate(),
+      network,
+      preview,
+      result: r,
+    });
+    appendEntry(network, entry);
+
     if (r.failed.length > 0) {
       const lines = r.failed.map((f) => `${describePending(f.pending)}: ${f.error}`).join("\n");
       alert(`Applied ${r.applied.length}, failed ${r.failed.length}.\n\n${lines}`);
@@ -347,8 +372,7 @@ function setupPendingBar(): void {
 // each row to inspect the spec/action body, then commit or cancel.
 // Click-outside / Escape / Cancel = false; Apply = true.
 
-function confirmApplyAll(): Promise<boolean> {
-  const preview = previewQueue(getQueue());
+function confirmApplyAll(preview: ApplyPreview): Promise<boolean> {
   if (preview.total === 0) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => mountApplyPreviewModal(preview, resolve));
 }

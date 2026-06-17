@@ -99,6 +99,8 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     smart-defaults.ts         → strategiesFor + nextAvailable + computePrefillForKind — async next-available-integer suggestion for create-form integer-ID fields (l3vni on ipvpns, vni on macvpns; slice #172.D)
     topology-filters.ts       → emptyFilter + isActive + applyFilter + uniqueZones — pure layered-filter helpers for the Topology view; zone dimension shipped, filter shape extensible to VRF / service (slice #174.E)
     subrule-table.ts          → getSubRuleItems + extractRowCells + itemKey — pure helpers for the unified sub-rule inline table; backs the single-section table-then-add UI for qos-policies / filters / prefix-lists / route-policies (slice #173.A)
+    action-history.ts         → buildEntry + load/save/append/clear + prependEntry — client-side per-network Apply All history persisted to localStorage (slice #175.A); newtron audit-log viewer is a separate slice
+    history.ts                → mountHistoryTab — History tab view: expandable per-Apply entries with per-item outcome + error display (slice #175.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
