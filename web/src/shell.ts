@@ -151,8 +151,19 @@ function setupPalette(): void {
   const overlay = document.getElementById("palette-overlay");
   const input = document.getElementById("palette-input") as HTMLInputElement | null;
   const trigger = document.getElementById("palette-trigger");
+  const headerHint = document.getElementById("palette-hint");
   const resultsEl = document.getElementById("palette-results");
   if (!overlay || !input || !resultsEl) return;
+
+  // Platform-aware modifier label for the header hint (slice #169.F).
+  // The Cmd-K handler below accepts both metaKey and ctrlKey, so we
+  // pick the label that matches the operator's primary modifier.
+  const modLabel = document.getElementById("palette-hint-mod");
+  if (modLabel) {
+    const platform = (navigator.platform || "").toLowerCase();
+    const isMac = platform.includes("mac");
+    modLabel.textContent = isMac ? "⌘" : "Ctrl";
+  }
 
   const open = (): void => {
     if (paletteOpen) return;
@@ -171,6 +182,7 @@ function setupPalette(): void {
   };
 
   trigger?.addEventListener("click", open);
+  headerHint?.addEventListener("click", open);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
