@@ -96,6 +96,53 @@ describe("buildEntry()", () => {
     });
     assert.deepEqual(entry.items.map((i) => i.id), ["1", "2", "3"]);
   });
+
+  test("undoable=true for create-style spec items; preBody not populated", () => {
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview: SAMPLE_PREVIEW,
+      result: { applied: [{ id: "1" }, { id: "2" }, { id: "3" }], failed: [] },
+    });
+    // Item 1 is a spec create (effect:create, kind:spec). Always undoable.
+    const create = entry.items.find((i) => i.id === "1");
+    assert.equal(create.undoable, true);
+    assert.equal(create.preBody, undefined);
+  });
+
+  test("undoable=false for device.action regardless of preBody presence", () => {
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview: SAMPLE_PREVIEW,
+      result: { applied: [{ id: "2" }], failed: [] },
+      preBodies: new Map([["2", { fake: "body" }]]),
+    });
+    const action = entry.items.find((i) => i.id === "2");
+    assert.equal(action.undoable, false);
+  });
+
+  test("undoable=true for spec.delete when preBody captured", () => {
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview: SAMPLE_PREVIEW,
+      result: { applied: [{ id: "3" }], failed: [] },
+      preBodies: new Map([["3", { name: "old", description: "x" }]]),
+    });
+    const del = entry.items.find((i) => i.id === "3");
+    assert.equal(del.undoable, true);
+    assert.deepEqual(del.preBody, { name: "old", description: "x" });
+  });
+
+  test("undoable=false for spec.delete when preBody NOT captured", () => {
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview: SAMPLE_PREVIEW,
+      result: { applied: [{ id: "3" }], failed: [] },
+      // No preBodies passed
+    });
+    const del = entry.items.find((i) => i.id === "3");
+    assert.equal(del.undoable, false);
+    assert.equal(del.preBody, undefined);
+  });
 });
 
 describe("prependEntry()", () => {

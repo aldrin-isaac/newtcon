@@ -16,6 +16,15 @@ import {
   loadHistory,
 } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
+import { planUndo, type UndoPlan } from "./undo-plan.js";
+import {
+  enqueueSpecCreate,
+  enqueueSpecDelete,
+  enqueueTopologyAddDevice,
+  enqueueTopologyAddLink,
+  enqueueTopologyRemoveDevice,
+  enqueueTopologyRemoveLink,
+} from "./staging.js";
 
 export function mountHistoryTab(root: HTMLElement): void {
   root.textContent = "";
@@ -73,12 +82,72 @@ function renderEntry(entry: HistoryEntry): HTMLElement {
   }
   details.appendChild(head);
 
+  // Per-entry Undo (slice #175.C.1). The button is enabled when AT
+  // LEAST ONE item in this entry is undoable; per-item undoable status
+  // is rendered honestly beside each row below. Click stages the
+  // inverse Pending list and lets the operator confirm via the same
+  // Apply modal any other change goes through.
+  const undoablePlan = planUndo(entry, (i) => `undo-${entry.id}-${i}`);
+  if (undoablePlan.counts.planned > 0) {
+    details.appendChild(renderEntryUndoBar(entry, undoablePlan));
+  }
+
   const itemsList = el("ol", { className: "history-items" });
   for (const item of entry.items) itemsList.appendChild(renderItem(item));
   details.appendChild(itemsList);
 
   li.appendChild(details);
   return li;
+}
+
+function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
+  const bar = el("div", { className: "history-undo-bar" });
+  const summary = el("span", { className: "history-undo-summary" });
+  if (plan.counts.skipped === 0) {
+    summary.textContent =
+      `${plan.counts.planned} item${plan.counts.planned === 1 ? "" : "s"} can be undone.`;
+  } else {
+    summary.textContent =
+      `${plan.counts.planned} can be undone, ${plan.counts.skipped} cannot.`;
+  }
+  bar.appendChild(summary);
+  const btn = el("button", { type: "button", className: "history-undo-btn" }, "Stage undo");
+  btn.title = "Stage the inverse operations. You'll confirm via the usual Apply preview.";
+  btn.addEventListener("click", () => {
+    const queuedNames: string[] = [];
+    for (const item of plan.items) {
+      if (!item.planned || !item.inverse) continue;
+      const inv = item.inverse;
+      if (inv.group === "spec" && inv.op === "create") {
+        enqueueSpecCreate(inv.kind, inv.name, inv.body);
+        queuedNames.push(`+ ${inv.kind} ${inv.name}`);
+      } else if (inv.group === "spec" && inv.op === "delete") {
+        enqueueSpecDelete(inv.kind, inv.name);
+        queuedNames.push(`− ${inv.kind} ${inv.name}`);
+      } else if (inv.group === "topology" && inv.op === "add-device") {
+        enqueueTopologyAddDevice(inv.name, inv.body);
+        queuedNames.push(`+ device ${inv.name}`);
+      } else if (inv.group === "topology" && inv.op === "remove-device") {
+        enqueueTopologyRemoveDevice(inv.name);
+        queuedNames.push(`− device ${inv.name}`);
+      } else if (inv.group === "topology" && inv.op === "add-link") {
+        enqueueTopologyAddLink(inv.a, inv.z);
+        queuedNames.push(`+ link ${inv.a} ↔ ${inv.z}`);
+      } else if (inv.group === "topology" && inv.op === "remove-link") {
+        enqueueTopologyRemoveLink(inv.device, inv.iface);
+        queuedNames.push(`− link ${inv.device}:${inv.iface}`);
+      }
+    }
+    btn.setAttribute("disabled", "");
+    btn.textContent = "Staged";
+    const note = el("p", { className: "history-undo-note" },
+      `Staged ${queuedNames.length} inverse change${queuedNames.length === 1 ? "" : "s"} into the pending queue. ` +
+      "Click Save in the header to apply (same confirm modal + per-device projection as any other Apply).");
+    bar.appendChild(note);
+    void entry; // entry id is in the bar for future re-mount hooks
+  });
+  bar.appendChild(btn);
+  return bar;
 }
 
 function renderItem(item: HistoryItem): HTMLElement {
@@ -105,7 +174,24 @@ function renderItem(item: HistoryItem): HTMLElement {
   if (item.error) {
     row.appendChild(el("p", { className: "history-item-error" }, item.error));
   }
+  // Per-item undoable annotation (slice #175.C.1) — honest about
+  // device/interface actions, missing pre-bodies, and the data-layer
+  // scope.
+  if (item.undoable === false) {
+    row.appendChild(el("p", { className: "history-item-not-undoable" },
+      itemUndoSkipReason(item)));
+  }
   return row;
+}
+
+function itemUndoSkipReason(item: HistoryItem): string {
+  if (item.kind === "device action" || item.kind === "interface action") {
+    return "Not undoable — device/interface actions need manual reconfiguration.";
+  }
+  if (item.effect === "delete" && item.preBody === undefined) {
+    return "Not undoable — pre-apply body wasn't captured.";
+  }
+  return "Not undoable from this entry.";
 }
 
 function formatTime(iso: string): string {

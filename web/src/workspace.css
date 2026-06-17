@@ -361,6 +361,18 @@
 .history-item-outcome--applied { color: var(--color-success); }
 .history-item-outcome--failed { color: var(--color-danger); }
 .history-item-error { margin: var(--space-2xs) 0 0 24px; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-danger); white-space: pre-wrap; }
+.history-item-not-undoable { margin: var(--space-2xs) 0 0 24px; font-size: var(--text-2xs); color: var(--color-text-muted); font-style: italic; }
+
+/* Per-entry undo bar (slice #175.C.1) — appears between summary row
+ * and items list when at least one item is undoable. Click stages the
+ * inverse Pending ops; operator confirms via the existing Apply modal. */
+.history-undo-bar { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-2xs) var(--space-md); background: var(--color-info-bg); border-top: 1px solid var(--color-border-subtle); border-bottom: 1px solid var(--color-border-subtle); flex-wrap: wrap; }
+.history-undo-summary { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.history-undo-btn { font-size: var(--text-xs); padding: 3px var(--space-sm); border: 1px solid var(--color-info); background: var(--color-surface); color: var(--color-info); border-radius: 4px; cursor: pointer; font-family: var(--font-system); margin-left: auto; }
+.history-undo-btn:hover { background: var(--color-info); color: var(--color-surface); }
+.history-undo-btn[disabled] { opacity: 0.6; cursor: default; }
+.history-undo-note { margin: var(--space-2xs) 0 0; font-size: var(--text-xs); color: var(--color-text-secondary); width: 100%; }
+
 .view-empty { color: var(--color-text-muted); font-style: italic; padding: var(--space-md) 0; }
 
 /* Apply-preview modal (slice #171.A) */

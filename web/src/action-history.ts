@@ -25,6 +25,21 @@ export interface HistoryItem {
   danger: boolean;
   outcome: "applied" | "failed";
   error?: string;
+  /**
+   * Pre-apply body for delete-style operations (slice #175.C.1). Populated
+   * at apply-preview time before the queue runs, so undo can re-create
+   * what was deleted. Absent for create-style items (the inverse needs
+   * only the name) and for items where the pre-apply fetch failed.
+   */
+  preBody?: Record<string, unknown>;
+  /**
+   * Whether this specific item can be undone via the data-layer planner
+   * (slice #175.C.1). Computed at buildEntry time. False for
+   * device.action / interface.action (device-level undo is a separate
+   * slice) and for items whose pre-apply body fetch failed. The History
+   * renderer surfaces this honestly per row.
+   */
+  undoable: boolean;
 }
 
 /** One Apply All event. */
@@ -54,6 +69,10 @@ export interface ApplyResultLike {
  * post-apply result + caller-supplied identity + timestamp. Pure: no
  * I/O, no localStorage, no Date.now() inside (timestamp is passed in
  * so callers can stamp once and the function stays deterministic).
+ *
+ * `preBodies` is the map of pre-apply bodies captured for delete-style
+ * items at preview time (slice #175.C.1). Keyed by Pending.id; absent
+ * keys yield items with `undoable: false` for those rows.
  */
 export function buildEntry(args: {
   id: string;
@@ -62,12 +81,15 @@ export function buildEntry(args: {
   network: string;
   preview: ApplyPreview;
   result: ApplyResultLike;
+  preBodies?: ReadonlyMap<string, Record<string, unknown>>;
 }): HistoryEntry {
   const failedIds = new Set(args.result.failed.map((f) => f.pending.id));
   const errorById = new Map<string, string>();
   for (const f of args.result.failed) errorById.set(f.pending.id, f.error);
+  const preBodies = args.preBodies ?? new Map<string, Record<string, unknown>>();
   const items: HistoryItem[] = args.preview.items.map((p) => {
     const failed = failedIds.has(p.id);
+    const undoable = isItemUndoable(p, preBodies);
     const it: HistoryItem = {
       id: p.id,
       effect: p.effect,
@@ -76,9 +98,12 @@ export function buildEntry(args: {
       scope: p.scope,
       danger: p.danger,
       outcome: failed ? "failed" : "applied",
+      undoable,
     };
     const err = errorById.get(p.id);
     if (failed && err !== undefined) it.error = err;
+    const cached = preBodies.get(p.id);
+    if (cached !== undefined) it.preBody = cached;
     return it;
   });
   return {
@@ -94,6 +119,33 @@ export function buildEntry(args: {
     },
     items,
   };
+}
+
+/**
+ * isItemUndoable decides whether a preview item can be undone by
+ * data-layer planning (slice #175.C.1). Rules:
+ *
+ *   create-style (spec, device, link)  always undoable (DELETE by name)
+ *   delete-style                       undoable iff preBody was captured
+ *   device / interface action          NEVER undoable here — separate slice
+ *
+ * Note: undoable does NOT mean the item succeeded. A FAILED apply may
+ * still be undoable in principle (an inverse for a partial create); the
+ * History UI surfaces both flags so the operator can choose.
+ */
+function isItemUndoable(
+  item: { effect: "create" | "delete" | "action"; kind: string; id: string },
+  preBodies: ReadonlyMap<string, Record<string, unknown>>,
+): boolean {
+  // Per-action kinds are explicitly out of scope for the data-layer
+  // planner — device-action undo is a separate slice (175.C.2) that
+  // needs per-action-kind inverse mapping or a CONFIG_DB-delta endpoint.
+  if (item.kind === "device action" || item.kind === "interface action") return false;
+  if (item.effect === "create") return true;
+  if (item.effect === "delete") return preBodies.has(item.id);
+  // Fallthrough (item.effect === "action") — newtcon doesn't classify
+  // non-RPC actions today, but be honest about not handling them.
+  return false;
 }
 
 const STORAGE_KEY_PREFIX = "newtcon:history:";
