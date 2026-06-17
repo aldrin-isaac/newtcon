@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { emptyStateFor, hasEmptyState } from "../dist/empty-states.js";
+import { emptyStateFor, hasEmptyState, TOPOLOGY_EMPTY } from "../dist/empty-states.js";
 
 // The kinds covered by the curated COPY map. Keep this list in sync
 // with COPY in empty-states.ts so a missing or added entry is caught
@@ -72,5 +72,32 @@ describe("hasEmptyState()", () => {
 
   test("false for unknown", () => {
     assert.equal(hasEmptyState("not-a-real-kind"), false);
+  });
+});
+
+describe("TOPOLOGY_EMPTY (slice #169.B)", () => {
+  test("has non-empty title + body", () => {
+    assert.ok(TOPOLOGY_EMPTY.title && TOPOLOGY_EMPTY.title.length > 0);
+    assert.ok(TOPOLOGY_EMPTY.body && TOPOLOGY_EMPTY.body.length > 0);
+  });
+
+  test("body mentions the toolbar's actions (Create node, Bring up)", () => {
+    const haystack = TOPOLOGY_EMPTY.body.toLowerCase();
+    assert.ok(/create node/.test(haystack), "should mention Create node");
+    assert.ok(/bring up|lab/.test(haystack), "should mention Bring up / lab");
+  });
+
+  test("hint surfaces the profile prerequisite", () => {
+    assert.ok(TOPOLOGY_EMPTY.hint && /profile/i.test(TOPOLOGY_EMPTY.hint));
+  });
+
+  test("does not use 'spec' as bare jargon (operator-language lens)", () => {
+    // The breadcrumb "Specs → Inventory → Profiles" is fine — that's
+    // referring to the visible sidebar tab. A bare standalone "spec"
+    // (the internal noun for a YAML/JSON record) is what's banned.
+    const haystack = (TOPOLOGY_EMPTY.title + " " + TOPOLOGY_EMPTY.body + " " +
+                      (TOPOLOGY_EMPTY.hint ?? "")).toLowerCase();
+    assert.ok(!/\bspec\b/.test(haystack),
+      "topology empty state should not use 'spec' as bare jargon: " + haystack);
   });
 });

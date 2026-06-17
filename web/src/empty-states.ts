@@ -94,3 +94,14 @@ export function emptyStateFor(kind: SpecKind): EmptyStateCopy {
 export function hasEmptyState(kind: SpecKind): boolean {
   return kind in COPY;
 }
+
+/**
+ * Per-view empty-state copy for non-Specs surfaces (slice #169.B+).
+ * Exposed as named constants rather than a keyed map because each view
+ * has its own renderer and the call-site is the natural index.
+ */
+export const TOPOLOGY_EMPTY: EmptyStateCopy = {
+  title: "No devices in this network's topology yet",
+  body: "Topology shows the devices newtron knows about and the links between them. Add one with Create node, or bring up the whole network as a VM lab with the toolbar above.",
+  hint: "Each device needs a matching profile in Specs → Inventory → Profiles before it can be registered.",
+};
