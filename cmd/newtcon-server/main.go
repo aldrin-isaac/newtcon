@@ -166,6 +166,14 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Audit log + integrity status (slice #175.B). Forwards newtron's
+	// /audit/events + /audit/integrity endpoints (newtron PR #197).
+	// Backs the Audit tab in the SPA.
+	handlers.RegisterAuditRoutes(mux, handlers.AuditDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Operator-identity endpoints: /api/auth/{login,logout,whoami}.
 	// Cookie.Secure is auto-derived from tlsOn — production HTTPS deployments
 	// get Secure cookies; plain-HTTP dev gets non-Secure (so the browser will

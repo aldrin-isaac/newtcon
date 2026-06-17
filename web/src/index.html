@@ -37,6 +37,10 @@
             <span class="nav-icon" data-icon="activity"></span>
             <span class="nav-label">History</span>
           </button>
+          <button type="button" id="tab-audit" class="nav-item" role="tab" aria-selected="false">
+            <span class="nav-icon" data-icon="server"></span>
+            <span class="nav-label">Audit</span>
+          </button>
         </nav>
         <div class="sidebar-footer">
           <button type="button" class="palette-trigger" id="palette-trigger" title="Open command palette">
@@ -136,6 +140,9 @@
           </section>
           <section class="view view-history" id="panel-history" hidden>
             <!-- mounted by history.ts mountHistoryTab() -->
+          </section>
+          <section class="view view-audit" id="panel-audit" hidden>
+            <!-- mounted by audit.ts mountAuditTab() -->
           </section>
         </main>
       </div>

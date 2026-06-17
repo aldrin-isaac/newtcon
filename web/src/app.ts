@@ -18,6 +18,7 @@ import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
+import { mountAuditTab } from "./audit.js";
 import { emptyStateFor, TOPOLOGY_EMPTY } from "./empty-states.js";
 import {
   SAMPLE_SEEDS,
@@ -3747,23 +3748,26 @@ function setupTabs(): void {
   const tabTopology = document.getElementById("tab-topology");
   const tabPermissions = document.getElementById("tab-permissions");
   const tabHistory = document.getElementById("tab-history");
+  const tabAudit = document.getElementById("tab-audit");
   const panelSpecs = document.getElementById("panel-specs");
   const panelTopology = document.getElementById("panel-topology");
   const panelPermissions = document.getElementById("panel-permissions");
   const panelHistory = document.getElementById("panel-history");
+  const panelAudit = document.getElementById("panel-audit");
 
-  if (!tabSpecs || !tabTopology || !tabPermissions || !tabHistory ||
-      !panelSpecs || !panelTopology || !panelPermissions || !panelHistory) return;
+  if (!tabSpecs || !tabTopology || !tabPermissions || !tabHistory || !tabAudit ||
+      !panelSpecs || !panelTopology || !panelPermissions || !panelHistory || !panelAudit) return;
 
   let topologyMounted = false;
 
-  type TabName = "specs" | "topology" | "permissions" | "history";
+  type TabName = "specs" | "topology" | "permissions" | "history" | "audit";
 
   const activateTab = (name: TabName): void => {
     const isSpecs = name === "specs";
     const isTopology = name === "topology";
     const isPermissions = name === "permissions";
     const isHistory = name === "history";
+    const isAudit = name === "audit";
 
     tabSpecs.classList.toggle("workspace-tab--active", isSpecs);
     tabSpecs.setAttribute("aria-selected", isSpecs ? "true" : "false");
@@ -3773,11 +3777,14 @@ function setupTabs(): void {
     tabPermissions.setAttribute("aria-selected", isPermissions ? "true" : "false");
     tabHistory.classList.toggle("workspace-tab--active", isHistory);
     tabHistory.setAttribute("aria-selected", isHistory ? "true" : "false");
+    tabAudit.classList.toggle("workspace-tab--active", isAudit);
+    tabAudit.setAttribute("aria-selected", isAudit ? "true" : "false");
 
     (panelSpecs as HTMLElement).hidden = !isSpecs;
     (panelTopology as HTMLElement).hidden = !isTopology;
     (panelPermissions as HTMLElement).hidden = !isPermissions;
     (panelHistory as HTMLElement).hidden = !isHistory;
+    (panelAudit as HTMLElement).hidden = !isAudit;
 
     if (isTopology && !topologyMounted) {
       topologyMounted = true;
@@ -3798,12 +3805,18 @@ function setupTabs(): void {
       // operator opens the tab after an Apply.
       mountHistoryTab(panelHistory as HTMLElement);
     }
+    if (isAudit) {
+      // Re-mount so the operator gets fresh events + integrity status
+      // every time they open the tab (no auto-poll for now).
+      void mountAuditTab(panelAudit as HTMLElement);
+    }
   };
 
   tabSpecs.addEventListener("click", () => activateTab("specs"));
   tabTopology.addEventListener("click", () => activateTab("topology"));
   tabPermissions.addEventListener("click", () => activateTab("permissions"));
   tabHistory.addEventListener("click", () => activateTab("history"));
+  tabAudit.addEventListener("click", () => activateTab("audit"));
 }
 
 // ---- Entry ------------------------------------------------------------------

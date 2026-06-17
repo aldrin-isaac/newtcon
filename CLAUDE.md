@@ -54,6 +54,7 @@ internal/handlers/            → one file per resource family
   config.go                   → /api/config (deployment posture descriptor — auth_required, …)
   auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store; returns 404 when --auth-required is off)
   authorization.go            → /api/networks/{netID}/authorization (read-only inspector for newtron's grant table; slice 2.2)
+  audit.go                    → /api/networks/{netID}/audit/{events,integrity} (forwards newtron's audit endpoints; slice #175.B)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
@@ -64,6 +65,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   tls.go                      → outbound TLS config (BuildTLSConfig: --newtron-ca-cert / --newtron-skip-tls-verify)
   auth.go                     → Login/Logout RPCs + WithBearer context plumbing + bearer-injecting RoundTripper
   authorization.go            → GetAuthorization (read newtron's live grant table; slice 2.2)
+  audit.go                    → AuditEvents + AuditIntegrity (read newtron's audit log + L6 chain status; slice #175.B)
   errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
@@ -104,6 +106,8 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     empty-states.ts           → emptyStateFor + hasEmptyState — curated pedagogical empty-state copy (title + body + optional hint) for each spec facet; replaces the generic "(none defined)" with operator-language teaching (slice #169.A)
     projection-aggregator.ts  → groupByDevice + summarizeDiff — pure helpers backing the per-device projection in the apply-preview modal; fanout-and-aggregate over newtron's intent/projection-diff (slice #171.B)
     sample-network.ts         → SAMPLE_SEEDS + planLoad + summarisePlan — quickstart pure data + planner for the "Load sample" link under the empty Services facet (slice #169.E)
+    audit-format.ts           → shortHash + formatTimestamp + eventStatusLabel + activeFilterCount — pure formatters backing the Audit tab (slice #175.B)
+    audit.ts                  → mountAuditTab — Audit tab view: integrity badge + filter row + paged event table; reads newtron's audit endpoints via the typed client (slice #175.B)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
