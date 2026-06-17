@@ -32,6 +32,7 @@ import {
   summarizePermission,
   summarizeUser,
 } from "./permission-derivations.js";
+import { filterAuthorization } from "./permission-search.js";
 
 /** mountAuthorizationTab clears `root` and renders the Permissions view. */
 export async function mountAuthorizationTab(root: HTMLElement): Promise<void> {
@@ -58,9 +59,41 @@ function renderAuthorization(root: HTMLElement, data: AuthorizationDetail): void
   root.appendChild(intro);
 
   root.appendChild(renderLookup(data));
-  root.appendChild(renderSuperUsers(data.super_users ?? []));
-  root.appendChild(renderUserGroups(data.user_groups ?? {}));
-  root.appendChild(renderPermissions(data.permissions ?? {}));
+
+  // Search filters every visible section (super-users / user-groups /
+  // permission table) by substring; the Lookup section above stays
+  // unfiltered — it's a different affordance for direct identity /
+  // permission lookup, and shrinking those selectors would defeat their
+  // purpose. (Slice #170.C.)
+  const filtered = el("div", { className: "authz-filtered" });
+  const rerender = (q: string): void => {
+    const f = filterAuthorization(q, data);
+    filtered.textContent = "";
+    filtered.appendChild(renderSuperUsers(f.superUsers, f.totals.superUsers));
+    filtered.appendChild(renderUserGroups(f.userGroups, f.totals.userGroups));
+    // renderPermissions takes the unfiltered permissions map + a name
+    // allow-list so each row still has access to its original grant
+    // value for rendering.
+    filtered.appendChild(renderPermissions(data.permissions ?? {}, f.permissions, f.totals.permissions));
+  };
+  root.appendChild(renderSearchBar(rerender));
+  root.appendChild(filtered);
+  rerender("");
+}
+
+function renderSearchBar(onInput: (query: string) => void): HTMLElement {
+  const box = el("section", { className: "authz-section authz-search" });
+  const input = el("input", {
+    type: "search",
+    className: "authz-search-input",
+    placeholder: "Search permissions, groups, users…",
+    autocomplete: "off",
+    spellcheck: false,
+  });
+  input.setAttribute("aria-label", "Filter permissions table");
+  input.addEventListener("input", () => onInput(input.value));
+  box.appendChild(input);
+  return box;
 }
 
 // ---- Lookup: forward + inverse member-of views (slice #170.B) -------------
@@ -293,11 +326,17 @@ function renderExpandedGrant(g: ExpandedGrant, index: number | null): HTMLElemen
   return box;
 }
 
-function renderSuperUsers(users: string[]): HTMLElement {
+function renderSuperUsers(users: string[], total: number): HTMLElement {
   const section = el("section", { className: "authz-section" });
-  section.appendChild(el("h3", { className: "authz-section-heading" }, "Super users"));
-  if (users.length === 0) {
+  const heading = el("h3", { className: "authz-section-heading" }, "Super users");
+  section.appendChild(heading);
+  appendFilterHint(section, users.length, total);
+  if (total === 0) {
     section.appendChild(el("p", { className: "authz-empty" }, "(none)"));
+    return section;
+  }
+  if (users.length === 0) {
+    section.appendChild(el("p", { className: "authz-empty" }, "(no matches)"));
     return section;
   }
   const list = el("ul", { className: "authz-chip-list" });
@@ -308,12 +347,17 @@ function renderSuperUsers(users: string[]): HTMLElement {
   return section;
 }
 
-function renderUserGroups(groups: Record<string, string[]>): HTMLElement {
+function renderUserGroups(groups: Record<string, string[]>, total: number): HTMLElement {
   const section = el("section", { className: "authz-section" });
   section.appendChild(el("h3", { className: "authz-section-heading" }, "User groups"));
   const entries = Object.entries(groups);
-  if (entries.length === 0) {
+  appendFilterHint(section, entries.length, total);
+  if (total === 0) {
     section.appendChild(el("p", { className: "authz-empty" }, "(none)"));
+    return section;
+  }
+  if (entries.length === 0) {
+    section.appendChild(el("p", { className: "authz-empty" }, "(no matches)"));
     return section;
   }
   entries.sort(([a], [b]) => a.localeCompare(b));
@@ -328,23 +372,37 @@ function renderUserGroups(groups: Record<string, string[]>): HTMLElement {
   return section;
 }
 
-function renderPermissions(permissions: Record<string, unknown>): HTMLElement {
+function renderPermissions(
+  permissions: Record<string, unknown>,
+  visibleNames: string[],
+  total: number,
+): HTMLElement {
   const section = el("section", { className: "authz-section" });
   section.appendChild(el("h3", { className: "authz-section-heading" }, "Permissions"));
-  const names = Object.keys(permissions);
-  if (names.length === 0) {
+  appendFilterHint(section, visibleNames.length, total);
+  if (total === 0) {
     section.appendChild(el("p", { className: "authz-empty" }, "(none)"));
     return section;
   }
+  if (visibleNames.length === 0) {
+    section.appendChild(el("p", { className: "authz-empty" }, "(no matches)"));
+    return section;
+  }
 
-  // Group by operator-domain category (Spec authoring / Services /
-  // Routing / …). Each group is its own subsection with a heading so
-  // the operator scans by concern, not alphabet.
-  const grouped = groupPermissions(names);
+  // Group by operator-domain category. Each group is its own subsection
+  // with a heading so the operator scans by concern, not alphabet.
+  const grouped = groupPermissions(visibleNames);
   for (const [groupId, groupNames] of grouped) {
     section.appendChild(renderPermissionGroup(groupId, groupNames, permissions));
   }
   return section;
+}
+
+function appendFilterHint(section: HTMLElement, shown: number, total: number): void {
+  if (total > 0 && shown !== total) {
+    section.appendChild(el("p", { className: "authz-filter-hint" },
+      `showing ${shown} of ${total}`));
+  }
 }
 
 function renderPermissionGroup(

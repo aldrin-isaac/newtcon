@@ -191,6 +191,12 @@
 .authz-where-key { font-family: var(--font-mono); color: var(--color-info); font-weight: var(--weight-medium); }
 .authz-where-value { font-family: var(--font-mono); color: var(--color-text-primary); }
 
+/* Search filter (slice #170.C) */
+.authz-section.authz-search { padding: 0; margin-bottom: var(--space-md); background: transparent; border: none; }
+.authz-search-input { width: 100%; max-width: 480px; padding: 6px var(--space-sm); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); color: var(--color-text-primary); font-size: var(--text-sm); font-family: var(--font-system); }
+.authz-search-input:focus { outline: none; border-color: var(--color-info); box-shadow: 0 0 0 2px var(--color-info-bg); }
+.authz-filter-hint { font-size: var(--text-xs); color: var(--color-text-muted); font-style: italic; margin: calc(-1 * var(--space-2xs)) 0 var(--space-sm); }
+
 /* Lookup section (forward + inverse member-of views; slice #170.B) */
 .authz-lookup { padding: var(--space-md); background: var(--color-surface-sunken); border: 1px solid var(--color-border-subtle); border-radius: 6px; }
 .authz-lookup-block { margin: var(--space-sm) 0; }
