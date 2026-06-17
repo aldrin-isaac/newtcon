@@ -17,6 +17,8 @@ import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
 import type { Pending } from "./staging.js";
 import { fetchSpecDetail } from "./api/newtcon/network.js";
+import { fetchTopology } from "./api/newtcon/nodes.js";
+import { captureTopologyBodies, type RawTopology } from "./topology-undo-capture.js";
 import {
   type DeviceBatch,
   type DeviceProjection,
@@ -398,29 +400,46 @@ function setupPendingBar(): void {
 
 // ---- Pre-apply body capture (slice #175.C.1) -----------------------------
 //
-// Undo for delete-style operations needs the body of the spec being
-// deleted — otherwise nothing can recreate it. Fetched in parallel
-// just before applyAll runs; per-fetch failures degrade silently (the
-// item just renders as not-undoable in the History tab).
+// Undo for delete-style operations needs the body of the thing being
+// deleted — otherwise nothing can recreate it. Fired in parallel just
+// before applyAll runs; per-fetch failures degrade silently (the item
+// just renders as not-undoable in the History tab).
 //
-// Topology remove-device / remove-link bodies are NOT captured in this
-// slice. add-link doesn't need a body (the title carries both
-// endpoints); remove-device would need a topology-detail endpoint
-// that newtcon doesn't currently surface. Both render as not-undoable
-// honestly until a follow-up adds the pre-fetch.
+// Covered:
+//   spec.delete             fetchSpecDetail per item
+//   topology.remove-device  body extracted from one fetchTopology()
+//   topology.remove-link    {a, z} endpoints extracted from same
+//
+// The topology fetch fires only when the queue actually has a
+// topology removal — no point pulling the whole topology for a
+// spec-only batch.
 
 async function capturePreApplyBodies(queue: readonly Pending[]): Promise<Map<string, Record<string, unknown>>> {
   const out = new Map<string, Record<string, unknown>>();
-  const targets = queue.filter((p) => p.group === "spec" && p.op === "delete");
-  await Promise.all(targets.map(async (p) => {
-    if (p.group !== "spec" || p.op !== "delete") return; // narrow
-    try {
-      const detail = await fetchSpecDetail(p.kind, p.name);
-      if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-        out.set(p.id, detail as Record<string, unknown>);
-      }
-    } catch { /* item just won't be undoable */ }
-  }));
+  // Spec-delete bodies.
+  const specTargets = queue.filter((p) => p.group === "spec" && p.op === "delete");
+  const topologyTargets = queue.filter((p) =>
+    p.group === "topology" && (p.op === "remove-device" || p.op === "remove-link"));
+  await Promise.all([
+    ...specTargets.map(async (p) => {
+      if (p.group !== "spec" || p.op !== "delete") return;
+      try {
+        const detail = await fetchSpecDetail(p.kind, p.name);
+        if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+          out.set(p.id, detail as Record<string, unknown>);
+        }
+      } catch { /* item just won't be undoable */ }
+    }),
+    (async () => {
+      if (topologyTargets.length === 0) return;
+      try {
+        const topology = (await fetchTopology()) as RawTopology;
+        for (const [id, body] of captureTopologyBodies(topology, queue)) {
+          out.set(id, body);
+        }
+      } catch { /* topology fetch failed → those items just won't be undoable */ }
+    })(),
+  ]);
   return out;
 }
 

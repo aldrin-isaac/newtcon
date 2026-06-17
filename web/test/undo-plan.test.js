@@ -98,7 +98,7 @@ describe("planUndo() — topology link ops", () => {
     assert.equal(inv.iface, "eth0");
   });
 
-  test("link remove → add-link with both endpoints", () => {
+  test("link remove → add-link with both endpoints (title-encoded fallback)", () => {
     const plan = planUndo(entry([
       { id: "4", effect: "delete", kind: "link", title: "r1:eth0 ↔ r2:eth0", scope: "topology", danger: true, outcome: "applied", undoable: true },
     ]), idGen);
@@ -106,6 +106,28 @@ describe("planUndo() — topology link ops", () => {
     assert.equal(inv.op, "add-link");
     assert.equal(inv.a, "r1:eth0");
     assert.equal(inv.z, "r2:eth0");
+  });
+
+  test("link remove with cached {a, z} preBody → add-link with cached endpoints (slice #175.C.1 polish)", () => {
+    // Real-world title from apply-preview.ts is just "device:iface" —
+    // only the queued endpoint. Without preBody this would fail to
+    // plan; with preBody (captured from the topology before applyAll),
+    // both endpoints are recoverable.
+    const plan = planUndo(entry([
+      { id: "4", effect: "delete", kind: "link", title: "r2:eth1", scope: "topology", danger: true, outcome: "applied", undoable: true, preBody: { a: "r2:eth1", z: "host-a:eth0" } },
+    ]), idGen);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.op, "add-link");
+    assert.equal(inv.a, "r2:eth1");
+    assert.equal(inv.z, "host-a:eth0");
+  });
+
+  test("link remove with non-parseable title AND no preBody → skipped", () => {
+    const plan = planUndo(entry([
+      { id: "4", effect: "delete", kind: "link", title: "r2:eth1", scope: "topology", danger: true, outcome: "applied", undoable: true },
+    ]), idGen);
+    // No inverse can be composed without both endpoints.
+    assert.equal(plan.counts.skipped, 1);
   });
 
   test("malformed link title → skipped", () => {
