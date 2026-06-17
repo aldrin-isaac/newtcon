@@ -192,6 +192,56 @@
 
 /* Permissions tab — read-only authorization-table inspector. */
 .view-permissions { padding: var(--space-md) var(--space-lg); overflow-y: auto; }
+
+/* Audit tab (slice #175.B) */
+.view-audit { padding: var(--space-md) var(--space-lg); overflow-y: auto; }
+.audit-integrity-host { margin: var(--space-md) 0; }
+.audit-integrity { padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-surface); display: flex; flex-direction: column; gap: var(--space-sm); }
+.audit-integrity--clean { border-left: 4px solid var(--color-success); }
+.audit-integrity--broken { border-left: 4px solid var(--color-danger); background: var(--color-danger-bg); }
+.audit-integrity--unknown { border-left: 4px solid var(--color-text-muted); }
+.audit-integrity-head { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
+.audit-integrity-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-text-muted); display: inline-block; }
+.audit-integrity--clean .audit-integrity-dot { background: var(--color-success); }
+.audit-integrity--broken .audit-integrity-dot { background: var(--color-danger); }
+.audit-integrity-title { font-size: var(--text-sm); color: var(--color-text-primary); }
+.audit-integrity-count { font-size: var(--text-xs); color: var(--color-text-muted); margin-left: auto; }
+.audit-integrity-meta { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2xs) var(--space-sm); margin: 0; font-size: var(--text-xs); }
+.audit-integrity-meta dt { color: var(--color-text-muted); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-size: var(--text-2xs); align-self: center; }
+.audit-integrity-meta dd { margin: 0; color: var(--color-text-primary); }
+.audit-integrity-hash { font-family: var(--font-mono); cursor: help; }
+.audit-integrity-break { color: var(--color-danger); font-weight: var(--weight-medium); }
+.audit-integrity-detail { font-size: var(--text-xs); color: var(--color-text-secondary); margin: 0; }
+
+.audit-filter-row { display: flex; align-items: flex-end; gap: var(--space-sm); flex-wrap: wrap; margin: var(--space-md) 0; padding: var(--space-sm) var(--space-md); background: var(--color-surface-sunken); border-radius: 6px; }
+.audit-filter-field { display: flex; flex-direction: column; gap: 2px; min-width: 140px; }
+.audit-filter-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); }
+.audit-filter-input { padding: 4px var(--space-xs); border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface); color: var(--color-text-primary); font-size: var(--text-sm); font-family: var(--font-system); }
+.audit-filter-input:focus { outline: none; border-color: var(--color-info); }
+.audit-filter-apply { padding: 5px var(--space-md); border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-surface); border-radius: 4px; font-size: var(--text-sm); cursor: pointer; }
+.audit-filter-apply:hover { filter: brightness(1.08); }
+.audit-filter-reset { padding: 5px var(--space-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); border-radius: 4px; font-size: var(--text-sm); cursor: pointer; font-family: var(--font-system); }
+.audit-filter-reset:hover { color: var(--color-text-primary); }
+
+.audit-table-host { margin-top: var(--space-md); }
+.audit-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-family: var(--font-mono); }
+.audit-table thead { background: var(--color-surface-sunken); }
+.audit-th { text-align: left; padding: var(--space-2xs) var(--space-xs); font-family: var(--font-system); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-subtle); }
+.audit-row { border-bottom: 1px solid var(--color-border-subtle); }
+.audit-row:hover { background: var(--color-surface-hover); }
+.audit-td { padding: var(--space-2xs) var(--space-xs); color: var(--color-text-primary); vertical-align: top; }
+.audit-td-time { color: var(--color-text-secondary); white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-xs); }
+.audit-td-op { color: var(--color-text-secondary); }
+.audit-status { display: inline-block; padding: 1px var(--space-xs); border-radius: 3px; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-family: var(--font-system); font-weight: var(--weight-medium); }
+.audit-status--applied { background: var(--color-success-bg); color: var(--color-success); border: 1px solid var(--color-success-border); }
+.audit-status--dry-run, .audit-status--preview { background: var(--color-info-bg); color: var(--color-info); border: 1px solid var(--color-info-border); }
+.audit-status--failed { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
+
+.audit-table-footer { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) 0; }
+.audit-table-footer-count { font-size: var(--text-xs); color: var(--color-text-muted); }
+.audit-load-more { padding: 4px var(--space-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); border-radius: 4px; font-size: var(--text-xs); cursor: pointer; margin-left: auto; font-family: var(--font-system); }
+.audit-load-more:hover { color: var(--color-text-primary); border-color: var(--color-border-default); }
+.audit-load-more[disabled] { cursor: progress; }
 .view-heading { font-size: var(--text-lg); font-weight: var(--weight-semibold); margin: 0 0 var(--space-2xs); }
 .view-intro { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0 0 var(--space-lg); }
 .view-note { font-size: var(--text-sm); margin: 0 0 var(--space-md); padding: var(--space-sm) var(--space-md); border-radius: 4px; border-left: 3px solid transparent; }

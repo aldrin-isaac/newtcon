@@ -101,6 +101,7 @@ function setupBreadcrumb(): void {
     "tab-topology": "Topology",
     "tab-permissions": "Permissions",
     "tab-history": "History",
+    "tab-audit": "Audit",
   };
   const crumb = document.getElementById("crumb-view");
   for (const id of Object.keys(labelByTab)) {
@@ -118,7 +119,7 @@ function setupBreadcrumb(): void {
 // ---- Sidebar nav active-state ---------------------------------------------
 
 function setupSidebarActiveStates(): void {
-  const ids = ["tab-specs", "tab-topology", "tab-permissions", "tab-history"];
+  const ids = ["tab-specs", "tab-topology", "tab-permissions", "tab-history", "tab-audit"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     btn?.addEventListener(
