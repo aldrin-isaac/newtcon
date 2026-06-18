@@ -536,17 +536,26 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
 }
 
 // Queue an action (does NOT POST). For node-multi, queues one per device.
+// Merges action.wireBody (constants set by the action definition, e.g.
+// {tagged: true} for the trunk-add variant of configure-interface) on
+// top of the form-derived body. Form values take precedence over
+// wireBody so an operator can never accidentally override a wire-level
+// discriminator with a stray field, but no current action defines
+// overlapping keys.
 function queueActionFromForm(action: ActionDef, target: ActionTarget, body: Record<string, unknown>): void {
+  const finalBody = action.wireBody
+    ? { ...action.wireBody, ...body }
+    : body;
   if (target.kind === "interface") {
-    enqueueInterfaceAction(target.device, target.iface, action.id, action.label, body, action.danger);
+    enqueueInterfaceAction(target.device, target.iface, action.id, action.label, finalBody, action.danger);
     return;
   }
   if (target.kind === "node") {
-    enqueueDeviceAction(target.device, action.id, action.label, body, action.danger);
+    enqueueDeviceAction(target.device, action.id, action.label, finalBody, action.danger);
     return;
   }
   for (const d of target.devices) {
-    enqueueDeviceAction(d, action.id, action.label, body, action.danger);
+    enqueueDeviceAction(d, action.id, action.label, finalBody, action.danger);
   }
 }
 
