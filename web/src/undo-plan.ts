@@ -115,6 +115,12 @@ function inverseFor(item: HistoryItem, id: string): Pending | null {
       return { id, group: "topology", op: "add-device", name: item.title, body: item.preBody };
     }
   }
+  if (item.kind === "interface action") {
+    return inverseInterfaceAction(item, id);
+  }
+  if (item.kind === "device action") {
+    return inverseDeviceAction(item, id);
+  }
   if (item.kind === "link") {
     // topology add-link ↔ remove-link.
     //
@@ -155,12 +161,51 @@ function inverseFor(item: HistoryItem, id: string): Pending | null {
 
 function skipReason(item: HistoryItem): string {
   if (item.kind === "device action" || item.kind === "interface action") {
-    return "requires manual reconfiguration — device/interface undo is a separate slice";
+    // Distinguish "no inverse mapped yet for this actionId" from a generic
+    // not-undoable so the operator knows whether a future slice will
+    // light up the action.
+    return "no inverse mapping for actionId '" + (item.actionId ?? "<unknown>") + "' yet";
   }
   if (item.effect === "delete") {
     return "pre-apply body wasn't captured at apply time; can't recreate";
   }
   return "no inverse mapping for this item";
+}
+
+/**
+ * inverseInterfaceAction maps a queued interface RPC to its inverse.
+ * Slice #175.C.2.a covers apply-service. configure-interface family
+ * pending narrow survey of trunk semantics — separate sub-slice.
+ */
+function inverseInterfaceAction(item: HistoryItem, id: string): Pending | null {
+  if (!item.actionId || !item.device || !item.iface) return null;
+  if (item.actionId === "apply-service") {
+    // Inverse: POST .../interfaces/{name}/remove-service with no body.
+    // Newtron's handleRemoveService takes no request body — the URL
+    // identifies the binding (handler_interface.go:50).
+    return {
+      id,
+      group: "interface",
+      op: "action",
+      device: item.device,
+      iface: item.iface,
+      actionId: "remove-service",
+      label: "Unbind service from " + item.device + ":" + item.iface,
+      body: {},
+      danger: true,
+    };
+  }
+  return null;
+}
+
+/**
+ * inverseDeviceAction is the hook for node-level RPC inverses. NODE_ACTIONS
+ * is empty today so this slice ships zero device-level inverses; the
+ * matching machinery is here for the moment they're added — every
+ * node-level newtron verb has a paired inverse per the survey.
+ */
+function inverseDeviceAction(_item: HistoryItem, _id: string): Pending | null {
+  return null;
 }
 
 /**

@@ -33,13 +33,26 @@ export interface HistoryItem {
    */
   preBody?: Record<string, unknown>;
   /**
-   * Whether this specific item can be undone via the data-layer planner
-   * (slice #175.C.1). Computed at buildEntry time. False for
-   * device.action / interface.action (device-level undo is a separate
-   * slice) and for items whose pre-apply body fetch failed. The History
-   * renderer surfaces this honestly per row.
+   * Whether this specific item can be undone via the data-layer or
+   * device-action planner. Computed at buildEntry time. False for
+   * action items whose actionId isn't in the supported-inverse list
+   * (configure-interface family pending narrow trunk-semantics survey).
+   * The History renderer surfaces this honestly per row.
    */
   undoable: boolean;
+  /**
+   * For action items: the newtron RPC subpath (e.g. "apply-service").
+   * Needed by the undo planner. Absent for spec + topology items.
+   */
+  actionId?: string;
+  /**
+   * For action items: the target device (action items) + interface
+   * (interface action items only). Threaded from PendingPreview so the
+   * undo planner can compose the inverse RPC URL without re-parsing the
+   * scope string.
+   */
+  device?: string;
+  iface?: string;
 }
 
 /** One Apply All event. */
@@ -104,6 +117,9 @@ export function buildEntry(args: {
     if (failed && err !== undefined) it.error = err;
     const cached = preBodies.get(p.id);
     if (cached !== undefined) it.preBody = cached;
+    if (p.actionId !== undefined) it.actionId = p.actionId;
+    if (p.device !== undefined) it.device = p.device;
+    if (p.iface !== undefined) it.iface = p.iface;
     return it;
   });
   return {
@@ -122,31 +138,46 @@ export function buildEntry(args: {
 }
 
 /**
- * isItemUndoable decides whether a preview item can be undone by
- * data-layer planning (slice #175.C.1). Rules:
+ * isItemUndoable decides whether a preview item can be undone. Rules:
  *
  *   create-style (spec, device, link)  always undoable (DELETE by name)
  *   delete-style                       undoable iff preBody was captured
- *   device / interface action          NEVER undoable here — separate slice
+ *   action items                       undoable iff actionId is in the
+ *                                      per-action-kind inverse map
+ *                                      (slice #175.C.2.a + later
+ *                                      sub-slices)
  *
  * Note: undoable does NOT mean the item succeeded. A FAILED apply may
- * still be undoable in principle (an inverse for a partial create); the
- * History UI surfaces both flags so the operator can choose.
+ * still be undoable in principle; the History UI surfaces both flags so
+ * the operator can choose.
  */
 function isItemUndoable(
-  item: { effect: "create" | "delete" | "action"; kind: string; id: string },
+  item: { effect: "create" | "delete" | "action"; kind: string; id: string; actionId?: string },
   preBodies: ReadonlyMap<string, Record<string, unknown>>,
 ): boolean {
-  // Per-action kinds are explicitly out of scope for the data-layer
-  // planner — device-action undo is a separate slice (175.C.2) that
-  // needs per-action-kind inverse mapping or a CONFIG_DB-delta endpoint.
-  if (item.kind === "device action" || item.kind === "interface action") return false;
+  // Action items — supported via per-actionId inverse mapping.
+  if (item.kind === "device action" || item.kind === "interface action") {
+    return item.actionId !== undefined && ACTION_INVERSES.has(item.actionId);
+  }
   if (item.effect === "create") return true;
   if (item.effect === "delete") return preBodies.has(item.id);
-  // Fallthrough (item.effect === "action") — newtcon doesn't classify
-  // non-RPC actions today, but be honest about not handling them.
+  // Fallthrough.
   return false;
 }
+
+/**
+ * ACTION_INVERSES is the set of action kinds the undo planner can
+ * handle today. Updated as sub-slices of 175.C.2 land.
+ *
+ *   175.C.2.a — apply-service (inverse: remove-service)
+ *   175.C.2.b — configure-interface family (pending trunk-semantics
+ *               survey before landing)
+ *   175.C.2.c — unconfigure-interface (pending the prior-state
+ *               composition design)
+ */
+const ACTION_INVERSES: ReadonlySet<string> = new Set<string>([
+  "apply-service",
+]);
 
 const STORAGE_KEY_PREFIX = "newtcon:history:";
 

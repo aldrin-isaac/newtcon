@@ -117,7 +117,51 @@ describe("buildEntry()", () => {
       preBodies: new Map([["2", { fake: "body" }]]),
     });
     const action = entry.items.find((i) => i.id === "2");
+    // SAMPLE_PREVIEW's id="2" carries kind "device action" but no
+    // actionId field, so it lands in the not-mapped bucket.
     assert.equal(action.undoable, false);
+  });
+
+  test("undoable=true for interface action with actionId='apply-service' (slice 175.C.2.a)", () => {
+    const preview = {
+      total: 1,
+      items: [{
+        id: "applyservice-1", effect: "action", kind: "interface action",
+        title: "Bind service", scope: "r1:eth0", danger: false, body: null,
+        actionId: "apply-service", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "applyservice-1" }], failed: [] },
+    });
+    const item = entry.items[0];
+    assert.equal(item.undoable, true);
+    assert.equal(item.actionId, "apply-service");
+    assert.equal(item.device, "r1");
+    assert.equal(item.iface, "eth0");
+  });
+
+  test("undoable=false for interface action whose actionId is not in the supported set", () => {
+    const preview = {
+      total: 1,
+      items: [{
+        id: "configif-1", effect: "action", kind: "interface action",
+        title: "Set access", scope: "r1:eth0", danger: false, body: null,
+        actionId: "configure-interface", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "configif-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, false);
   });
 
   test("undoable=true for spec.delete when preBody captured", () => {
