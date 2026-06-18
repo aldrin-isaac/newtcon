@@ -97,7 +97,12 @@ func (c *Client) ListRoutePolicies(ctx context.Context, network string) ([]strin
 }
 
 func (c *Client) ListProfiles(ctx context.Context, network string) ([]string, error) {
-	return c.listNames(ctx, network, "profiles")
+	// Newtron PR #206 (2026-06-17) renamed the route from /profiles to /nodes
+	// to match the domain term used elsewhere. The DeviceProfile struct stays
+	// — a device has a profile, but it lives under nodes/. Newtcon-internal
+	// callers still use "profiles" as the spec-kind label; only the upstream
+	// URL changes.
+	return c.listNames(ctx, network, "nodes")
 }
 
 func (c *Client) ListZones(ctx context.Context, network string) ([]string, error) {
@@ -225,10 +230,13 @@ func (c *Client) AddFilterRule(ctx context.Context, network string, body any) (j
 
 // RemoveFilterRule sends POST /network/{netID}/remove-filter-rule.
 // Substrate: handler.go line 81.
-func (c *Client) RemoveFilterRule(ctx context.Context, network, filter string, sequence int) error {
+//
+// Body field renamed `sequence` → `seq` per newtron PR #214 (2026-06-17)
+// to align with the spec types + Add request types that already used `seq`.
+func (c *Client) RemoveFilterRule(ctx context.Context, network, filter string, seq int) error {
 	_, err := c.networkPost(ctx, network, "remove-filter-rule", map[string]any{
-		"filter":   filter,
-		"sequence": sequence,
+		"filter": filter,
+		"seq":    seq,
 	})
 	return err
 }
@@ -265,10 +273,12 @@ func (c *Client) AddRoutePolicyRule(ctx context.Context, network string, body an
 
 // RemoveRoutePolicyRule sends POST /network/{netID}/remove-route-policy-rule.
 // Substrate: handler.go line 89.
-func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy string, sequence int) error {
+//
+// Body field renamed `sequence` → `seq` per newtron PR #214 (2026-06-17).
+func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy string, seq int) error {
 	_, err := c.networkPost(ctx, network, "remove-route-policy-rule", map[string]any{
-		"policy":   policy,
-		"sequence": sequence,
+		"policy": policy,
+		"seq":    seq,
 	})
 	return err
 }

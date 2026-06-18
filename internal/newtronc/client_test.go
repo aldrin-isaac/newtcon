@@ -164,7 +164,7 @@ func asUnavailableError(err error, target **newtronc.UnavailableError) bool {
 //	scaffold=true  + missing dir → scaffold + register, 201
 //	scaffold=true  + initialized → 409 (ConflictError)
 //	id already registered        → 409 (ConflictError)
-//	missing id/spec_dir          → 400 (ValidationError)
+//	missing id/dir               → 400 (ValidationError)
 // ============================================================================
 
 func TestClient_RegisterNetwork_RegisterExisting(t *testing.T) {
@@ -191,7 +191,7 @@ func TestClient_RegisterNetwork_RegisterExisting(t *testing.T) {
 	// scaffold=false MUST NOT serialize the scaffold/description fields — they're
 	// additive on RegisterNetworkRequest, and the client should look identical
 	// to a pre-scaffold caller for the default path.
-	if !strings.Contains(seenBody, `"id":"lab"`) || !strings.Contains(seenBody, `"spec_dir":"/etc/newtron/lab"`) {
+	if !strings.Contains(seenBody, `"id":"lab"`) || !strings.Contains(seenBody, `"dir":"/etc/newtron/lab"`) {
 		t.Errorf("body missing required fields: %s", seenBody)
 	}
 	if strings.Contains(seenBody, "scaffold") {
@@ -247,7 +247,7 @@ func TestClient_RegisterNetwork_ConflictOnAlreadyRegistered(t *testing.T) {
 }
 
 // TestClient_RegisterNetwork_ConflictOnScaffoldInitialized pins the 409 that
-// newtron returns when scaffold=true but spec_dir already contains specs.
+// newtron returns when scaffold=true but `dir` already contains a layout.
 // Same typed error as the "id already registered" 409 — callers disambiguate
 // via *ConflictError.Body (open question #2 in the migration plan).
 func TestClient_RegisterNetwork_ConflictOnScaffoldInitialized(t *testing.T) {
@@ -271,7 +271,7 @@ func TestClient_RegisterNetwork_ConflictOnScaffoldInitialized(t *testing.T) {
 func TestClient_RegisterNetwork_ValidationOnMissingFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, `{"error":"id and spec_dir are required"}`)
+		fmt.Fprintln(w, `{"error":"id and dir are required"}`)
 	}))
 	defer srv.Close()
 

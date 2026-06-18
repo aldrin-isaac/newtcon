@@ -15,7 +15,7 @@ const DEFAULT_NET = "default";
 
 interface NetworkInfo {
   id: string;
-  spec_dir: string;
+  dir: string;
   has_topology: boolean;
   topology: string;
   nodes: string[];
@@ -76,7 +76,7 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
       <span class="network-switcher-item-topology">${escapeHtml(info.topology || "—")}</span>`;
     item.addEventListener("click", () => {
       if (isActive) { closeDropdown(); return; }
-      if (!window.confirm(`Switch active network to "${info.id}" (${info.topology || info.spec_dir})? The page will reload.`)) return;
+      if (!window.confirm(`Switch active network to "${info.id}" (${info.topology || info.dir})? The page will reload.`)) return;
       setActiveNetwork(info.id);
       window.location.reload();
     });
@@ -131,21 +131,25 @@ async function toggleDropdown(trigger: HTMLElement): Promise<void> {
 // ---- Register-new modal --------------------------------------------------
 
 function openRegisterModal(): void {
-  // Trivial in-place modal (no framework). Three fields: id, spec_dir,
+  // Trivial in-place modal (no framework). Three fields: id, dir,
   // description. scaffold:true is always sent — the operator is creating
-  // a *new* topology here; for "register an existing spec dir" use the
+  // a *new* topology here; for "register an existing dir" use the
   // newtron CLI (out of scope for v1 of the switcher).
+  //
+  // Field renamed spec_dir → dir per newtron PR #208 — the layout
+  // collapse means the directory IS the network root, not just where
+  // spec files live.
   const overlay = document.createElement("div");
   overlay.className = "network-modal-overlay";
   overlay.innerHTML = `
     <div class="network-modal">
       <h2 class="network-modal-title">New topology</h2>
-      <p class="network-modal-hint">Creates an empty spec layout at the given path and registers it as a network. Spec files (topology.json, platforms.json, profiles/) are scaffolded; populate them through the UI or the newtron CLI.</p>
+      <p class="network-modal-hint">Creates an empty layout at the given path and registers it as a network. The network.json + nodes/ subdirectory are scaffolded; populate them through the UI or the newtron CLI.</p>
       <form class="network-modal-form">
         <label class="form-label">Network ID *</label>
         <input class="form-control" name="id" placeholder="e.g. demo-1" required />
-        <label class="form-label">Spec directory (absolute path) *</label>
-        <input class="form-control" name="spec_dir" placeholder="e.g. /var/topologies/demo-1/specs" required />
+        <label class="form-label">Directory (absolute path) *</label>
+        <input class="form-control" name="dir" placeholder="e.g. /var/topologies/demo-1" required />
         <label class="form-label">Description</label>
         <input class="form-control" name="description" placeholder="What this network is for (optional)" />
         <div class="network-modal-error" hidden></div>
@@ -168,19 +172,19 @@ function openRegisterModal(): void {
     errorOut.hidden = true;
     const data = new FormData(form);
     const id = String(data.get("id") ?? "").trim();
-    const specDir = String(data.get("spec_dir") ?? "").trim();
+    const dir = String(data.get("dir") ?? "").trim();
     const description = String(data.get("description") ?? "").trim();
-    if (!id || !specDir) {
-      errorOut.textContent = "Network ID and spec directory are required.";
+    if (!id || !dir) {
+      errorOut.textContent = "Network ID and directory are required.";
       errorOut.hidden = false;
       return;
     }
-    if (!window.confirm(`Create new topology "${id}" at ${specDir}? Empty spec files will be written.`)) return;
+    if (!window.confirm(`Create new topology "${id}" at ${dir}? Empty layout will be scaffolded.`)) return;
     try {
       const r = await fetch("/api/networks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, spec_dir: specDir, description, scaffold: true }),
+        body: JSON.stringify({ id, dir, description, scaffold: true }),
       });
       if (!r.ok) {
         const body = await r.text();
