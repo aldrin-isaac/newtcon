@@ -149,8 +149,28 @@ describe("buildEntry()", () => {
     const preview = {
       total: 1,
       items: [{
-        id: "configif-1", effect: "action", kind: "interface action",
-        title: "Set access", scope: "r1:eth0", danger: false, body: null,
+        id: "unknown-1", effect: "action", kind: "interface action",
+        title: "Custom op", scope: "r1:eth0", danger: false, body: null,
+        actionId: "some-future-verb", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "unknown-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, false);
+  });
+
+  test("configure-interface tagged:true (trunk add) → undoable=true; body threaded (slice 175.C.2.b)", () => {
+    const preview = {
+      total: 1,
+      items: [{
+        id: "ci-trunk-1", effect: "action", kind: "interface action",
+        title: "Add tagged VLAN (trunk)", scope: "r1:eth0", danger: false,
+        body: { vlan_id: 100, tagged: true },
         actionId: "configure-interface", device: "r1", iface: "eth0",
       }],
       counts: { create: 0, delete: 0, action: 1, danger: 0 },
@@ -159,7 +179,49 @@ describe("buildEntry()", () => {
     const entry = buildEntry({
       id: "e1", timestamp: "t", user: null, network: "n",
       preview,
-      result: { applied: [{ id: "configif-1" }], failed: [] },
+      result: { applied: [{ id: "ci-trunk-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, true);
+    assert.deepEqual(entry.items[0].body, { vlan_id: 100, tagged: true });
+  });
+
+  test("configure-interface tagged:false (access) → undoable=false even though actionId is mapped", () => {
+    // Predicate inspects body. Access mode has no clean atomic
+    // inverse (waits on 175.C.2.c composite restore).
+    const preview = {
+      total: 1,
+      items: [{
+        id: "ci-access-1", effect: "action", kind: "interface action",
+        title: "Set to access", scope: "r1:eth0", danger: false,
+        body: { vlan_id: 100, tagged: false },
+        actionId: "configure-interface", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "ci-access-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, false);
+  });
+
+  test("configure-interface with no body → undoable=false (predicate defensively requires body)", () => {
+    const preview = {
+      total: 1,
+      items: [{
+        id: "ci-empty-1", effect: "action", kind: "interface action",
+        title: "Set port", scope: "r1:eth0", danger: false, body: null,
+        actionId: "configure-interface", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "ci-empty-1" }], failed: [] },
     });
     assert.equal(entry.items[0].undoable, false);
   });

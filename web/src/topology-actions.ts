@@ -22,12 +22,22 @@ export interface ActionField {
 }
 
 export interface ActionDef {
-  id: string;            // newtron subpath
+  id: string;            // newtron URL subpath (the actual wire verb)
   label: string;         // operator-facing menu text
   icon: string;          // icons.ts key
   danger?: boolean;
   confirm?: string;
   fields?: ActionField[];
+  /**
+   * Constant body fields merged into the request alongside the form
+   * field values. Used when the same newtron verb (e.g.
+   * `configure-interface`) has multiple operator-facing variants
+   * distinguished by a wire-level discriminator (`tagged: true` for
+   * trunk-add, `tagged: false` for access-set). Keeps the per-variant
+   * UX (distinct labels, distinct History rows, distinct undo
+   * inverses) while sending the right body shape to newtron.
+   */
+  wireBody?: Record<string, unknown>;
 }
 
 export interface ActionGroup {
@@ -68,30 +78,34 @@ export const INTERFACE_ACTIONS: ActionGroup[] = [
   {
     group: "Port mode",
     items: [
+      // Three variants of /configure-interface, distinguished on the wire
+      // by `tagged`. Keep operator-facing labels distinct so History and
+      // undo can disambiguate per-variant — the body's `tagged` field is
+      // the discriminator (per the 2026-06-18 newtron update + PR #225
+      // which made `tagged:true` additive in intent).
       {
-        // POST /configure-interface { vlan_id, tagged: false } — access mode
-        id: "set-access", label: "Set to access (single untagged VLAN)", icon: "settings",
+        id: "configure-interface", label: "Set to access (single untagged VLAN)", icon: "settings",
         fields: [
           { name: "vlan_id", label: "VLAN ID", type: "number", required: true, hint: "1–4094" },
         ],
+        wireBody: { tagged: false },
         confirm: "Configure this port as access (single untagged VLAN)? Any existing port-mode config is replaced.",
       },
       {
-        // POST /configure-interface { vlan_id, tagged: true } — trunk member
-        // Each call adds one tagged VLAN. Multi-VLAN trunk = repeat per VLAN.
-        id: "add-trunk-vlan", label: "Add tagged VLAN (trunk)", icon: "plus",
+        id: "configure-interface", label: "Add tagged VLAN (trunk)", icon: "plus",
         fields: [
           { name: "vlan_id", label: "VLAN ID", type: "number", required: true, hint: "1–4094 (call repeatedly for multiple)" },
         ],
+        wireBody: { tagged: true },
         confirm: "Add this VLAN as a tagged member of the port? Existing tagged VLANs are preserved.",
       },
       {
-        // POST /configure-interface { vrf, ip } — routed mode
-        id: "set-routed", label: "Set to routed (VRF + IP)", icon: "settings",
+        id: "configure-interface", label: "Set to routed (VRF + IP)", icon: "settings",
         fields: [
           { name: "vrf", label: "VRF",       type: "text", required: true, hint: "'default' for global; otherwise a VRF derived from an IPVPN spec" },
           { name: "ip",  label: "IP (CIDR)", type: "text", required: true, hint: "e.g. 10.1.0.1/24" },
         ],
+        // No `tagged` → newtron infers routed mode from vrf + ip presence.
         confirm: "Configure this port as routed (VRF + IP)? Any existing port-mode config is replaced.",
       },
       {

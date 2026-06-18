@@ -174,15 +174,21 @@ function skipReason(item: HistoryItem): string {
 
 /**
  * inverseInterfaceAction maps a queued interface RPC to its inverse.
- * Slice #175.C.2.a covers apply-service. configure-interface family
- * pending narrow survey of trunk semantics — separate sub-slice.
+ *
+ *   175.C.2.a — apply-service → remove-service (no body)
+ *   175.C.2.b — configure-interface with tagged:true → remove-trunk-vlan
+ *               with the original vlan_id (newtron PR #225 made the
+ *               trunk record per-VLAN and shipped this atomic strip).
+ *
+ * configure-interface variants without tagged:true (access mode,
+ * routed mode) and unconfigure-interface still require composite
+ * multi-step recovery — they remain not-undoable here pending the
+ * 175.C.2.c slice and likely a newtron snapshot/restore primitive.
  */
 function inverseInterfaceAction(item: HistoryItem, id: string): Pending | null {
   if (!item.actionId || !item.device || !item.iface) return null;
   if (item.actionId === "apply-service") {
     // Inverse: POST .../interfaces/{name}/remove-service with no body.
-    // Newtron's handleRemoveService takes no request body — the URL
-    // identifies the binding (handler_interface.go:50).
     return {
       id,
       group: "interface",
@@ -192,6 +198,27 @@ function inverseInterfaceAction(item: HistoryItem, id: string): Pending | null {
       actionId: "remove-service",
       label: "Unbind service from " + item.device + ":" + item.iface,
       body: {},
+      danger: true,
+    };
+  }
+  if (item.actionId === "configure-interface") {
+    // Only the trunk-add variant (tagged:true with a numeric vlan_id)
+    // has a clean atomic inverse — remove-trunk-vlan {vlan_id}.
+    // newtron handler_interface.go:remove-trunk-vlan strips exactly
+    // that one VLAN_MEMBER + intent record; sub-resources untouched.
+    const body = item.body;
+    if (!body || body["tagged"] !== true) return null;
+    const vlanId = body["vlan_id"];
+    if (typeof vlanId !== "number") return null;
+    return {
+      id,
+      group: "interface",
+      op: "action",
+      device: item.device,
+      iface: item.iface,
+      actionId: "remove-trunk-vlan",
+      label: "Remove trunk VLAN " + vlanId + " from " + item.device + ":" + item.iface,
+      body: { vlan_id: vlanId },
       danger: true,
     };
   }

@@ -53,6 +53,14 @@ export interface HistoryItem {
    */
   device?: string;
   iface?: string;
+  /**
+   * For action items: the request body of the original RPC. Required by
+   * the undo planner for kinds whose inverse depends on body content
+   * (e.g. configure-interface — the trunk-add variant has tagged:true
+   * and its inverse needs the vlan_id). Spec + topology items don't
+   * populate this (their preBody covers the pre-state cache).
+   */
+  body?: Record<string, unknown>;
 }
 
 /** One Apply All event. */
@@ -120,6 +128,13 @@ export function buildEntry(args: {
     if (p.actionId !== undefined) it.actionId = p.actionId;
     if (p.device !== undefined) it.device = p.device;
     if (p.iface !== undefined) it.iface = p.iface;
+    // body comes through for action items so the undo planner can
+    // inspect it (e.g. configure-interface's `tagged` discriminator).
+    if (p.kind === "device action" || p.kind === "interface action") {
+      if (p.body && typeof p.body === "object") {
+        it.body = p.body as Record<string, unknown>;
+      }
+    }
     return it;
   });
   return {
@@ -152,12 +167,23 @@ export function buildEntry(args: {
  * the operator can choose.
  */
 function isItemUndoable(
-  item: { effect: "create" | "delete" | "action"; kind: string; id: string; actionId?: string },
+  item: {
+    effect: "create" | "delete" | "action";
+    kind: string;
+    id: string;
+    actionId?: string;
+    body?: Record<string, unknown> | null;
+  },
   preBodies: ReadonlyMap<string, Record<string, unknown>>,
 ): boolean {
-  // Action items — supported via per-actionId inverse mapping.
+  // Action items — per-actionId predicate map; for some actionIds the
+  // predicate inspects the body (e.g. configure-interface is only
+  // undoable for the trunk-add variant where body.tagged === true).
   if (item.kind === "device action" || item.kind === "interface action") {
-    return item.actionId !== undefined && ACTION_INVERSES.has(item.actionId);
+    if (item.actionId === undefined) return false;
+    const predicate = ACTION_INVERSE_PREDICATES[item.actionId];
+    if (!predicate) return false;
+    return predicate(item.body ?? undefined);
   }
   if (item.effect === "create") return true;
   if (item.effect === "delete") return preBodies.has(item.id);
@@ -166,18 +192,29 @@ function isItemUndoable(
 }
 
 /**
- * ACTION_INVERSES is the set of action kinds the undo planner can
- * handle today. Updated as sub-slices of 175.C.2 land.
+ * ACTION_INVERSE_PREDICATES maps actionId → predicate(body) that
+ * answers "is this specific call undoable?". Predicates inspect body
+ * when the inverse depends on the request shape (configure-interface's
+ * trunk-add variant only); they return true unconditionally for
+ * actionIds with a fixed inverse (apply-service).
  *
- *   175.C.2.a — apply-service (inverse: remove-service)
- *   175.C.2.b — configure-interface family (pending trunk-semantics
- *               survey before landing)
- *   175.C.2.c — unconfigure-interface (pending the prior-state
- *               composition design)
+ * Updated as sub-slices of 175.C.2 land:
+ *
+ *   175.C.2.a — apply-service (inverse: remove-service, no body)
+ *   175.C.2.b — configure-interface (only when tagged: true; inverse
+ *               is remove-trunk-vlan with the original vlan_id — newtron
+ *               PR #225). Other configure-interface bodies (access,
+ *               routed) need composite multi-step recovery — deferred.
+ *   175.C.2.c — unconfigure-interface (pending the composite
+ *               restore-from-pre-state design)
  */
-const ACTION_INVERSES: ReadonlySet<string> = new Set<string>([
-  "apply-service",
-]);
+const ACTION_INVERSE_PREDICATES: Record<string, (body: Record<string, unknown> | undefined) => boolean> = {
+  "apply-service": () => true,
+  "configure-interface": (body) => {
+    if (!body || typeof body !== "object") return false;
+    return body["tagged"] === true && typeof body["vlan_id"] === "number";
+  },
+};
 
 const STORAGE_KEY_PREFIX = "newtcon:history:";
 

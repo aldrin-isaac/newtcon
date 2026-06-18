@@ -157,10 +157,15 @@ function handleActionInvoke(action: ActionDef, ctx: MenuContext): void {
 }
 
 function queueFromMenu(action: ActionDef, ctx: MenuContext, body: Record<string, unknown>): void {
+  // Merge action.wireBody under the form body — same shape as
+  // queueActionFromForm in topology-action-panel.ts (kept in sync).
+  const finalBody = action.wireBody
+    ? { ...action.wireBody, ...body }
+    : body;
   if (ctx.kind === "node") {
-    enqueueDeviceAction(ctx.device, action.id, action.label, body, action.danger);
+    enqueueDeviceAction(ctx.device, action.id, action.label, finalBody, action.danger);
   } else {
-    enqueueInterfaceAction(ctx.device, ctx.iface ?? "", action.id, action.label, body, action.danger);
+    enqueueInterfaceAction(ctx.device, ctx.iface ?? "", action.id, action.label, finalBody, action.danger);
   }
 }
 
