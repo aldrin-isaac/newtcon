@@ -12,6 +12,10 @@ import {
   removeFilterRule,
   removePrefixListEntry,
   removeRoutePolicyRule,
+  updateQoSQueue,
+  updateFilterRule,
+  updateRoutePolicyRule,
+  updatePrefixListEntry,
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
@@ -82,6 +86,7 @@ import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
   type SubRuleColumn,
   type SubRuleItemType,
+  composeUpdateBody,
   extractRowCells,
   getSubRuleItems,
   itemKey,
@@ -1123,6 +1128,20 @@ function renderSubRuleRow(
   const actionsCell = el("td", { className: "subrule-td subrule-td--actions" });
   const key = itemKey(item, conf.itemType, conf.keyField);
   if (key !== null) {
+    // Edit button (slice #173.B). Swaps the row for an inline edit
+    // form prefilled with the item's current values. Reuses
+    // conf.addFields so add + edit stay shape-aligned.
+    const editBtn = el("button", {
+      type: "button",
+      className: "subrule-edit-btn",
+      title: `Edit ${conf.itemLabel} ${key}`,
+    }, "✎");
+    editBtn.addEventListener("click", () => {
+      const editRow = renderSubRuleEdit(kind, specName, item, conf, row);
+      row.replaceWith(editRow);
+    });
+    actionsCell.appendChild(editBtn);
+
     const delBtn = el("button", {
       type: "button",
       className: "subrule-delete-btn",
@@ -1146,6 +1165,81 @@ function renderSubRuleRow(
   }
   row.appendChild(actionsCell);
   return row;
+}
+
+// renderSubRuleEdit returns an inline edit row (slice #173.B) for a
+// single sub-rule item. Replaces the read-only row via row.replaceWith
+// when the operator clicks the Edit button. On Save: calls
+// updateSubRuleItem and re-opens the detail to refresh; on Cancel:
+// the caller swaps the original row back in.
+function renderSubRuleEdit(
+  kind: SpecKind,
+  specName: string,
+  item: unknown,
+  conf: SubRuleTable,
+  originalRow: HTMLElement,
+): HTMLElement {
+  const editRow = el("tr", { className: "subrule-row subrule-row--editing" });
+  const cell = el("td", { className: "subrule-td subrule-td--edit-cell" }) as HTMLTableCellElement;
+  cell.colSpan = conf.columns.length + 1;
+
+  // For object items, the addFields field names match the item's wire
+  // shape — prefill is the item itself. For string items (prefix-
+  // lists), the single addField "prefix" maps to the item's string
+  // value.
+  const prefill: Record<string, unknown> = conf.itemType === "string"
+    ? { prefix: typeof item === "string" ? item : String(item) }
+    : { ...(item as Record<string, unknown>) };
+
+  const { form, getValues, validate } = buildFormFields(conf.addFields, { prefill });
+  cell.appendChild(form);
+
+  const errOut = el("div", { className: "form-error-out" });
+  cell.appendChild(errOut);
+
+  const buttons = el("div", { className: "form-button-row" });
+  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Save");
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(saveBtn);
+  buttons.appendChild(cancelBtn);
+  cell.appendChild(buttons);
+
+  editRow.appendChild(cell);
+
+  cancelBtn.addEventListener("click", () => {
+    editRow.replaceWith(originalRow);
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    clearFieldErrors(form);
+    if (!validate()) return;
+    errOut.textContent = "";
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    const values = getValues();
+    const originalKey = itemKey(item, conf.itemType, conf.keyField);
+    if (originalKey === null) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      errOut.appendChild(el("p", { className: "panel-error" }, "Couldn't determine identifier for this row."));
+      return;
+    }
+    const body = composeUpdateBody(values, conf.itemType, conf.keyField, originalKey);
+    try {
+      await updateSubRuleItem(kind, specName, originalKey, body, conf);
+      openDetail(kind, kindTitleFor(kind), specName);
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      if (!attachServerValidationToForm(form, err)) {
+        errOut.appendChild(el("p", { className: "panel-error" },
+          err instanceof ApiError
+            ? translateErrorKind(err.kind) + ": " + err.message
+            : String(err)));
+      }
+    }
+  });
+  return editRow;
 }
 
 function renderSubRuleAdd(
@@ -1223,6 +1317,27 @@ function deleteSubRuleItem(kind: SpecKind, specName: string, key: string | numbe
     default: return Promise.reject(new Error("no delete for " + kind));
   }
 }
+
+// updateSubRuleItem dispatches to the per-kind update function (slice
+// #173.B). The URL path already identifies the row by its existing
+// keyField; body carries the new field values plus optionally a
+// renumber field (new_seq / new_queue_id / new_prefix).
+function updateSubRuleItem(
+  kind: SpecKind, specName: string,
+  key: string | number, body: Record<string, unknown>,
+  _conf: SubRuleTable,
+): Promise<unknown> {
+  switch (kind) {
+    case "qos-policies":   return updateQoSQueue(specName, Number(key), body);
+    case "filters":        return updateFilterRule(specName, Number(key), body);
+    case "prefix-lists":   return updatePrefixListEntry(specName, String(key), body);
+    case "route-policies": return updateRoutePolicyRule(specName, Number(key), body);
+    default: return Promise.reject(new Error("no update for " + kind));
+  }
+}
+
+// composeUpdateBody is imported from ./subrule-table.js — pure helper
+// so it can be unit-tested independently of the DOM-bound renderer.
 
 // pluralize handles the singular item labels in subRuleTables — all
 // English-regular except "prefix" → "prefixes".
