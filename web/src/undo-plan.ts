@@ -116,22 +116,38 @@ function inverseFor(item: HistoryItem, id: string): Pending | null {
     }
   }
   if (item.kind === "link") {
-    // topology add-link ↔ remove-link. The preview title carries both
-    // endpoints joined by " ↔ " from apply-preview.ts.
-    const endpoints = parseLinkTitle(item.title);
-    if (!endpoints) return null;
+    // topology add-link ↔ remove-link.
+    //
+    // For add-link items the preview title is "a:if ↔ z:if" — both
+    // endpoints are encoded, so we parse the title.
+    //
+    // For remove-link items the preview title is just "device:iface"
+    // (the queued endpoint the operator clicked); the OTHER endpoint
+    // is supplied via item.preBody = {a, z} captured at apply-preview
+    // time from the topology (slice #175.C.1 polish).
     if (item.effect === "create") {
-      // Remove takes (device, iface) of one endpoint. Newtron's delete
-      // endpoint matches a link by either endpoint, so the A side is
-      // sufficient. apply-preview.ts encodes the A endpoint first in
-      // the title "a:if ↔ z:if".
+      const endpoints = parseLinkTitle(item.title);
+      if (!endpoints) return null;
+      // Remove takes (device, iface) of one endpoint. Newtron's
+      // delete endpoint matches a link by either endpoint, so the A
+      // side is sufficient.
       const { aDev, aIf } = endpoints;
       return { id, group: "topology", op: "remove-link", device: aDev, iface: aIf };
     }
     if (item.effect === "delete") {
-      // Re-create the link by re-supplying both endpoints. We don't
-      // need preBody — the title carries everything.
-      return { id, group: "topology", op: "add-link", a: endpoints.a, z: endpoints.z };
+      // Use cached endpoints from preBody when present (the
+      // shell.ts capture extracts them from the topology before the
+      // queue runs).
+      if (item.preBody && typeof item.preBody.a === "string" && typeof item.preBody.z === "string") {
+        return { id, group: "topology", op: "add-link", a: item.preBody.a, z: item.preBody.z };
+      }
+      // Fallback: the title MAY carry both endpoints if some future
+      // caller starts emitting that shape — parse as a last resort.
+      const endpoints = parseLinkTitle(item.title);
+      if (endpoints) {
+        return { id, group: "topology", op: "add-link", a: endpoints.a, z: endpoints.z };
+      }
+      return null;
     }
   }
   return null;
