@@ -75,17 +75,22 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 	// Per-spec detail endpoints. URL pattern: /api/networks/{netID}/{kind}/{name}.
 	// {kind} is the same plural form used in the list endpoints; {name} is the
 	// spec instance name. Returns the full newtron payload verbatim.
-	for _, kind := range []struct{ url, newtronKind string }{
-		{"services", "service"},
-		{"ipvpns", "ipvpn"},
-		{"macvpns", "macvpn"},
-		{"qos-policies", "qos-policy"},
-		{"filters", "filter"},
-		{"prefix-lists", "prefix-list"},
-		{"route-policies", "route-policy"},
-		{"profiles", "profile"},
-		{"zones", "zone"},
-		{"platforms", "platform"},
+	//
+	// upstreamKind is the URL segment newtron itself serves under — usually
+	// equal to url, but `profiles` maps to newtron's `nodes/` after
+	// newtron PR #206 (2026-06-17). Newtcon-internal callers still address
+	// these as "profiles" so the SpecKind enum + frontend tabs don't shift.
+	for _, kind := range []struct{ url, newtronKind, upstreamKind string }{
+		{"services", "service", "services"},
+		{"ipvpns", "ipvpn", "ipvpns"},
+		{"macvpns", "macvpn", "macvpns"},
+		{"qos-policies", "qos-policy", "qos-policies"},
+		{"filters", "filter", "filters"},
+		{"prefix-lists", "prefix-list", "prefix-lists"},
+		{"route-policies", "route-policy", "route-policies"},
+		{"profiles", "profile", "nodes"},
+		{"zones", "zone", "zones"},
+		{"platforms", "platform", "platforms"},
 	} {
 		k := kind // capture for closure
 		path := "/api/networks/{netID}/" + k.url + "/{name}"
@@ -93,14 +98,7 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 			ctx := r.Context()
 			netID := r.PathValue("netID")
 			name := r.PathValue("name")
-			// newtron's per-spec detail route is plural (matches the list
-			// path one level up: GET /networks/{n}/profiles/{name}, not
-			// /profile/{name}). Pass k.url (plural) not k.newtronKind
-			// (singular, which is the create-/delete- verb suffix).
-			// Pre-PR every detail GET 404'd silently — k.newtronKind
-			// produced /newtron/v1/networks/{n}/profile/{name} which
-			// newtron's mux doesn't recognise.
-			payload, err := c.ShowSpec(ctx, netID, k.url, name)
+			payload, err := c.ShowSpec(ctx, netID, k.upstreamKind, name)
 			if err != nil {
 				writeUpstreamError(w, cid(ctx), err,
 					k.newtronKind+" "+name+" at /api/networks/"+netID+"/"+k.url+"/"+name, nil)

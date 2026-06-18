@@ -150,9 +150,13 @@ type networkEntry struct {
 // NetworkInfo mirrors newtron's per-network record returned by GET
 // /newtron/v1/networks. Exposed by Client.ListNetworksDetail and surfaced
 // by newtcon-server's GET /api/networks for the topology-switcher UI.
+//
+// Wire field renamed spec_dir → dir per newtron PR #208 (2026-06-17): the
+// directory IS the network root after the layout collapse, so the old name
+// lied about the data model.
 type NetworkInfo struct {
 	ID          string   `json:"id"`
-	SpecDir     string   `json:"spec_dir"`
+	Dir         string   `json:"dir"`
 	HasTopology bool     `json:"has_topology"`
 	Topology    string   `json:"topology"`
 	Nodes       []string `json:"nodes"`
@@ -296,17 +300,20 @@ func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
 // RegisterNetwork registers a network with newtron. Mirrors the wire shape
 // documented in newtron's docs/newtron/api.md §POST /newtron/v1/networks:
 //
-//	{"id":..., "spec_dir":..., "scaffold":..., "description":...}
+//	{"id":..., "dir":..., "scaffold":..., "description":...}
 //
-// When scaffold=false (the default), the spec_dir must already contain a
-// valid spec layout and newtron loads it as-is. When scaffold=true, newtron
-// creates an empty spec layout at spec_dir (three zero-valued spec files and
-// an empty profiles/ subdirectory) before registering. description is only
-// consulted on scaffold=true and seeds topology.json's description field.
+// When scaffold=false (the default), `dir` must already contain a valid
+// network layout and newtron loads it as-is. When scaffold=true, newtron
+// creates an empty spec layout at `dir` (zero-valued network.json + the
+// nodes/ subdirectory) before registering. description is only consulted on
+// scaffold=true and seeds topology.json's description field.
+//
+// Wire field renamed spec_dir → dir per newtron PR #208 (2026-06-17):
+// after the layout collapse, the directory IS the network root.
 //
 // Error mapping (newtron docs api.md §Status codes):
 //
-//	400 → *ValidationError (missing id/spec_dir or invalid JSON)
+//	400 → *ValidationError (missing id/dir or invalid JSON)
 //	409 → *ConflictError   (id already registered OR scaffold-into-initialized-dir)
 //	5xx → *UnavailableError (spec directory load error)
 //
@@ -315,10 +322,10 @@ func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
 // distinguishing message from newtron.
 //
 // Returns the network ID newtron acknowledged.
-func (c *Client) RegisterNetwork(ctx context.Context, id, specDir string, scaffold bool, description string) (string, error) {
+func (c *Client) RegisterNetwork(ctx context.Context, id, dir string, scaffold bool, description string) (string, error) {
 	body := map[string]any{
-		"id":       id,
-		"spec_dir": specDir,
+		"id":  id,
+		"dir": dir,
 	}
 	if scaffold {
 		body["scaffold"] = true

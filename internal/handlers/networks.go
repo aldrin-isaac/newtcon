@@ -48,7 +48,7 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
 			ID          string `json:"id"`
-			SpecDir     string `json:"spec_dir"`
+			Dir         string `json:"dir"`
 			Scaffold    bool   `json:"scaffold,omitempty"`
 			Description string `json:"description,omitempty"`
 		}
@@ -58,13 +58,13 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 				"POST /api/networks", nil)
 			return
 		}
-		if req.ID == "" || req.SpecDir == "" {
+		if req.ID == "" || req.Dir == "" {
 			writeUpstreamError(w, correlationID(r.Context()),
-				&newtronc.ValidationError{Body: []byte("id and spec_dir are required")},
+				&newtronc.ValidationError{Body: []byte("id and dir are required")},
 				"POST /api/networks", nil)
 			return
 		}
-		id, err := c.RegisterNetwork(r.Context(), req.ID, req.SpecDir, req.Scaffold, req.Description)
+		id, err := c.RegisterNetwork(r.Context(), req.ID, req.Dir, req.Scaffold, req.Description)
 		if err != nil {
 			writeUpstreamError(w, correlationID(r.Context()), err, "POST /api/networks", nil)
 			return

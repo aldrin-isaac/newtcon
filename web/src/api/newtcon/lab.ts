@@ -28,10 +28,12 @@ export interface NodeState {
 }
 
 // LabState mirrors pkg/newtlab/state.go LabState.
+// `spec_dir` → `dir` per newtron PR #208 (2026-06-17): after the layout
+// collapse the directory IS the network root, so the old name lied.
 export interface LabState {
   name: string;
   created: string;    // RFC3339
-  spec_dir: string;
+  dir: string;
   nodes: Record<string, NodeState>;
 }
 
