@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   composeUpdateBody,
+  computeReorderSeq,
   extractRowCells,
   getSubRuleItems,
   itemKey,
@@ -174,5 +175,52 @@ describe("composeUpdateBody() — slice #173.B", () => {
       "object", undefined, "ignored",
     );
     assert.deepEqual(body, { something: "value" });
+  });
+});
+
+describe("computeReorderSeq() — slice #173.C", () => {
+  test("up from middle uses midpoint of gap with prev-prev neighbour", () => {
+    // Rows at 10, 20, 30. Moving the 30-row up should land BETWEEN
+    // 10 and 20 → midpoint 15.
+    assert.equal(computeReorderSeq([10, 20, 30], 30, "up"), 15);
+  });
+
+  test("up from second row (no prev-prev) uses prev - 1", () => {
+    assert.equal(computeReorderSeq([10, 20], 20, "up"), 9);
+  });
+
+  test("up from first row → null (already at top)", () => {
+    assert.equal(computeReorderSeq([10, 20], 10, "up"), null);
+  });
+
+  test("up from second row with prev == 1 → null (no room)", () => {
+    assert.equal(computeReorderSeq([1, 20], 20, "up"), null);
+  });
+
+  test("down from middle uses midpoint with next-next", () => {
+    assert.equal(computeReorderSeq([10, 20, 30], 10, "down"), 25);
+  });
+
+  test("down from second-to-last → next + 10 (gappy step)", () => {
+    assert.equal(computeReorderSeq([10, 20], 10, "down"), 30);
+  });
+
+  test("down from last row → null", () => {
+    assert.equal(computeReorderSeq([10, 20], 20, "down"), null);
+  });
+
+  test("no integer between consecutive neighbours → null (operator must renumber)", () => {
+    // Rows at 10, 11, 12. Moving 12 up should land between 10 and 11,
+    // but there's no integer there.
+    assert.equal(computeReorderSeq([10, 11, 12], 12, "up"), null);
+  });
+
+  test("seq not in list → null (defensive)", () => {
+    assert.equal(computeReorderSeq([10, 20], 999, "up"), null);
+  });
+
+  test("single-row list → null in both directions", () => {
+    assert.equal(computeReorderSeq([10], 10, "up"), null);
+    assert.equal(computeReorderSeq([10], 10, "down"), null);
   });
 });

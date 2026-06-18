@@ -72,6 +72,61 @@ export function itemKey(
 }
 
 /**
+ * computeReorderSeq (slice #173.C) — given the sorted seq list of the
+ * current rows and the seq of the row the operator wants to move,
+ * returns the target `new_seq` value that puts that row immediately
+ * BEFORE / AFTER its neighbour.
+ *
+ * Strategy: midpoint-of-gap. With the common operator convention of
+ * gappy seqs (10, 20, 30), there's room for new_seq = 15 to land
+ * between 10 and 20. Honest about the failure mode: when neighbours
+ * are consecutive (no integer between them), or the target is already
+ * at the boundary, return null — the caller suppresses the button or
+ * surfaces a "no room to reorder; renumber via Edit" message.
+ *
+ * Returns null when:
+ *
+ *   - currentSeq is not in sortedSeqs (caller bug)
+ *   - direction is "up" and currentSeq is already first
+ *   - direction is "down" and currentSeq is already last
+ *   - the gap between neighbours leaves no integer slot
+ */
+export function computeReorderSeq(
+  sortedSeqs: readonly number[],
+  currentSeq: number,
+  direction: "up" | "down",
+): number | null {
+  const idx = sortedSeqs.indexOf(currentSeq);
+  if (idx < 0) return null;
+  if (direction === "up") {
+    if (idx === 0) return null; // already at top
+    const prev = sortedSeqs[idx - 1]!;
+    if (idx === 1) {
+      // Moving to top — pick any integer < prev. Use prev - 1 when prev > 1,
+      // else there's no room (seq 1 is the absolute floor in newtron).
+      return prev > 1 ? prev - 1 : null;
+    }
+    const prevPrev = sortedSeqs[idx - 2]!;
+    return midpoint(prevPrev, prev);
+  }
+  // down
+  if (idx === sortedSeqs.length - 1) return null; // already at bottom
+  const next = sortedSeqs[idx + 1]!;
+  if (idx === sortedSeqs.length - 2) {
+    // Moving to bottom — any integer > next. Step of 10 matches the
+    // gappy-seq operator convention; collision falls back to validation.
+    return next + 10;
+  }
+  const nextNext = sortedSeqs[idx + 2]!;
+  return midpoint(next, nextNext);
+}
+
+function midpoint(a: number, b: number): number | null {
+  if (b - a < 2) return null; // no integer between a and b
+  return Math.floor((a + b) / 2);
+}
+
+/**
  * composeUpdateBody (slice #173.B) — turns form-output values into the
  * body shape newtron's update-<sub-rule> verbs expect.
  *
