@@ -87,6 +87,7 @@ import {
   type SubRuleColumn,
   type SubRuleItemType,
   composeUpdateBody,
+  computeReorderSeq,
   extractRowCells,
   getSubRuleItems,
   itemKey,
@@ -468,6 +469,14 @@ interface SubRuleTable {
   keyField?: string;
   columns: SubRuleColumn[];
   addFields: FieldDef[];
+  /**
+   * When true, ↑/↓ reorder buttons appear in the per-row actions
+   * (slice #173.C). Set for sequence-ordered kinds (filter rules,
+   * route-policy rules) where reorder is operator-meaningful.
+   * NOT set for qos-policies (queue_id is hardware-meaningful, not
+   * an arbitrary order) or prefix-lists (unordered set).
+   */
+  reorderable?: boolean;
 }
 
 const subRuleTables: Partial<Record<SpecKind, SubRuleTable>> = {
@@ -507,6 +516,7 @@ const subRuleTables: Partial<Record<SpecKind, SubRuleTable>> = {
     itemLabel: "rule",
     itemType: "object",
     keyField: "seq",
+    reorderable: true,
     columns: [
       { field: "seq",       label: "Seq" },
       { field: "action",    label: "Action" },
@@ -566,6 +576,7 @@ const subRuleTables: Partial<Record<SpecKind, SubRuleTable>> = {
     itemLabel: "rule",
     itemType: "object",
     keyField: "seq",
+    reorderable: true,
     columns: [
       { field: "seq",         label: "Seq" },
       { field: "action",      label: "Action" },
@@ -1095,8 +1106,14 @@ function renderSubRuleTable(
     emptyRow.appendChild(cell);
     tbody.appendChild(emptyRow);
   } else {
+    // For reorderable kinds (slice #173.C), compute the sorted seq list
+    // once and pass to each row so its ↑/↓ buttons know what value to
+    // request as new_seq.
+    const sortedSeqs = conf.reorderable && conf.keyField
+      ? collectSortedSeqs(items, conf.keyField)
+      : null;
     for (const item of items) {
-      tbody.appendChild(renderSubRuleRow(kind, specName, item, conf));
+      tbody.appendChild(renderSubRuleRow(kind, specName, item, conf, sortedSeqs));
     }
   }
   table.appendChild(tbody);
@@ -1113,6 +1130,7 @@ function renderSubRuleRow(
   specName: string,
   item: unknown,
   conf: SubRuleTable,
+  sortedSeqs: readonly number[] | null,
 ): HTMLElement {
   const row = el("tr", { className: "subrule-row" });
   const cells = extractRowCells(item, conf.columns, conf.itemType);
@@ -1128,6 +1146,13 @@ function renderSubRuleRow(
   const actionsCell = el("td", { className: "subrule-td subrule-td--actions" });
   const key = itemKey(item, conf.itemType, conf.keyField);
   if (key !== null) {
+    // Reorder buttons (slice #173.C) — only for reorderable kinds with
+    // sortedSeqs computed at the table level. Computes a target new_seq
+    // via midpoint-of-gap heuristic; null result disables the button.
+    if (conf.reorderable && sortedSeqs && typeof key === "number") {
+      actionsCell.appendChild(makeReorderBtn(kind, specName, conf, key, sortedSeqs, "up"));
+      actionsCell.appendChild(makeReorderBtn(kind, specName, conf, key, sortedSeqs, "down"));
+    }
     // Edit button (slice #173.B). Swaps the row for an inline edit
     // form prefilled with the item's current values. Reuses
     // conf.addFields so add + edit stay shape-aligned.
@@ -1338,6 +1363,69 @@ function updateSubRuleItem(
 
 // composeUpdateBody is imported from ./subrule-table.js — pure helper
 // so it can be unit-tested independently of the DOM-bound renderer.
+
+// collectSortedSeqs (slice #173.C) — extracts the sequence-key values
+// from a sub-rule item list and returns them sorted ascending. Skips
+// items whose key isn't a number (defensive; current schemas only
+// have integer seq/queue_id).
+function collectSortedSeqs(items: readonly unknown[], keyField: string): number[] {
+  const out: number[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const v = (item as Record<string, unknown>)[keyField];
+    if (typeof v === "number") out.push(v);
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+// makeReorderBtn (slice #173.C) — builds a ↑ or ↓ button for one row.
+// Click computes the target new_seq via computeReorderSeq and fires the
+// update verb. When the heuristic returns null (already at top/bottom,
+// or no integer gap), the button is disabled with an explanatory title
+// so the operator knows why and what to do (renumber via Edit).
+function makeReorderBtn(
+  kind: SpecKind,
+  specName: string,
+  conf: SubRuleTable,
+  currentSeq: number,
+  sortedSeqs: readonly number[],
+  direction: "up" | "down",
+): HTMLButtonElement {
+  const target = computeReorderSeq(sortedSeqs, currentSeq, direction);
+  const arrow = direction === "up" ? "↑" : "↓";
+  const btn = el("button", {
+    type: "button",
+    className: "subrule-reorder-btn",
+  }, arrow) as HTMLButtonElement;
+  if (target === null) {
+    btn.disabled = true;
+    btn.title = direction === "up"
+      ? "Can't move up (already at top, or no room — renumber via Edit)"
+      : "Can't move down (already at bottom, or no room — renumber via Edit)";
+    return btn;
+  }
+  btn.title = `Move ${direction} (new seq ${target})`;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      // The keyField is the rename target; the URL identifies the row
+      // by currentSeq. composeUpdateBody handles the new_<keyField>
+      // translation: we feed it values where keyField=target so it
+      // detects the change.
+      const body = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
+      await updateSubRuleItem(kind, specName, currentSeq, body, conf);
+      openDetail(kind, kindTitleFor(kind), specName);
+    } catch (err) {
+      btn.disabled = false;
+      const msg = err instanceof ApiError
+        ? translateErrorKind(err.kind) + ": " + err.message
+        : String(err);
+      alert("Reorder failed: " + msg);
+    }
+  });
+  return btn;
+}
 
 // pluralize handles the singular item labels in subRuleTables — all
 // English-regular except "prefix" → "prefixes".
