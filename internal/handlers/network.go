@@ -407,4 +407,148 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 	}))
+
+	// ---- Sub-rule UPDATE (slice #173.B) ------------------------------------
+	// Per-item in-place edit + reorder for the four sub-rule families.
+	// Newtron PRs #215/216/217/222 ship the update-<sub-rule> verbs;
+	// these handlers wrap them with a RESTful PUT shape:
+	//
+	//   PUT /api/networks/{netID}/qos-policies/{name}/queues/{queue_id}
+	//   PUT /api/networks/{netID}/filters/{name}/rules/{seq}
+	//   PUT /api/networks/{netID}/route-policies/{name}/rules/{seq}
+	//   PUT /api/networks/{netID}/prefix-lists/{name}/entries/{prefix...}
+	//
+	// Identifier + parent name are taken from the URL path and injected
+	// into the body before forwarding to newtron's update-<X> verb,
+	// which expects them in the request body. The body may carry a
+	// renumber field (new_seq / new_queue_id / new_prefix) — passed
+	// through unchanged.
+
+	mux.Handle("PUT /api/networks/{netID}/qos-policies/{name}/queues/{queue_id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		policy := r.PathValue("name")
+		qidStr := r.PathValue("queue_id")
+		qid, err := strconv.Atoi(qidStr)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"queue_id must be an integer: "+qidStr, nil)
+			return
+		}
+		body := readJSONBodyAsMap(w, r)
+		if body == nil {
+			return
+		}
+		body["policy"] = policy
+		body["queue_id"] = qid
+		result, err := c.UpdateQoSQueue(ctx, netID, body)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/qos-policies/"+policy+"/queues/"+qidStr, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result)
+	}))
+
+	mux.Handle("PUT /api/networks/{netID}/filters/{name}/rules/{seq}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		filter := r.PathValue("name")
+		seqStr := r.PathValue("seq")
+		seq, err := strconv.Atoi(seqStr)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"seq must be an integer: "+seqStr, nil)
+			return
+		}
+		body := readJSONBodyAsMap(w, r)
+		if body == nil {
+			return
+		}
+		body["filter"] = filter
+		body["seq"] = seq
+		result, err := c.UpdateFilterRule(ctx, netID, body)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/filters/"+filter+"/rules/"+seqStr, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result)
+	}))
+
+	mux.Handle("PUT /api/networks/{netID}/route-policies/{name}/rules/{seq}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		policy := r.PathValue("name")
+		seqStr := r.PathValue("seq")
+		seq, err := strconv.Atoi(seqStr)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"seq must be an integer: "+seqStr, nil)
+			return
+		}
+		body := readJSONBodyAsMap(w, r)
+		if body == nil {
+			return
+		}
+		body["policy"] = policy
+		body["seq"] = seq
+		result, err := c.UpdateRoutePolicyRule(ctx, netID, body)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/route-policies/"+policy+"/rules/"+seqStr, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result)
+	}))
+
+	mux.Handle("PUT /api/networks/{netID}/prefix-lists/{name}/entries/{prefix...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		list := r.PathValue("name")
+		prefix := r.PathValue("prefix")
+		body := readJSONBodyAsMap(w, r)
+		if body == nil {
+			return
+		}
+		body["prefix_list"] = list
+		body["prefix"] = prefix
+		// new_prefix is REQUIRED by newtron (a prefix-list entry has no
+		// other mutable surface). Caller must supply it in the body —
+		// newtron's 400 will surface naturally if missing.
+		result, err := c.UpdatePrefixListEntry(ctx, netID, body)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/prefix-lists/"+list+"/entries/"+prefix, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result)
+	}))
+}
+
+// readJSONBodyAsMap reads + parses an HTTP request body as a JSON
+// object. On error (read failure, malformed JSON, or non-object root)
+// it writes a 400 validation_failure response and returns nil so the
+// caller can early-return.
+func readJSONBodyAsMap(w http.ResponseWriter, r *http.Request) map[string]any {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+			"reading request body: "+err.Error(), nil)
+		return nil
+	}
+	if len(body) == 0 {
+		return map[string]any{}
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+			"invalid JSON: "+err.Error(), nil)
+		return nil
+	}
+	return decoded
 }

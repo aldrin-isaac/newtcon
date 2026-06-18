@@ -31,6 +31,24 @@ export interface PendingPreview {
   danger: boolean;
   /** Detail body for the expand-on-demand panel; null when nothing to show. */
   body: Record<string, unknown> | null;
+  /**
+   * For "device action" + "interface action" items only: the underlying
+   * newtron RPC subpath (e.g. "apply-service", "configure-interface").
+   * Needed by the undo planner to compose the inverse RPC (slice #175.C.2).
+   * Absent for spec + topology items.
+   */
+  actionId?: string;
+  /**
+   * For action items only: the device the action targets. Same purpose as
+   * actionId above — the inverse RPC needs to know which device the call
+   * went to. Absent for spec + topology items.
+   */
+  device?: string;
+  /**
+   * For "interface action" items only: the interface name. Required to
+   * compose the inverse RPC URL.
+   */
+  iface?: string;
 }
 
 export interface ApplyPreview {
@@ -129,6 +147,7 @@ function toPreview(p: Pending): PendingPreview {
       id: p.id, effect: "action", kind: "device action",
       title: p.label, scope: p.device,
       danger: p.danger === true, body: p.body,
+      actionId: p.actionId, device: p.device,
     };
   }
   if (p.group === "interface" && p.op === "action") {
@@ -136,6 +155,7 @@ function toPreview(p: Pending): PendingPreview {
       id: p.id, effect: "action", kind: "interface action",
       title: p.label, scope: `${p.device}:${p.iface}`,
       danger: p.danger === true, body: p.body,
+      actionId: p.actionId, device: p.device, iface: p.iface,
     };
   }
   // Defensive fallback — keeps the preview rendering honest when the

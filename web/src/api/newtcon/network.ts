@@ -88,6 +88,38 @@ export async function removeRoutePolicyRule(name: string, seq: number, network?:
   return apiSend(pathFor(`route-policies/${encodeURIComponent(name)}/rules/${seq}`, network), "DELETE");
 }
 
+// ----------------------------------------------------------------------
+// Per-item sub-rule UPDATE (slice #173.B)
+// ----------------------------------------------------------------------
+// Wraps newtron's update-<sub-rule> verbs (PRs #215/216/217/222) with a
+// PUT-to-identified-resource shape. The body carries the new field
+// values plus an optional renumber field (new_seq / new_queue_id) — or
+// the required new_prefix for prefix-list entries.
+
+export async function updateQoSQueue(
+  name: string, queueId: number, body: Record<string, unknown>, network?: string,
+): Promise<unknown> {
+  return apiSend(pathFor(`qos-policies/${encodeURIComponent(name)}/queues/${queueId}`, network), "PUT", body);
+}
+
+export async function updateFilterRule(
+  name: string, seq: number, body: Record<string, unknown>, network?: string,
+): Promise<unknown> {
+  return apiSend(pathFor(`filters/${encodeURIComponent(name)}/rules/${seq}`, network), "PUT", body);
+}
+
+export async function updateRoutePolicyRule(
+  name: string, seq: number, body: Record<string, unknown>, network?: string,
+): Promise<unknown> {
+  return apiSend(pathFor(`route-policies/${encodeURIComponent(name)}/rules/${seq}`, network), "PUT", body);
+}
+
+export async function updatePrefixListEntry(
+  name: string, prefix: string, body: Record<string, unknown>, network?: string,
+): Promise<unknown> {
+  return apiSend(pathFor(`prefix-lists/${encodeURIComponent(name)}/entries/${encodeURIComponent(prefix)}`, network), "PUT", body);
+}
+
 // ============================================================================
 // List endpoints
 // ============================================================================

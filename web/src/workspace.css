@@ -716,8 +716,16 @@
 .subrule-td--empty { font-family: var(--font-system); text-align: center; padding: var(--space-sm); }
 .subrule-td--actions { text-align: right; width: 32px; }
 .subrule-empty-cell { color: var(--color-text-muted); }
+.subrule-edit-btn { background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px 6px; font-size: var(--text-sm); line-height: 1; border-radius: var(--radius-sm); margin-right: 2px; }
+.subrule-edit-btn:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 .subrule-delete-btn { background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px 6px; font-size: var(--text-md); line-height: 1; border-radius: var(--radius-sm); }
 .subrule-delete-btn:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+/* Inline-edit row (slice #173.B) — replaces the read-only row when
+ * the operator clicks the Edit pencil. Cell colspans the full table
+ * and hosts the prefilled buildFormFields form. */
+.subrule-row--editing { background: var(--color-surface-sunken); }
+.subrule-td--edit-cell { padding: var(--space-sm); }
+.subrule-td--actions { white-space: nowrap; text-align: right; }
 
 .subrule-add { margin-top: var(--space-sm); }
 .subrule-add-btn {

@@ -138,21 +138,44 @@ describe("planUndo() — topology link ops", () => {
   });
 });
 
-describe("planUndo() — device/interface actions", () => {
-  test("device.action → skipped with manual-reconfig reason", () => {
+describe("planUndo() — device/interface actions (175.C.2)", () => {
+  test("device.action with no actionId-inverse mapping → skipped with actionId in reason", () => {
     const plan = planUndo(entry([
-      { id: "5", effect: "action", kind: "device action", title: "create-vlan", scope: "r1", danger: false, outcome: "applied", undoable: false },
+      { id: "5", effect: "action", kind: "device action", title: "create-vlan", scope: "r1", danger: false, outcome: "applied", undoable: false, actionId: "create-vlan" },
     ]), idGen);
     assert.equal(plan.counts.skipped, 1);
-    assert.ok(plan.items[0].reason && /manual reconfiguration/.test(plan.items[0].reason));
+    assert.ok(plan.items[0].reason && /create-vlan/.test(plan.items[0].reason),
+      "skip reason should name the unmapped actionId so the operator knows what to ask for");
   });
 
-  test("interface.action → skipped same as device.action", () => {
+  test("interface.action with no actionId-inverse mapping → skipped same way", () => {
     const plan = planUndo(entry([
-      { id: "6", effect: "action", kind: "interface action", title: "set-mtu", scope: "r1:eth0", danger: false, outcome: "applied", undoable: false },
+      { id: "6", effect: "action", kind: "interface action", title: "set-mtu", scope: "r1:eth0", danger: false, outcome: "applied", undoable: false, actionId: "configure-interface", device: "r1", iface: "eth0" },
     ]), idGen);
     assert.equal(plan.items[0].planned, false);
-    assert.ok(plan.items[0].reason);
+    assert.ok(plan.items[0].reason && /configure-interface/.test(plan.items[0].reason));
+  });
+
+  test("apply-service → remove-service with no body (slice 175.C.2.a)", () => {
+    const plan = planUndo(entry([
+      { id: "7", effect: "action", kind: "interface action", title: "Bind service", scope: "r1:eth0", danger: false, outcome: "applied", undoable: true, actionId: "apply-service", device: "r1", iface: "eth0", body: { service: "svc-x" } },
+    ]), idGen);
+    assert.equal(plan.counts.planned, 1);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.group, "interface");
+    assert.equal(inv.op, "action");
+    assert.equal(inv.actionId, "remove-service");
+    assert.equal(inv.device, "r1");
+    assert.equal(inv.iface, "eth0");
+    assert.deepEqual(inv.body, {});
+    assert.equal(inv.danger, true);
+  });
+
+  test("apply-service without device/iface → skipped (defensive)", () => {
+    const plan = planUndo(entry([
+      { id: "7", effect: "action", kind: "interface action", title: "Bind service", scope: "?", danger: false, outcome: "applied", undoable: true, actionId: "apply-service" },
+    ]), idGen);
+    assert.equal(plan.counts.skipped, 1);
   });
 });
 

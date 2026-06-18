@@ -70,3 +70,42 @@ export function itemKey(
   if (typeof v === "string" || typeof v === "number") return v;
   return null;
 }
+
+/**
+ * composeUpdateBody (slice #173.B) — turns form-output values into the
+ * body shape newtron's update-<sub-rule> verbs expect.
+ *
+ * Rules:
+ *
+ *   itemType "string" (prefix-list entries):
+ *     Always send `new_prefix` — newtron requires it (PR #222), and
+ *     the no-change case is idempotent.
+ *
+ *   itemType "object" with keyField:
+ *     Drop the keyField from the body (the URL path identifies the
+ *     row). If the form value for the keyField DIFFERS from
+ *     originalKey, that's a renumber request — translate to
+ *     `new_<keyField>` (newtron PR #215/216/217).
+ *
+ *   itemType "object" without keyField:
+ *     Send the body verbatim. Defensive — no current kinds.
+ */
+export function composeUpdateBody(
+  values: Record<string, unknown>,
+  itemType: SubRuleItemType,
+  keyField: string | undefined,
+  originalKey: string | number,
+): Record<string, unknown> {
+  if (itemType === "string") {
+    return { new_prefix: String(values["prefix"] ?? "") };
+  }
+  const body: Record<string, unknown> = { ...values };
+  if (keyField) {
+    const formKey = body[keyField];
+    if (formKey !== undefined && String(formKey) !== String(originalKey)) {
+      body["new_" + keyField] = formKey;
+    }
+    delete body[keyField];
+  }
+  return body;
+}

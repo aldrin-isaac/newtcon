@@ -18,6 +18,8 @@ import {
 import { activeNetwork } from "./network-switcher.js";
 import { planUndo, type UndoPlan } from "./undo-plan.js";
 import {
+  enqueueDeviceAction,
+  enqueueInterfaceAction,
   enqueueSpecCreate,
   enqueueSpecDelete,
   enqueueTopologyAddDevice,
@@ -136,6 +138,12 @@ function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
       } else if (inv.group === "topology" && inv.op === "remove-link") {
         enqueueTopologyRemoveLink(inv.device, inv.iface);
         queuedNames.push(`− link ${inv.device}:${inv.iface}`);
+      } else if (inv.group === "device" && inv.op === "action") {
+        enqueueDeviceAction(inv.device, inv.actionId, inv.label, inv.body, inv.danger);
+        queuedNames.push(`${inv.device}: ${inv.label}`);
+      } else if (inv.group === "interface" && inv.op === "action") {
+        enqueueInterfaceAction(inv.device, inv.iface, inv.actionId, inv.label, inv.body, inv.danger);
+        queuedNames.push(`${inv.device}:${inv.iface}: ${inv.label}`);
       }
     }
     btn.setAttribute("disabled", "");
@@ -186,7 +194,10 @@ function renderItem(item: HistoryItem): HTMLElement {
 
 function itemUndoSkipReason(item: HistoryItem): string {
   if (item.kind === "device action" || item.kind === "interface action") {
-    return "Not undoable — device/interface actions need manual reconfiguration.";
+    if (item.actionId) {
+      return "Not undoable — no inverse mapping for actionId '" + item.actionId + "' yet.";
+    }
+    return "Not undoable — action kind not yet supported.";
   }
   if (item.effect === "delete" && item.preBody === undefined) {
     return "Not undoable — pre-apply body wasn't captured.";

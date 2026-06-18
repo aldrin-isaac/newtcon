@@ -5,6 +5,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  composeUpdateBody,
   extractRowCells,
   getSubRuleItems,
   itemKey,
@@ -111,5 +112,67 @@ describe("itemKey() — string items", () => {
 
   test("non-string item → null", () => {
     assert.equal(itemKey(42, "string"), null);
+  });
+});
+
+describe("composeUpdateBody() — slice #173.B", () => {
+  test("string itemType always emits new_prefix (newtron requires it; idempotent on no-change)", () => {
+    const body = composeUpdateBody({ prefix: "10.0.0.0/24" }, "string", undefined, "10.0.0.0/8");
+    assert.deepEqual(body, { new_prefix: "10.0.0.0/24" });
+  });
+
+  test("string itemType emits new_prefix even when prefix matches original (idempotent)", () => {
+    const body = composeUpdateBody({ prefix: "10.0.0.0/8" }, "string", undefined, "10.0.0.0/8");
+    assert.deepEqual(body, { new_prefix: "10.0.0.0/8" });
+  });
+
+  test("string itemType with missing field emits empty new_prefix", () => {
+    // Defensive — real form would have validated required first.
+    const body = composeUpdateBody({}, "string", undefined, "old");
+    assert.deepEqual(body, { new_prefix: "" });
+  });
+
+  test("object itemType drops keyField when value unchanged (URL identifies the row)", () => {
+    const body = composeUpdateBody(
+      { seq: 10, action: "permit", src_ip: "10.0.0.0/8" },
+      "object", "seq", 10,
+    );
+    assert.deepEqual(body, { action: "permit", src_ip: "10.0.0.0/8" });
+    assert.equal("seq" in body, false);
+    assert.equal("new_seq" in body, false);
+  });
+
+  test("object itemType translates changed keyField into new_<keyField> (renumber)", () => {
+    const body = composeUpdateBody(
+      { seq: 5, action: "deny" },
+      "object", "seq", 10,
+    );
+    assert.equal(body.new_seq, 5);
+    assert.equal(body.action, "deny");
+    assert.equal("seq" in body, false);
+  });
+
+  test("renumber comparison is string-coerced (10 == '10' counts as no-change)", () => {
+    // Form values come back stringified from text inputs; originalKey
+    // is the unmarshalled number. The comparison must tolerate both.
+    const body = composeUpdateBody({ seq: "10", action: "deny" }, "object", "seq", 10);
+    assert.equal("new_seq" in body, false);
+  });
+
+  test("queue_id renumber emits new_queue_id (per newtron PR #217 wire shape)", () => {
+    const body = composeUpdateBody(
+      { queue_id: 3, name: "q-bulk", type: "wrr", weight: 4 },
+      "object", "queue_id", 2,
+    );
+    assert.equal(body.new_queue_id, 3);
+    assert.equal("queue_id" in body, false);
+  });
+
+  test("object itemType without keyField → body passed verbatim (defensive)", () => {
+    const body = composeUpdateBody(
+      { something: "value" },
+      "object", undefined, "ignored",
+    );
+    assert.deepEqual(body, { something: "value" });
   });
 });
