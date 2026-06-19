@@ -147,6 +147,43 @@ export function resolvePhysicalDevicePalette(
 }
 
 /**
+ * resolveLabStatusText — short textual status for the Lab view's
+ * per-device corner overlay. Returns "" when there's nothing to say
+ * (no lab actuating this device — the absence is communicated by the
+ * blue/spec-only outline already).
+ *
+ * Source: newtlab's NodeState.phase + .status. Phase, when set, IS the
+ * status (booting / bootstrapping / patching) — it's the more
+ * specific signal than .status during a transition.
+ */
+export function resolveLabStatusText(
+  labState: LabState | null,
+  device: string,
+): string {
+  if (!labState) return "";
+  const node = labState.nodes?.[device];
+  if (!node) return "";
+  if (node.phase) return node.phase;
+  return node.status || "";
+}
+
+/**
+ * resolvePhysicalStatusText — short textual status for the Physical
+ * view's per-device corner overlay. Returns "" when probing is still
+ * in flight; "offline" when the probe rejected; "online" or
+ * "online · N drift" when the device responded.
+ */
+export function resolvePhysicalStatusText(
+  online: boolean | undefined,
+  driftCount: number,
+): string {
+  if (online === undefined) return "";
+  if (!online) return "offline";
+  if (driftCount > 0) return `online · ${driftCount} drift`;
+  return "online";
+}
+
+/**
  * resolveLinkPalette — pure: pick the more-attention-worthy state of
  * the two endpoints. Used to color link lines (slice #210.E, subset).
  *

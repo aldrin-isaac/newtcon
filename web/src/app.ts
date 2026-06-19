@@ -105,8 +105,10 @@ import { showToast } from "./toast.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
+  resolveLabStatusText,
   resolveLinkPalette,
   resolvePhysicalDevicePalette,
+  resolvePhysicalStatusText,
 } from "./topology-palette.js";
 import {
   type TopologyViewMode,
@@ -1679,8 +1681,14 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
 // picking which source feeds each device's state.
 type PaletteByDevice = Map<string, PaletteState>;
 
+// StatusTextByDevice — short textual status drawn under each device's
+// rect in lab/physical views. Empty string ("") suppresses the label
+// for that device; missing entries also suppress.
+type StatusTextByDevice = Map<string, string>;
+
 interface TopologyRenderOpts {
   paletteByDevice?: PaletteByDevice;
+  statusTextByDevice?: StatusTextByDevice;
   onNodeClick: (name: string, ev: MouseEvent) => void;
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
@@ -1883,6 +1891,31 @@ function renderTopologySVG(
       });
       typeLabel.textContent = String(node.type);
       g.appendChild(typeLabel);
+    }
+
+    // Corner status text — short textual signal (lab phase / physical
+    // online state) under the rect's bottom-right. Mutually exclusive
+    // with empty / missing entries so Spec view stays text-free.
+    const statusText = opts.statusTextByDevice?.get(node.name) ?? "";
+    if (statusText !== "") {
+      const statusLabel = svgEl("text", {
+        "class": "topo-status-text",
+        "data-status-text": node.name,
+        x: String(pos.cx + NODE_W / 2),
+        y: String(pos.cy + NODE_H / 2 + 12),
+      });
+      statusLabel.textContent = statusText;
+      g.appendChild(statusLabel);
+    } else {
+      // Render a hidden anchor so patchDeviceStatuses can replace it
+      // in place when the status text fills in later (poll tick).
+      const placeholder = svgEl("text", {
+        "class": "topo-status-text topo-status-text--empty",
+        "data-status-text": node.name,
+        x: String(pos.cx + NODE_W / 2),
+        y: String(pos.cy + NODE_H / 2 + 12),
+      });
+      g.appendChild(placeholder);
     }
 
     // Drag-to-reposition wiring. Only active when the caller wired
@@ -3588,6 +3621,12 @@ interface PollArgs {
    */
   rebuildPalette: (labState: LabState | null) => PaletteByDevice;
   /**
+   * rebuildStatusText — called with the freshly-fetched lab state each
+   * tick. The caller resolves the per-view textual status (lab phase
+   * vs. physical online state) and returns the map for the patcher.
+   */
+  rebuildStatusText: (labState: LabState | null) => StatusTextByDevice;
+  /**
    * onLabStateRefresh — lets the mount handler keep its own cached
    * labState ref in sync with what the poll just fetched, so a
    * post-tick view-mode switch resolves the palette against the
@@ -3607,8 +3646,9 @@ function startTopologyPoll(args: PollArgs): void {
       fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name)));
     }
     const palette = args.rebuildPalette(labState);
+    const statusText = args.rebuildStatusText(labState);
     const svg = args.graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
-    if (svg) patchDeviceStatuses(svg, fresh, palette);
+    if (svg) patchDeviceStatuses(svg, fresh, palette, statusText);
   }, 5000);
 }
 
@@ -3623,6 +3663,7 @@ function patchDeviceStatuses(
   svg: SVGSVGElement,
   statuses: Map<string, DeviceStatus>,
   paletteByDevice: PaletteByDevice,
+  statusTextByDevice: StatusTextByDevice,
 ): void {
   for (const [device, status] of statuses) {
     const sel = `g.topo-node[data-device="${CSS.escape(device)}"]`;
@@ -3639,6 +3680,16 @@ function patchDeviceStatuses(
     }
     const title = g.querySelector("g.topo-status-badge > title");
     if (title) title.textContent = `${device}: ${status.state} — ${status.detail}`;
+    // Per-device corner status text (Lab / Physical views). The renderer
+    // mounts an anchor element even when the text is empty so we can
+    // fill it in place on the next poll without re-rendering the SVG.
+    const statusLabel = g.querySelector('text.topo-status-text[data-status-text]');
+    if (statusLabel) {
+      const text = statusTextByDevice.get(device) ?? "";
+      statusLabel.textContent = text;
+      if (text === "") statusLabel.classList.add("topo-status-text--empty");
+      else statusLabel.classList.remove("topo-status-text--empty");
+    }
   }
   // Repaint link lines (slice #210.E subset) — endpoint palette may
   // have shifted on this tick (device went down, drift surfaced, etc.),
@@ -3741,7 +3792,34 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       }
       return m;
     };
+    // Per-device corner status text — Lab view shows the newtlab
+    // phase/status string ("booting", "patching", "running"); Physical
+    // view shows the probe outcome ("offline", "online", "online · 3
+    // drift"); Spec view shows nothing (the absence is the message).
+    const computeStatusTextByDevice = (): StatusTextByDevice => {
+      const m: StatusTextByDevice = new Map<string, string>();
+      for (const name of deviceNames) {
+        let t = "";
+        switch (viewMode) {
+          case "spec":
+            t = "";
+            break;
+          case "spec-lab":
+            t = resolveLabStatusText(labStateRef, name);
+            break;
+          case "spec-physical":
+            t = resolvePhysicalStatusText(
+              onlineByDevice.get(name),
+              driftByDevice.get(name) ?? 0,
+            );
+            break;
+        }
+        m.set(name, t);
+      }
+      return m;
+    };
     let paletteByDevice = computePaletteByDevice();
+    let statusTextByDevice = computeStatusTextByDevice();
 
     // Toolbar — buttons gate by view mode (slice #210 polish): Spec
     // view is the only place that authors the topology spec (create
@@ -3934,10 +4012,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           viewMode = mode;
           saveViewMode(activeNetName, mode);
           paletteByDevice = computePaletteByDevice();
+          statusTextByDevice = computeStatusTextByDevice();
           // View mode change re-renders the chip row (active highlight),
           // the toolbar (different mutation buttons per view), the
-          // graph (palette swap), the panel (hidden in observation
-          // views), and the drift summary (Physical-only).
+          // graph (palette + status-text swap), the panel (hidden in
+          // observation views), and the drift summary (Physical-only).
           renderViewRow();
           renderToolbar();
           selected.clear();
@@ -4101,6 +4180,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         : {};
       const result = renderTopologySVG(topoData, {
         paletteByDevice,
+        statusTextByDevice,
         dimmedNames: dimmed,
         onNodeClick: isSpec
           ? (deviceName, ev) => {
@@ -4247,6 +4327,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         labStateRef = lab;
         paletteByDevice = computePaletteByDevice();
         return paletteByDevice;
+      },
+      rebuildStatusText: () => {
+        statusTextByDevice = computeStatusTextByDevice();
+        return statusTextByDevice;
       },
       onLabStateRefresh: (lab) => {
         labStateRef = lab;
