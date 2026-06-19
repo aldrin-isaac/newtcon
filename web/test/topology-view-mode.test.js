@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 
 import {
   ALL_VIEW_MODES,
-  availableViewModes,
   defaultViewMode,
   loadViewMode,
   saveViewMode,
@@ -96,36 +95,3 @@ describe("defaultViewMode()", () => {
   });
 });
 
-describe("availableViewModes()", () => {
-  test("spec is always available", () => {
-    const set = availableViewModes(null, new Map());
-    assert.ok(set.has("spec"));
-  });
-
-  test("includes spec-lab only when lab has nodes", () => {
-    assert.equal(availableViewModes(null, new Map()).has("spec-lab"), false);
-    assert.equal(
-      availableViewModes({ nodes: { leaf1: {} } }, new Map()).has("spec-lab"),
-      true,
-    );
-  });
-
-  test("includes spec-physical only when at least one online", () => {
-    assert.equal(
-      availableViewModes(null, new Map([["leaf1", false]])).has("spec-physical"),
-      false,
-    );
-    assert.equal(
-      availableViewModes(null, new Map([["leaf1", true]])).has("spec-physical"),
-      true,
-    );
-  });
-
-  test("full house: all three available", () => {
-    const set = availableViewModes(
-      { nodes: { leaf1: { status: "running" } } },
-      new Map([["leaf1", true]]),
-    );
-    assert.deepEqual([...set].sort(), ["spec", "spec-lab", "spec-physical"]);
-  });
-});

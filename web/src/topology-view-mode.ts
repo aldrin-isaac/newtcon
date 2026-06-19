@@ -75,26 +75,6 @@ export function defaultViewMode(
   return "spec";
 }
 
-/** availableViewModes returns the modes the operator can currently
- *  switch to (others render disabled-but-visible so the operator can
- *  see what would be possible when signals arrive). */
-export function availableViewModes(
-  labState: LabState | null,
-  onlineByDevice: ReadonlyMap<string, boolean>,
-): Set<TopologyViewMode> {
-  const out = new Set<TopologyViewMode>(["spec"]);
-  if (labState && labState.nodes && Object.keys(labState.nodes).length > 0) {
-    out.add("spec-lab");
-  }
-  for (const v of onlineByDevice.values()) {
-    if (v === true) {
-      out.add("spec-physical");
-      break;
-    }
-  }
-  return out;
-}
-
 /** viewModeLabel — operator-facing UI text per mode. The spec substrate
  *  is implicit (every view layers on it), so the chip labels just name
  *  the actuation source. */

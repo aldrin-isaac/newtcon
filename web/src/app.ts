@@ -110,7 +110,6 @@ import {
 import {
   type TopologyViewMode,
   ALL_VIEW_MODES,
-  availableViewModes,
   defaultViewMode,
   loadViewMode,
   saveViewMode,
@@ -3857,29 +3856,25 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // View-mode chip row (slice #210.B) — sits above the zone filter
     // row so the operator sees the actuation-source switch as a
     // first-class control. The chip is always mounted (even with one
-    // mode available) because operators need to *see* what views exist
-    // even before signals arrive; unavailable modes render disabled.
+    // mode available). All three chips are always enabled — the
+    // "no actuation signal" condition is communicated by the view
+    // itself (blue spec-only coloring on every element) rather than
+    // by a redundant disabled-chip state.
     const viewRow = el("div", { className: "topology-view-row" });
     root.appendChild(viewRow);
     const renderViewRow = (): void => {
       viewRow.textContent = "";
       const label = el("span", { className: "topology-view-label" }, "View:");
       viewRow.appendChild(label);
-      const available = availableViewModes(labStateRef, onlineByDevice);
       for (const mode of ALL_VIEW_MODES) {
         const isActive = mode === viewMode;
-        const isAvail = available.has(mode);
         const cls = ["topology-view-chip"];
         if (isActive) cls.push("topology-view-chip--active");
-        if (!isAvail) cls.push("topology-view-chip--disabled");
         const chip = el("button", {
           type: "button",
           className: cls.join(" "),
-          title: isAvail
-            ? `Switch to ${viewModeLabel(mode)}`
-            : `${viewModeLabel(mode)} — no signal available`,
+          title: `Switch to ${viewModeLabel(mode)}`,
         }, viewModeLabel(mode)) as HTMLButtonElement;
-        if (!isAvail) chip.disabled = true;
         chip.addEventListener("click", () => {
           if (mode === viewMode) return;
           viewMode = mode;
@@ -4196,10 +4191,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       },
       onLabStateRefresh: (lab) => {
         labStateRef = lab;
-        // Re-render the view chip row when lab availability flips so
-        // the operator can pick a newly-available mode (or sees a
-        // previously available one go disabled).
-        renderViewRow();
       },
     });
 
