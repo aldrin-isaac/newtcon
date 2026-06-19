@@ -878,26 +878,15 @@ async function renderSchemaDrivenCreate(
     }
   }
 
-  // The schema doesn't include the spec's identifier — that's a
-  // newtcon-level concept (the URL identifies the row). Render a
-  // dedicated name input above the schema fields.
-  const wrapper = el("div", { className: "schema-create-wrapper" });
-  const nameRow = el("div", { className: "schema-form-row" });
-  nameRow.appendChild(el("label", { className: "schema-form-label" }, "Name *"));
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.required = true;
-  nameInput.className = "schema-form-input";
-  nameInput.placeholder = `e.g. ${schema.label.toLowerCase().replace(/\s+/g, "-")}-1`;
-  nameRow.appendChild(nameInput);
-  wrapper.appendChild(nameRow);
-
+  // Newtron prepends the identifier field (e.g. `name`) to `fields` as
+  // a synthetic field with `immutable: true`. The schema-form renderer
+  // emits an input for it like any other field, so we render the form
+  // directly with no manual identifier injection.
   const { form, getValues, validate } = await renderSchemaForm({
     schema,
     overrides,
   });
-  wrapper.appendChild(form);
-  content.appendChild(wrapper);
+  content.appendChild(form);
 
   const errorOut = el("div", { className: "form-error-out" });
   content.appendChild(errorOut);
@@ -906,17 +895,18 @@ async function renderSchemaDrivenCreate(
   content.appendChild(submitBtn);
 
   submitBtn.addEventListener("click", () => {
-    if (!nameInput.reportValidity()) return;
     if (!validate()) return;
     errorOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Queued";
     try {
       const values = getValues();
-      const name = nameInput.value.trim();
-      // Inject the name into the body — newtron's create- verbs expect
-      // it there alongside the schema-defined fields.
-      values["name"] = name;
+      // Identifier comes from the schema-rendered field (per newtron's
+      // synthetic prepend). Fall back to other common identifier names
+      // for kinds whose identifier isn't "name" (defensive — schema's
+      // `identifier` field is the authoritative source).
+      const idField = schema.identifier || "name";
+      const name = String(values[idField] ?? "(unnamed)");
       enqueueSpecCreate(kind as StagingSpecKind, name, values);
       const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, submitBtn);
