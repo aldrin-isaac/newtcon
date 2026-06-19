@@ -102,7 +102,7 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
-import { fetchSchema, resolveSlugToKind } from "./api/newtcon/schema.js";
+import { fetchSchema, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
@@ -1425,6 +1425,120 @@ function renderSubRuleAdd(
   formArea.hidden = true;
   wrap.appendChild(formArea);
 
+  // Dynamic dispatch — try the schema path first. resolveSubRuleKind
+  // walks newtron's schema to find the sub-rule kind nested under
+  // this parent (FilterSpec.rules → FilterRule, QoSPolicy.queues →
+  // QoSQueue, prefix-lists → PrefixListEntry via parent_ref). When
+  // it returns a kind, we render schema-driven; otherwise fall back
+  // to conf.addFields. Decision is async — the form area shows a
+  // loading state until resolution completes.
+  const loading = el("p", { className: "status-loading" }, "Loading form…");
+  formArea.appendChild(loading);
+
+  addBtn.addEventListener("click", () => {
+    addBtn.hidden = true;
+    formArea.hidden = false;
+  });
+
+  void (async () => {
+    const subKind = await resolveSubRuleKind(kind).catch(() => null);
+    loading.remove();
+    if (subKind !== null) {
+      await mountSchemaSubRuleAddForm(
+        kind, specName, conf, subKind, formArea, addBtn,
+      );
+    } else {
+      mountLegacySubRuleAddForm(
+        kind, specName, conf, formArea, addBtn,
+      );
+    }
+  })();
+
+  return wrap;
+}
+
+/**
+ * mountSchemaSubRuleAddForm — renders the sub-rule add form from
+ * newtron's schema for the sub-rule kind. parent_ref is injected
+ * into the body at submit time so newtron's add-X verb gets
+ * {<parent_ref>: <parent_name>, ...field_values}.
+ */
+async function mountSchemaSubRuleAddForm(
+  kind: SpecKind,
+  specName: string,
+  conf: SubRuleTable,
+  subKind: string,
+  formArea: HTMLElement,
+  addBtn: HTMLElement,
+): Promise<void> {
+  let schema;
+  try {
+    schema = await fetchSchema(subKind);
+  } catch (err) {
+    formArea.appendChild(el("p", { className: "panel-error" },
+      `Schema for ${subKind} unavailable: ${formatErrorBrief(err)}`));
+    return;
+  }
+  const { form, getValues, validate } = await renderSchemaForm({ schema });
+  formArea.appendChild(form);
+
+  const errOut = el("div", { className: "form-error-out" });
+  formArea.appendChild(errOut);
+
+  const buttons = el("div", { className: "form-button-row" });
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" },
+    "Add " + conf.itemLabel);
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(submitBtn);
+  buttons.appendChild(cancelBtn);
+  formArea.appendChild(buttons);
+
+  cancelBtn.addEventListener("click", () => {
+    formArea.hidden = true;
+    addBtn.hidden = false;
+    errOut.textContent = "";
+  });
+
+  submitBtn.addEventListener("click", async () => {
+    if (!validate()) return;
+    errOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Saving…";
+    try {
+      const values = getValues();
+      if (schema.parent_ref) {
+        // Inject the parent's name into the body using newtron's
+        // declared wire field. No newtcon-side semantic mapping.
+        values[schema.parent_ref] = specName;
+      }
+      await addSubRule(kind, specName, conf.endpoint, values);
+      openDetail(kind, kindTitleFor(kind), specName);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Add " + conf.itemLabel;
+      if (!attachServerValidationToForm(form, err)) {
+        errOut.appendChild(el("p", { className: "panel-error" },
+          err instanceof ApiError
+            ? translateErrorKind(err.kind) + ": " + err.message
+            : String(err)));
+      }
+    }
+  });
+}
+
+/**
+ * mountLegacySubRuleAddForm — fallback for sub-rule kinds newtron's
+ * schema endpoint doesn't yet describe. Preserves the prior behavior:
+ * build the form from conf.addFields with parent-name injection from
+ * the kind→parent-field convention in injectParentName.
+ */
+function mountLegacySubRuleAddForm(
+  kind: SpecKind,
+  specName: string,
+  conf: SubRuleTable,
+  formArea: HTMLElement,
+  addBtn: HTMLElement,
+): void {
   const { form, getValues, validate } = buildFormFields(conf.addFields);
   formArea.appendChild(form);
 
@@ -1439,10 +1553,6 @@ function renderSubRuleAdd(
   buttons.appendChild(cancelBtn);
   formArea.appendChild(buttons);
 
-  addBtn.addEventListener("click", () => {
-    addBtn.hidden = true;
-    formArea.hidden = false;
-  });
   cancelBtn.addEventListener("click", () => {
     formArea.hidden = true;
     addBtn.hidden = false;
@@ -1472,8 +1582,6 @@ function renderSubRuleAdd(
       }
     }
   });
-
-  return wrap;
 }
 
 // deleteSubRuleItem dispatches to the per-kind delete function.

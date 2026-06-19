@@ -154,6 +154,50 @@ let slugToKindCache: Promise<Map<string, string>> | null = null;
  * schema, and reading the slug from `paths.list`. Top-level kinds
  * have `paths.list`; embedded / sub-rule kinds don't.
  */
+/**
+ * resolveSubRuleKind — for a parent URL slug (e.g. "filters",
+ * "route-policies"), return the newtron kind name of the sub-rule
+ * kind nested inside it (e.g. "FilterRule", "RoutePolicyRule").
+ * Returns null when no sub-rule is discoverable from the schema.
+ *
+ * Strategy: resolve the parent slug to a kind, fetch its schema, find
+ * the first `array` or `map` field with `item_kind` set — that names
+ * the sub-rule. For parent slugs whose parent kind has no schema
+ * (e.g. "prefix-lists" today — newtron doesn't ship a PrefixListSpec),
+ * the helper falls back to walking every kind and picking the one
+ * whose parent_ref / list-path pattern matches the slug.
+ */
+export async function resolveSubRuleKind(parentSlug: string): Promise<string | null> {
+  // Path 1 — parent has a schema; read item_kind off its array/map field.
+  const parentKind = await resolveSlugToKind(parentSlug).catch(() => null);
+  if (parentKind !== null) {
+    const meta = await fetchSchema(parentKind).catch(() => null);
+    if (meta) {
+      for (const f of meta.fields) {
+        if ((f.type === "array" || f.type === "map") && f.item_kind) {
+          return f.item_kind;
+        }
+      }
+    }
+  }
+  // Path 2 — fallback: walk every registered kind, find the sub-rule
+  // (kinds with parent_ref) whose parent_ref hyphenated-plural matches
+  // the slug. This catches the prefix-lists case where newtron has no
+  // parent schema but does have the PrefixListEntry sub-rule.
+  const summaries = await fetchSchemaKinds().catch(() => []);
+  for (const s of summaries) {
+    const m = await fetchSchema(s.kind).catch(() => null);
+    if (!m || !m.parent_ref) continue;
+    // parent_ref "prefix_list" → slug "prefix-lists"
+    // parent_ref "filter"       → slug "filters"
+    // parent_ref "policy"       → ambiguous (filters AND route-policies
+    //                              both have policy-style parent_refs)
+    const conventionalSlug = m.parent_ref.replace(/_/g, "-") + "s";
+    if (conventionalSlug === parentSlug) return m.kind;
+  }
+  return null;
+}
+
 export async function resolveSlugToKind(slug: string): Promise<string | null> {
   if (!slugToKindCache) {
     slugToKindCache = (async () => {
