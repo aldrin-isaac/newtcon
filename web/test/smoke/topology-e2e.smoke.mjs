@@ -22,7 +22,18 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
-  page.on("dialog", async (d) => await d.accept()); // auto-accept any confirm
+  await page.evaluateOnNewDocument(() => {
+    // Inline confirm modal auto-accept; replaces native-dialog handler.
+    const install = () => new MutationObserver(() => {
+      const btn = document.querySelector(".confirm-modal-btn--confirm");
+      if (btn instanceof HTMLElement) btn.click();
+    }).observe(document.body, { childList: true, subtree: true });
+    if (document.readyState === "loading") {
+      addEventListener("DOMContentLoaded", install);
+    } else {
+      install();
+    }
+  });
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
   console.log(`→ open ${BASE}`);

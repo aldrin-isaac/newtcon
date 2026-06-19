@@ -29,6 +29,8 @@ import {
 import { postProjectionDiff } from "./api/newtcon/nodes.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
 import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
+import { confirmInline } from "./confirm-inline.js";
+import { showToast } from "./toast.js";
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -340,10 +342,16 @@ function setupPendingBar(): void {
     if (!list.hidden) renderList();
   });
 
-  discardBtn.addEventListener("click", () => {
+  discardBtn.addEventListener("click", async () => {
     const n = pendingCount();
     if (n === 0) return;
-    if (!window.confirm(`Discard ${n} pending change${n === 1 ? "" : "s"}? Nothing will be applied.`)) return;
+    const ok = await confirmInline({
+      title: `Discard ${n} pending change${n === 1 ? "" : "s"}?`,
+      body: "Nothing will be applied.",
+      danger: true,
+      confirmLabel: "Discard",
+    });
+    if (!ok) return;
     discardAll();
   });
 
@@ -388,7 +396,16 @@ function setupPendingBar(): void {
 
     if (r.failed.length > 0) {
       const lines = r.failed.map((f) => `${describePending(f.pending)}: ${f.error}`).join("\n");
-      alert(`Applied ${r.applied.length}, failed ${r.failed.length}.\n\n${lines}`);
+      showToast({
+        kind: "error",
+        title: `Applied ${r.applied.length}, failed ${r.failed.length}`,
+        body: lines,
+      });
+    } else if (r.applied.length > 0) {
+      showToast({
+        kind: "success",
+        title: `Applied ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}`,
+      });
     }
     // Re-mount whichever view is visible so the (now-applied) changes refresh.
     document.querySelector(".nav-item--active")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

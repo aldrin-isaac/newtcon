@@ -20,7 +20,20 @@ const zoneName = "zone_t" + Math.floor(Math.random() * 9000 + 1000);
 
 try {
   const page = await browser.newPage();
-  page.on("dialog", (d) => d.accept());
+  // Inline confirm modal (workspace.css .confirm-overlay) auto-accept —
+  // replaces puppeteer's native-dialog handler. Observes the body for
+  // any newly mounted Confirm button and clicks it.
+  await page.evaluateOnNewDocument(() => {
+    const install = () => new MutationObserver(() => {
+      const btn = document.querySelector(".confirm-modal-btn--confirm");
+      if (btn instanceof HTMLElement) btn.click();
+    }).observe(document.body, { childList: true, subtree: true });
+    if (document.readyState === "loading") {
+      addEventListener("DOMContentLoaded", install);
+    } else {
+      install();
+    }
+  });
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
   console.log(`→ open ${BASE}`);

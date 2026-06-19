@@ -11,6 +11,7 @@ import {
 } from "./topology-actions.js";
 import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
 import { formatErrorBrief as formatError } from "./render-error.js";
+import { confirmInline } from "./confirm-inline.js";
 
 // ---- API helpers (avoid importing app.ts to keep this self-contained) -----
 
@@ -146,14 +147,35 @@ function positionMenu(menu: HTMLElement, x: number, y: number): void {
 function handleActionInvoke(action: ActionDef, ctx: MenuContext): void {
   const needsForm = (action.fields ?? []).length > 0;
   if (!needsForm) {
-    if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
-    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
-    queueFromMenu(action, ctx, {});
-    ctx.onComplete?.();
+    void confirmAndQueue(action, ctx, {}).then((queued) => {
+      if (queued) ctx.onComplete?.();
+    });
     return;
   }
   openActionDrawer(action, ctx);
+}
+
+// confirmAndQueue folds the per-action confirm + base queue confirm +
+// (when destructive) danger confirmation into one confirmInline call.
+// Returns true when the operator confirmed AND queueing succeeded.
+async function confirmAndQueue(
+  action: ActionDef,
+  ctx: MenuContext,
+  body: Record<string, unknown>,
+): Promise<boolean> {
+  const bodyParts: string[] = [];
+  if (action.confirm) bodyParts.push(action.confirm);
+  bodyParts.push("Click Apply changes to send it to newtron.");
+  if (action.danger) bodyParts.push("This is destructive.");
+  const ok = await confirmInline({
+    title: `Queue "${action.label}"?`,
+    body: bodyParts.join("\n\n"),
+    danger: !!action.danger,
+    confirmLabel: "Queue",
+  });
+  if (!ok) return false;
+  queueFromMenu(action, ctx, body);
+  return true;
 }
 
 function queueFromMenu(action: ActionDef, ctx: MenuContext, body: Record<string, unknown>): void {
@@ -242,17 +264,14 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
       body[field.name] = coerceFieldValue(field, raw);
     }
 
-    if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
-    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
-
+    const queued = await confirmAndQueue(action, ctx, body);
+    if (!queued) return;
     try {
-      queueFromMenu(action, ctx, body);
       // Show a brief success summary, then close the drawer.
-      const ok = document.createElement("p");
-      ok.className = "form-success";
-      ok.textContent = "Queued. Click Apply changes (per-device or workspace) to apply.";
-      content.appendChild(ok);
+      const okPara = document.createElement("p");
+      okPara.className = "form-success";
+      okPara.textContent = "Queued. Click Apply changes (per-device or workspace) to apply.";
+      content.appendChild(okPara);
       ctx.onComplete?.();
       setTimeout(() => closeDrawer(), 700);
     } catch (err) {

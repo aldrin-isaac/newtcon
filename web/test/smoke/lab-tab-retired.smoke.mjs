@@ -19,7 +19,6 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
-page.on("dialog", (d) => { void d.dismiss(); });
 
 try {
   await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
@@ -58,11 +57,8 @@ try {
   expect(toolbarBtns.includes("Provision"), `toolbar has Provision: ${JSON.stringify(toolbarBtns)}`);
   expect(toolbarBtns.includes("Tear down"), `toolbar has Tear down: ${JSON.stringify(toolbarBtns)}`);
 
-  // ── 4. Provision click triggers confirm + POST /api/labs/{net}/provision ─
-  let provisionConfirmSeen = false;
+  // ── 4. Provision click mounts inline confirm + POST on accept ───────────
   let provisionPostSeen = false;
-  page.removeAllListeners("dialog");
-  page.on("dialog", (d) => { provisionConfirmSeen = true; void d.dismiss(); });
   page.on("request", (req) => {
     if (req.method() === "POST" && req.url().includes("/api/labs/") && req.url().endsWith("/provision")) {
       provisionPostSeen = true;
@@ -74,17 +70,28 @@ try {
       .find((el) => el.textContent.trim() === "Provision");
     b?.click();
   });
-  await new Promise((r) => setTimeout(r, 400));
-  expect(provisionConfirmSeen, "Provision click triggers confirm");
-  expect(!provisionPostSeen, "dismissed confirm → no POST (operator stayed safe)");
+  await new Promise((r) => setTimeout(r, 250));
+  const provisionConfirmModal = await page.$(".confirm-overlay");
+  expect(!!provisionConfirmModal, "Provision click mounts inline confirm modal");
 
-  // Re-click and accept to verify the POST shape on the wire.
-  page.removeAllListeners("dialog");
-  page.on("dialog", (d) => { void d.accept(); });
+  // Cancel first → no POST on the wire.
+  await page.evaluate(() => {
+    const cancel = document.querySelector(".confirm-modal-btn--cancel");
+    if (cancel instanceof HTMLElement) cancel.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  expect(!provisionPostSeen, "cancelled confirm → no POST (operator stayed safe)");
+
+  // Re-click and accept → POST goes through.
   await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
       .find((el) => el.textContent.trim() === "Provision");
     b?.click();
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  await page.evaluate(() => {
+    const confirm = document.querySelector(".confirm-modal-btn--confirm");
+    if (confirm instanceof HTMLElement) confirm.click();
   });
   await new Promise((r) => setTimeout(r, 600));
   expect(provisionPostSeen, "accepted confirm → POST /api/labs/{net}/provision observed");
