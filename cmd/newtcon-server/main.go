@@ -174,6 +174,15 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Spec-authoring schema metadata (newtron PR #240). Two global
+	// read-only endpoints (no /networks/{netID}/ prefix — the schema
+	// is per-install, not per-network). Frontend drives create-form
+	// labels + tooltips + types from these.
+	handlers.RegisterSchemaRoutes(mux, handlers.SchemaDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Operator-identity endpoints: /api/auth/{login,logout,whoami}.
 	// Cookie.Secure is auto-derived from tlsOn — production HTTPS deployments
 	// get Secure cookies; plain-HTTP dev gets non-Secure (so the browser will

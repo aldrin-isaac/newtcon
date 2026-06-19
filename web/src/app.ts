@@ -102,6 +102,8 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
+import { fetchSchema } from "./api/newtcon/schema.js";
+import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
@@ -750,6 +752,15 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
   return { form, getValues, validate: () => form.reportValidity() };
 }
 
+// Kinds whose create form is driven by newtron's schema metadata
+// (PR #240) instead of newtcon's hand-typed specForms entry. Mapping is
+// newtcon-kind → newtron-Go-type-name. Adding a kind here moves it onto
+// the schema-driven path; specForms[kind] becomes dead code for that
+// kind and can be deleted in the follow-up.
+const SCHEMA_KIND_FOR: Partial<Record<SpecKind, string>> = {
+  ipvpns: "IPVPNSpec",
+};
+
 // openCreateDrawer opens the drawer for creating a new spec of the given kind.
 // onSuccess is called after a successful create to refresh the panel list.
 function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => void): void {
@@ -763,6 +774,15 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
 
   content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
   content.appendChild(el("h2", { className: "drawer-name" }, "Add " + kindTitle.toLowerCase().replace(/s$/, "")));
+
+  // Schema-driven path (newtron PR #240). Labels, tooltips, types,
+  // required-ness, and field list all come from newtron's schema
+  // endpoint. UX overrides (smart defaults) layer on top.
+  const schemaKind = SCHEMA_KIND_FOR[kind];
+  if (schemaKind !== undefined) {
+    void renderSchemaDrivenCreate(kind, schemaKind, content, drawer, onSuccess);
+    return;
+  }
 
   const fields = specForms[kind];
   if (!fields || fields.length === 0) {
@@ -802,6 +822,101 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
     try {
       const values = getValues();
       const name = String(values["name"] ?? values["id"] ?? "(unnamed)");
+      enqueueSpecCreate(kind as StagingSpecKind, name, values);
+      const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
+      content.insertBefore(ok, submitBtn);
+      onSuccess();
+      setTimeout(() => {
+        drawer.setAttribute("aria-hidden", "true");
+        drawer.classList.remove("open");
+      }, 800);
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Create";
+      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+    }
+  });
+}
+
+// renderSchemaDrivenCreate — schema-metadata flavour of openCreateDrawer
+// (newtron PR #240). Fetches the schema for the kind, renders a `name`
+// identifier input + the schema fields, and wires the same staging
+// enqueue + drawer close that the legacy path uses.
+async function renderSchemaDrivenCreate(
+  kind: SpecKind,
+  schemaKind: string,
+  content: HTMLElement,
+  drawer: HTMLElement,
+  onSuccess: () => void,
+): Promise<void> {
+  // Loading placeholder while the schema fetch is in flight — the
+  // first open per session waits one HTTP round-trip; subsequent
+  // opens hit the cache.
+  const loading = el("p", { className: "status-loading" }, "Loading schema…");
+  content.appendChild(loading);
+  let schema;
+  try {
+    schema = await fetchSchema(schemaKind);
+  } catch (err) {
+    loading.remove();
+    content.appendChild(el("p", { className: "panel-error" },
+      `Schema for ${schemaKind} unavailable: ${formatErrorBrief(err)}`));
+    return;
+  }
+  loading.remove();
+
+  // Per-field UX overrides — schema gives shape, newtcon decides UX.
+  // For ipvpns / macvpns the smart-default integer fields use the same
+  // strategiesFor()/computePrefillForKind() machinery as the legacy
+  // path so we share one bug surface.
+  const overrides: Record<string, import("./schema-form.js").SchemaFieldOverride> = {};
+  if (strategiesFor(kind)) {
+    const defaults = await computePrefillForKind(kind);
+    for (const [name, value] of Object.entries(defaults)) {
+      const v: string | number = typeof value === "number" ? value : String(value);
+      overrides[name] = { smartDefault: () => v };
+    }
+  }
+
+  // The schema doesn't include the spec's identifier — that's a
+  // newtcon-level concept (the URL identifies the row). Render a
+  // dedicated name input above the schema fields.
+  const wrapper = el("div", { className: "schema-create-wrapper" });
+  const nameRow = el("div", { className: "schema-form-row" });
+  nameRow.appendChild(el("label", { className: "schema-form-label" }, "Name *"));
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.required = true;
+  nameInput.className = "schema-form-input";
+  nameInput.placeholder = `e.g. ${schema.label.toLowerCase().replace(/\s+/g, "-")}-1`;
+  nameRow.appendChild(nameInput);
+  wrapper.appendChild(nameRow);
+
+  const { form, getValues, validate } = await renderSchemaForm({
+    schema,
+    overrides,
+  });
+  wrapper.appendChild(form);
+  content.appendChild(wrapper);
+
+  const errorOut = el("div", { className: "form-error-out" });
+  content.appendChild(errorOut);
+
+  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Create");
+  content.appendChild(submitBtn);
+
+  submitBtn.addEventListener("click", () => {
+    if (!nameInput.reportValidity()) return;
+    if (!validate()) return;
+    errorOut.textContent = "";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Queued";
+    try {
+      const values = getValues();
+      const name = nameInput.value.trim();
+      // Inject the name into the body — newtron's create- verbs expect
+      // it there alongside the schema-defined fields.
+      values["name"] = name;
       enqueueSpecCreate(kind as StagingSpecKind, name, values);
       const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, submitBtn);

@@ -1,0 +1,109 @@
+// schema.ts — typed client for newtron's spec-authoring schema
+// metadata, fronted by an in-session cache.
+//
+// Wire shape mirrors newtron PR #240 (docs/newtron/api.md §schema):
+//
+//   GET /api/schema           → { kinds: [{ kind, label, description }, …] }
+//   GET /api/schema/{kind}    → { kind, label, description, fields: [SchemaField] }
+//
+// One module-level cache per browser session: schemas don't change at
+// runtime (they're derived from struct tags at newtron boot), so
+// fetching the same kind twice serves the second call from memory.
+
+import { apiFetch } from "./_transport.js";
+
+// ─── Wire-shape types ──────────────────────────────────────────────
+
+export interface SchemaKindSummary {
+  kind: string;        // Go type name, e.g. "IPVPNSpec"
+  label: string;
+  description: string;
+}
+
+export interface SchemaField {
+  name: string;        // wire field name
+  label: string;       // operator-facing form label
+  description?: string;
+  type:
+    | "string"
+    | "int"
+    | "float"
+    | "bool"
+    | "enum"
+    | "array"
+    | "map"
+    | "object"
+    | "ref";
+  required: boolean;
+  enum?: string[];     // type === "enum"
+  ref_kind?: string;   // type === "ref"
+  item_type?: string;  // type === "array" | "map" of primitives
+  item_kind?: string;  // type === "array" | "map" | "object" of structs
+}
+
+export interface SchemaMeta {
+  kind: string;
+  label: string;
+  description: string;
+  fields: SchemaField[];
+}
+
+// ─── Cache ─────────────────────────────────────────────────────────
+
+// One pending promise per kind so concurrent callers share the
+// in-flight fetch. Resolved entries stay forever (the schema is
+// boot-time data on newtron's side).
+const schemaCache = new Map<string, Promise<SchemaMeta>>();
+let kindsCache: Promise<SchemaKindSummary[]> | null = null;
+
+/**
+ * fetchSchemaKinds returns the full list of registered authoring kinds,
+ * alphabetical by kind name. Cached for the session.
+ */
+export async function fetchSchemaKinds(): Promise<SchemaKindSummary[]> {
+  if (kindsCache) return kindsCache;
+  kindsCache = (async () => {
+    const body = (await apiFetch("/api/schema", { cache: "no-store" })) as
+      | { kinds?: SchemaKindSummary[] }
+      | null;
+    return Array.isArray(body?.kinds) ? body!.kinds! : [];
+  })();
+  try {
+    return await kindsCache;
+  } catch (e) {
+    kindsCache = null; // allow retry on next call
+    throw e;
+  }
+}
+
+/**
+ * fetchSchema returns the full field metadata for one kind. Cached
+ * per-kind for the session. Throws on 404 (unknown kind) — caller
+ * decides whether to fall back to a hand-typed form.
+ */
+export async function fetchSchema(kind: string): Promise<SchemaMeta> {
+  const hit = schemaCache.get(kind);
+  if (hit) return hit;
+  const p = (async () => {
+    return (await apiFetch(
+      `/api/schema/${encodeURIComponent(kind)}`,
+      { cache: "no-store" },
+    )) as SchemaMeta;
+  })();
+  schemaCache.set(kind, p);
+  try {
+    return await p;
+  } catch (e) {
+    schemaCache.delete(kind);
+    throw e;
+  }
+}
+
+/**
+ * resetSchemaCache — testing hook only. Production code should never
+ * need to clear the cache.
+ */
+export function resetSchemaCache(): void {
+  schemaCache.clear();
+  kindsCache = null;
+}
