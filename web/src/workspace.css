@@ -168,6 +168,11 @@
   font-style: italic;
   cursor: not-allowed;
 }
+.schema-form-input--readonly {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  cursor: default;
+}
 .schema-form-checkbox {
   width: 16px; height: 16px;
   accent-color: var(--color-accent);

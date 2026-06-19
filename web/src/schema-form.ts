@@ -60,6 +60,11 @@ export interface SchemaFormOpts {
   /** Wire field names to skip rendering entirely. Synthetic
    *  identifier fields ("name") are typically inserted separately. */
   skipFields?: ReadonlySet<string>;
+  /** True when this form is editing an existing spec. Fields with
+   *  `immutable: true` (e.g. the identifier) render as read-only so
+   *  the operator can see the value but can't change it through the
+   *  update verb — newtron rejects identifier changes. */
+  editMode?: boolean;
 }
 
 export interface SchemaFormResult {
@@ -93,7 +98,7 @@ export async function renderSchemaForm(
     if (skip.has(field.name)) continue;
     const override = overrides[field.name] ?? {};
     if (override.hidden) continue;
-    const row = await buildFieldRow(field, prefill[field.name], override);
+    const row = await buildFieldRow(field, prefill[field.name], override, !!opts.editMode);
     form.appendChild(row.row);
     valueReaders.set(field.name, row.read);
   }
@@ -125,6 +130,7 @@ async function buildFieldRow(
   field: SchemaField,
   prefill: unknown,
   override: SchemaFieldOverride,
+  editMode: boolean,
 ): Promise<FieldRowResult> {
   const row = document.createElement("div");
   row.className = "schema-form-row";
@@ -151,6 +157,12 @@ async function buildFieldRow(
     } catch { /* swallow — operator can fill it in */ }
   }
 
+  // editMode + field.immutable → render as read-only. Newtron rejects
+  // identifier changes (and any other immutable field) via the update
+  // verb, so locking the input prevents the operator from submitting
+  // a doomed request. Read still returns the value so the body keeps
+  // it (newtron may require it; newtcon-server reconciles with URL).
+  const lockField = editMode && !!field.immutable;
   let read: () => unknown;
 
   switch (field.type) {
@@ -158,11 +170,12 @@ async function buildFieldRow(
       const input = document.createElement("input");
       input.type = "text";
       input.name = field.name;
-      input.className = "schema-form-input";
+      input.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       if (field.required) input.required = true;
       if (field.pattern) input.pattern = field.pattern;
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
       if (defaultValue !== "") input.value = String(defaultValue);
+      if (lockField) input.readOnly = true;
       row.appendChild(input);
       read = () => input.value.trim();
       break;
@@ -172,13 +185,14 @@ async function buildFieldRow(
       const input = document.createElement("input");
       input.type = "number";
       input.name = field.name;
-      input.className = "schema-form-input";
+      input.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       input.step = field.type === "int" ? "1" : "any";
       if (field.required) input.required = true;
       if (typeof field.min === "number") input.min = String(field.min);
       if (typeof field.max === "number") input.max = String(field.max);
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
       if (defaultValue !== "") input.value = String(defaultValue);
+      if (lockField) input.readOnly = true;
       row.appendChild(input);
       read = () => {
         const v = input.value.trim();
@@ -196,6 +210,7 @@ async function buildFieldRow(
       if (prefill === true || prefill === "true" || prefill === 1) {
         input.checked = true;
       }
+      if (lockField) input.disabled = true;
       row.appendChild(input);
       read = () => input.checked;
       break;
@@ -203,7 +218,7 @@ async function buildFieldRow(
     case "enum": {
       const select = document.createElement("select");
       select.name = field.name;
-      select.className = "schema-form-input";
+      select.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       if (field.required) select.required = true;
       if (!field.required) {
         const blank = document.createElement("option");
@@ -218,6 +233,9 @@ async function buildFieldRow(
         if (String(defaultValue) === opt) o.selected = true;
         select.appendChild(o);
       }
+      // <select> has no readOnly; disabled drops it from submit but
+      // we capture the value via the read closure regardless.
+      if (lockField) select.disabled = true;
       row.appendChild(select);
       read = () => select.value;
       break;
