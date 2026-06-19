@@ -194,25 +194,37 @@ function isItemUndoable(
 /**
  * ACTION_INVERSE_PREDICATES maps actionId → predicate(body) that
  * answers "is this specific call undoable?". Predicates inspect body
- * when the inverse depends on the request shape (configure-interface's
- * trunk-add variant only); they return true unconditionally for
- * actionIds with a fixed inverse (apply-service).
+ * when the inverse depends on the request shape.
  *
  * Updated as sub-slices of 175.C.2 land:
  *
  *   175.C.2.a — apply-service (inverse: remove-service, no body)
- *   175.C.2.b — configure-interface (only when tagged: true; inverse
- *               is remove-trunk-vlan with the original vlan_id — newtron
- *               PR #225). Other configure-interface bodies (access,
- *               routed) need composite multi-step recovery — deferred.
- *   175.C.2.c — unconfigure-interface (pending the composite
- *               restore-from-pre-state design)
+ *   175.C.2.b — configure-interface tagged:true (trunk add) → inverse
+ *               is remove-trunk-vlan {vlan_id} (newtron PR #225)
+ *   175.C.2.c — configure-interface tagged:false (access) and routed
+ *               (vrf+ip) → inverse is unconfigure-interface (newtron
+ *               case A: cross-mode transitions rejected at the intent
+ *               DAG, so the prior state was always empty — clearing
+ *               the port restores it)
+ *   future   — unconfigure-interface undo (needs InterfaceDetail +
+ *              ServiceBindingDetail + ACL pre-state cache to compose
+ *              the multi-call restore sequence)
  */
 const ACTION_INVERSE_PREDICATES: Record<string, (body: Record<string, unknown> | undefined) => boolean> = {
   "apply-service": () => true,
   "configure-interface": (body) => {
     if (!body || typeof body !== "object") return false;
-    return body["tagged"] === true && typeof body["vlan_id"] === "number";
+    // Trunk add (#175.C.2.b) — inverse via remove-trunk-vlan, needs
+    // a numeric vlan_id alongside tagged:true.
+    if (body["tagged"] === true) return typeof body["vlan_id"] === "number";
+    // Access (#175.C.2.c) — inverse via unconfigure-interface;
+    // requires the body actually describes an access set
+    // (vlan_id present, tagged explicitly false).
+    if (body["tagged"] === false && typeof body["vlan_id"] === "number") return true;
+    // Routed (#175.C.2.c) — inverse via unconfigure-interface;
+    // requires the body describes a routed set (vrf and/or ip).
+    if (typeof body["vrf"] === "string" || typeof body["ip"] === "string") return true;
+    return false;
   },
 };
 

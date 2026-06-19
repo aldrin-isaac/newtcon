@@ -202,12 +202,39 @@ function inverseInterfaceAction(item: HistoryItem, id: string): Pending | null {
     };
   }
   if (item.actionId === "configure-interface") {
-    // Only the trunk-add variant (tagged:true with a numeric vlan_id)
-    // has a clean atomic inverse — remove-trunk-vlan {vlan_id}.
-    // newtron handler_interface.go:remove-trunk-vlan strips exactly
-    // that one VLAN_MEMBER + intent record; sub-resources untouched.
-    const body = item.body;
-    if (!body || body["tagged"] !== true) return null;
+    return inverseConfigureInterface(item, id);
+  }
+  return null;
+}
+
+/**
+ * inverseConfigureInterface — the three operator-facing variants
+ * (trunk-add, set-access, set-routed) all map to the same wire verb
+ * but distinct inverses (#175.C.2.b + #175.C.2.c).
+ *
+ *   tagged:true  + vlan_id  → remove-trunk-vlan (atomic per-VLAN
+ *                             strip, newtron PR #225). Bookkeeping
+ *                             matches the per-VLAN intent record.
+ *   tagged:false + vlan_id  → unconfigure-interface (per-newtron case
+ *                             A: cross-mode transitions rejected, so
+ *                             prior state was always empty — clearing
+ *                             the port restores it).
+ *   vrf or ip               → unconfigure-interface (same reasoning
+ *                             — routed mode can only be entered from
+ *                             empty, so empty IS the prior state).
+ *
+ * Within-mode changes (e.g. routed-IP swap) are accepted by newtron
+ * post-PR #229 (within-mode orphan fix) but undo isn't faithful for
+ * those — clearing the port restores it to empty, not to the prior
+ * IP. The apply-preview projection (171.B) surfaces what the undo
+ * will actually do so the operator can Cancel if state has drifted.
+ */
+function inverseConfigureInterface(item: HistoryItem, id: string): Pending | null {
+  const body = item.body;
+  if (!body || !item.device || !item.iface) return null;
+
+  // Trunk-add (#175.C.2.b) — atomic single-VLAN strip.
+  if (body["tagged"] === true) {
     const vlanId = body["vlan_id"];
     if (typeof vlanId !== "number") return null;
     return {
@@ -222,7 +249,23 @@ function inverseInterfaceAction(item: HistoryItem, id: string): Pending | null {
       danger: true,
     };
   }
-  return null;
+
+  // Access (tagged:false) or routed (vrf+ip) — both cleared via
+  // unconfigure-interface (newtron case A enforcement).
+  const isAccess = body["tagged"] === false && typeof body["vlan_id"] === "number";
+  const isRouted = typeof body["vrf"] === "string" || typeof body["ip"] === "string";
+  if (!isAccess && !isRouted) return null;
+  return {
+    id,
+    group: "interface",
+    op: "action",
+    device: item.device,
+    iface: item.iface,
+    actionId: "unconfigure-interface",
+    label: "Clear port configuration on " + item.device + ":" + item.iface,
+    body: {},
+    danger: true,
+  };
 }
 
 /**
