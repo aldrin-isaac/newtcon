@@ -421,6 +421,92 @@ function enterSpecEditMode(
   content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
   content.appendChild(el("h2", { className: "drawer-name" }, name));
 
+  // Schema-driven path: resolve the URL slug to a newtron kind, fetch
+  // its schema, render an edit form prefilled from the GET-detail wire
+  // shape. Fields with `immutable: true` render read-only — newtron
+  // rejects identifier changes via the update verb.
+  void (async () => {
+    const schemaKind = await resolveSlugToKind(kind).catch(() => null);
+    if (schemaKind !== null) {
+      await renderSchemaDrivenEdit(kind, kindTitle, name, detail, schemaKind, content);
+      return;
+    }
+    legacyEditForm(kind, kindTitle, name, detail, content);
+  })();
+}
+
+async function renderSchemaDrivenEdit(
+  kind: SpecKind,
+  kindTitle: string,
+  name: string,
+  detail: unknown,
+  schemaKind: string,
+  content: HTMLElement,
+): Promise<void> {
+  const loading = el("p", { className: "status-loading" }, "Loading schema…");
+  content.appendChild(loading);
+  let schema;
+  try {
+    schema = await fetchSchema(schemaKind);
+  } catch (err) {
+    loading.remove();
+    content.appendChild(el("p", { className: "panel-error" },
+      `Schema for ${schemaKind} unavailable: ${formatErrorBrief(err)}`));
+    return;
+  }
+  loading.remove();
+  const { form, getValues, validate } = await renderSchemaForm({
+    schema,
+    prefill: detail && typeof detail === "object" ? detail as Record<string, unknown> : {},
+    editMode: true,
+  });
+  content.appendChild(form);
+
+  const errOut = el("div", { className: "form-error-out" });
+  content.appendChild(errOut);
+
+  const buttons = el("div", { className: "form-button-row" });
+  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Save");
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(saveBtn);
+  buttons.appendChild(cancelBtn);
+  content.appendChild(buttons);
+
+  cancelBtn.addEventListener("click", () => {
+    void openDetail(kind, kindTitle, name);
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    if (!validate()) return;
+    errOut.textContent = "";
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      const values = getValues();
+      // The PUT URL identifies the row; newtcon-server overwrites any
+      // identifier in the body with the URL value. Strip the
+      // identifier here too to keep the wire payload clean.
+      const idField = schema.identifier || "name";
+      delete values[idField];
+      await updateSpec(kind, name, values);
+      void openDetail(kind, kindTitle, name);
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      if (!attachServerValidationToForm(form, err)) {
+        errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+      }
+    }
+  });
+}
+
+function legacyEditForm(
+  kind: SpecKind,
+  kindTitle: string,
+  name: string,
+  detail: unknown,
+  content: HTMLElement,
+): void {
   const fields = specForms[kind];
   if (!fields) return;
 
