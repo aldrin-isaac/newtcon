@@ -185,9 +185,9 @@ describe("buildEntry()", () => {
     assert.deepEqual(entry.items[0].body, { vlan_id: 100, tagged: true });
   });
 
-  test("configure-interface tagged:false (access) → undoable=false even though actionId is mapped", () => {
-    // Predicate inspects body. Access mode has no clean atomic
-    // inverse (waits on 175.C.2.c composite restore).
+  test("configure-interface tagged:false (access) → undoable=true via unconfigure-interface (slice 175.C.2.c)", () => {
+    // Per newtron case A: cross-mode transitions are rejected, so the
+    // prior state was always empty. Clearing the port restores it.
     const preview = {
       total: 1,
       items: [{
@@ -203,6 +203,48 @@ describe("buildEntry()", () => {
       id: "e1", timestamp: "t", user: null, network: "n",
       preview,
       result: { applied: [{ id: "ci-access-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, true);
+  });
+
+  test("configure-interface routed (vrf+ip) → undoable=true via unconfigure-interface (slice 175.C.2.c)", () => {
+    const preview = {
+      total: 1,
+      items: [{
+        id: "ci-routed-1", effect: "action", kind: "interface action",
+        title: "Set to routed", scope: "r1:eth0", danger: false,
+        body: { vrf: "blue", ip: "10.0.0.1/24" },
+        actionId: "configure-interface", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "ci-routed-1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, true);
+  });
+
+  test("configure-interface access without vlan_id → undoable=false (defensive)", () => {
+    // tagged:false but no vlan_id — newtron would have rejected the
+    // forward call, but the predicate is defensive about partial bodies.
+    const preview = {
+      total: 1,
+      items: [{
+        id: "ci-partial-1", effect: "action", kind: "interface action",
+        title: "Set to access", scope: "r1:eth0", danger: false,
+        body: { tagged: false },
+        actionId: "configure-interface", device: "r1", iface: "eth0",
+      }],
+      counts: { create: 0, delete: 0, action: 1, danger: 0 },
+      hasDangerous: false, hasDeletes: false,
+    };
+    const entry = buildEntry({
+      id: "e1", timestamp: "t", user: null, network: "n",
+      preview,
+      result: { applied: [{ id: "ci-partial-1" }], failed: [] },
     });
     assert.equal(entry.items[0].undoable, false);
   });

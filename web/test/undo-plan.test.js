@@ -191,17 +191,39 @@ describe("planUndo() — device/interface actions (175.C.2)", () => {
     assert.equal(inv.danger, true);
   });
 
-  test("configure-interface tagged:false (access set) → skipped (no atomic inverse — same as before #225)", () => {
+  test("configure-interface tagged:false (access set) → unconfigure-interface (slice 175.C.2.c)", () => {
+    // Per newtron case A: cross-mode rejected, so prior was empty.
+    // Clearing the port restores empty.
     const plan = planUndo(entry([
-      { id: "8", effect: "action", kind: "interface action", title: "Set to access", scope: "r1:eth0", danger: false, outcome: "applied", undoable: false, actionId: "configure-interface", device: "r1", iface: "eth0", body: { vlan_id: 100, tagged: false } },
+      { id: "8", effect: "action", kind: "interface action", title: "Set to access", scope: "r1:eth0", danger: false, outcome: "applied", undoable: true, actionId: "configure-interface", device: "r1", iface: "eth0", body: { vlan_id: 100, tagged: false } },
     ]), idGen);
-    assert.equal(plan.counts.skipped, 1);
-    assert.ok(plan.items[0].reason && /configure-interface/.test(plan.items[0].reason));
+    assert.equal(plan.counts.planned, 1);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.actionId, "unconfigure-interface");
+    assert.equal(inv.device, "r1");
+    assert.equal(inv.iface, "eth0");
+    assert.deepEqual(inv.body, {});
+    assert.equal(inv.danger, true);
   });
 
-  test("configure-interface with vrf/ip (routed) → skipped", () => {
+  test("configure-interface routed (vrf+ip) → unconfigure-interface (slice 175.C.2.c)", () => {
     const plan = planUndo(entry([
-      { id: "8", effect: "action", kind: "interface action", title: "Set to routed", scope: "r1:eth0", danger: false, outcome: "applied", undoable: false, actionId: "configure-interface", device: "r1", iface: "eth0", body: { vrf: "blue", ip: "10.0.0.1/24" } },
+      { id: "8", effect: "action", kind: "interface action", title: "Set to routed", scope: "r1:eth0", danger: false, outcome: "applied", undoable: true, actionId: "configure-interface", device: "r1", iface: "eth0", body: { vrf: "blue", ip: "10.0.0.1/24" } },
+    ]), idGen);
+    assert.equal(plan.counts.planned, 1);
+    assert.equal(plan.items[0].inverse.actionId, "unconfigure-interface");
+  });
+
+  test("configure-interface routed with only vrf (no ip) → still undoable via unconfigure-interface", () => {
+    const plan = planUndo(entry([
+      { id: "8", effect: "action", kind: "interface action", title: "Set vrf", scope: "r1:eth0", danger: false, outcome: "applied", undoable: true, actionId: "configure-interface", device: "r1", iface: "eth0", body: { vrf: "blue" } },
+    ]), idGen);
+    assert.equal(plan.items[0].inverse.actionId, "unconfigure-interface");
+  });
+
+  test("configure-interface with empty body → skipped (no inverse mappable)", () => {
+    const plan = planUndo(entry([
+      { id: "8", effect: "action", kind: "interface action", title: "Configure", scope: "r1:eth0", danger: false, outcome: "applied", undoable: false, actionId: "configure-interface", device: "r1", iface: "eth0", body: {} },
     ]), idGen);
     assert.equal(plan.counts.skipped, 1);
   });
