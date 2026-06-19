@@ -95,11 +95,13 @@ export function availableViewModes(
   return out;
 }
 
-/** viewModeLabel — operator-facing UI text per mode. */
+/** viewModeLabel — operator-facing UI text per mode. The spec substrate
+ *  is implicit (every view layers on it), so the chip labels just name
+ *  the actuation source. */
 export function viewModeLabel(mode: TopologyViewMode): string {
   switch (mode) {
-    case "spec":          return "Spec only";
-    case "spec-lab":      return "Spec + Lab";
-    case "spec-physical": return "Spec + Physical";
+    case "spec":          return "Spec";
+    case "spec-lab":      return "Lab";
+    case "spec-physical": return "Physical";
   }
 }
