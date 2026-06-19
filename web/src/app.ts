@@ -2876,17 +2876,36 @@ function openLinkDrawer(link: TopoLink): void {
       if (detailResult.status === "fulfilled") {
         body.appendChild(renderValue(detailResult.value));
       } else {
-        body.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(detailResult.reason)));
+        body.appendChild(renderLiveDataError(detailResult.reason, "interface", endpoint.device));
       }
       const bindHeading = el("p", { className: "drawer-kind" }, "Service binding");
       body.appendChild(bindHeading);
       if (bindingResult.status === "fulfilled") {
         body.appendChild(renderValue(bindingResult.value));
       } else {
-        body.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(bindingResult.reason)));
+        body.appendChild(renderLiveDataError(bindingResult.reason, "service binding", endpoint.device));
       }
     });
   }
+}
+
+// renderLiveDataError translates a failed per-device live fetch into
+// operator-friendly text. The common case in newtcon today is that a
+// network's devices aren't deployed (the lab is down, the device's
+// CONFIG_DB / SSH transport is unreachable) — surfacing the raw
+// "newtron_unavailable" envelope reads as a system failure when
+// actually it's the expected condition. For other error kinds (genuine
+// problems worth seeing) fall back to formatErrorBrief.
+function renderLiveDataError(
+  err: unknown,
+  what: "interface" | "service binding",
+  device: string,
+): HTMLElement {
+  if (err instanceof ApiError && err.kind === "newtron_unavailable") {
+    return el("p", { className: "panel-note" },
+      `${device} is not reachable. Live ${what} state will appear here once the device is up.`);
+  }
+  return el("p", { className: "panel-error" }, formatErrorBrief(err));
 }
 
 // openNodeDrawer opens the detail drawer for a device and renders node-inspector
