@@ -24,12 +24,29 @@ type SchemaKindsResponse struct {
 // SchemaMeta is the full per-kind schema returned by
 // GET /api/schema/{kind}. Includes every spec field's wire name,
 // operator-facing label, tooltip, type, and (where applicable) the
-// enum values or referenced kind.
+// enum values or referenced kind. Newtron PR #240's universal-engine
+// extension also exposes paths + identifier + parent_ref so clients
+// drive CRUD URLs from the schema rather than hardcoded mappings.
 type SchemaMeta struct {
 	Kind        string             `json:"kind"`
 	Label       string             `json:"label"`
 	Description string             `json:"description"`
 	Fields      []SchemaFieldMeta  `json:"fields"`
+	Identifier  string             `json:"identifier,omitempty"`
+	ParentRef   string             `json:"parent_ref,omitempty"`
+	Paths       SchemaPaths        `json:"paths,omitempty"`
+}
+
+// SchemaPaths declares the HTTP path templates per CRUD verb. All
+// paths use {netID} as the network placeholder; show additionally uses
+// {name} for the spec instance. Empty fields mean the verb isn't
+// supported for the kind (e.g. PlatformSpec has only list+show).
+type SchemaPaths struct {
+	List   string `json:"list,omitempty"`
+	Show   string `json:"show,omitempty"`
+	Create string `json:"create,omitempty"`
+	Update string `json:"update,omitempty"`
+	Delete string `json:"delete,omitempty"`
 }
 
 // SchemaFieldMeta is one field's metadata. Optional members stay

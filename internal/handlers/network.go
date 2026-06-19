@@ -118,105 +118,106 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 // Write routes — create and delete for each spec type, plus sub-rules.
 // ============================================================================
 
-// specKindMap maps the plural URL segment used in the newtcon API to the
-// singular newtron RPC segment (used in create-<kind> / delete-<kind> URLs).
-var specKindMap = map[string]string{
-	"services":       "service",
-	"ipvpns":         "ipvpn",
-	"macvpns":        "macvpn",
-	"qos-policies":   "qos-policy",
-	"filters":        "filter",
-	"prefix-lists":   "prefix-list",
-	"route-policies": "route-policy",
-	"profiles":       "profile",
-	"zones":          "zone",
-}
-
-// registerWriteRoutes adds POST (create) and DELETE (delete) for every spec
-// type listed in specKindMap, plus sub-rule endpoints for the four types that
-// support child rules.
+// registerWriteRoutes adds generic POST / DELETE / PUT handlers that
+// resolve the URL slug to a newtron kind via kindResolver at request
+// time. The resolver consults newtron's /api/schema first; the
+// legacy specKindMap (defined in kind_resolver.go) is the fallback.
+//
+// Net: when newtron adds a new top-level kind (RegisterSchemaKind),
+// it becomes authorable through newtcon-server with no code change.
 func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx context.Context) string) {
-	// ---- Per-kind create + delete -------------------------------------------
+	// ---- Generic create + delete + update -----------------------------------
+	resolver := newKindResolver(c)
 
-	for urlKind, newtronKind := range specKindMap {
-		uk := urlKind  // capture for closure
-		nk := newtronKind // capture for closure
+	mux.Handle("POST /api/networks/{netID}/{kind}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		slug := r.PathValue("kind")
+		entry, ok := resolver.lookup(ctx, slug)
+		if !ok {
+			types.WriteError(w, http.StatusNotFound, types.KindValidationFailure,
+				"unknown spec kind: "+slug, nil)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"reading request body: "+err.Error(), nil)
+			return
+		}
+		var decoded any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"invalid JSON: "+err.Error(), nil)
+			return
+		}
+		result, err := c.CreateSpec(ctx, netID, entry.newtronKind, decoded)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/"+slug, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write(result)
+	}))
 
-		// POST /api/networks/{netID}/{kind} → create spec
-		mux.Handle("POST /api/networks/{netID}/"+uk, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			netID := r.PathValue("netID")
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-					"reading request body: "+err.Error(), nil)
-				return
-			}
-			var decoded any
-			if err := json.Unmarshal(body, &decoded); err != nil {
-				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-					"invalid JSON: "+err.Error(), nil)
-				return
-			}
-			result, err := c.CreateSpec(ctx, netID, nk, decoded)
-			if err != nil {
-				writeUpstreamError(w, cid(ctx), err, "POST /api/networks/"+netID+"/"+uk, nil)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write(result)
-		}))
+	mux.Handle("DELETE /api/networks/{netID}/{kind}/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		slug := r.PathValue("kind")
+		name := r.PathValue("name")
+		entry, ok := resolver.lookup(ctx, slug)
+		if !ok {
+			types.WriteError(w, http.StatusNotFound, types.KindValidationFailure,
+				"unknown spec kind: "+slug, nil)
+			return
+		}
+		if err := c.DeleteSpec(ctx, netID, entry.newtronKind, name); err != nil {
+			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/"+slug+"/"+name, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "name": name})
+	}))
 
-		// DELETE /api/networks/{netID}/{kind}/{name} → delete spec
-		mux.Handle("DELETE /api/networks/{netID}/"+uk+"/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			netID := r.PathValue("netID")
-			name := r.PathValue("name")
-			if err := c.DeleteSpec(ctx, netID, nk, name); err != nil {
-				writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/"+uk+"/"+name, nil)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "name": name})
-		}))
-
-		// PUT /api/networks/{netID}/{kind}/{name} → in-place update (newtron PR #172)
-		// Body shape mirrors create. Sub-collections (queues/rules/statements)
-		// are preserved by newtron and managed via add-X/remove-X — callers
-		// must NOT include them in the request body.
-		mux.Handle("PUT /api/networks/{netID}/"+uk+"/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			netID := r.PathValue("netID")
-			name := r.PathValue("name")
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-					"reading request body: "+err.Error(), nil)
-				return
-			}
-			var decoded map[string]any
-			if err := json.Unmarshal(body, &decoded); err != nil {
-				types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
-					"invalid JSON: "+err.Error(), nil)
-				return
-			}
-			// Identifier comes from the URL — overwrite any client-supplied
-			// "name" so the operator can't ask "update foo" while sending
-			// {"name":"bar",…}; newtron would 404 silently or update the wrong
-			// spec depending on its own validation.
-			decoded["name"] = name
-			result, err := c.UpdateSpec(ctx, netID, nk, decoded)
-			if err != nil {
-				writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/"+uk+"/"+name, nil)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(result)
-		}))
-	}
+	mux.Handle("PUT /api/networks/{netID}/{kind}/{name}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		slug := r.PathValue("kind")
+		name := r.PathValue("name")
+		entry, ok := resolver.lookup(ctx, slug)
+		if !ok {
+			types.WriteError(w, http.StatusNotFound, types.KindValidationFailure,
+				"unknown spec kind: "+slug, nil)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"reading request body: "+err.Error(), nil)
+			return
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure,
+				"invalid JSON: "+err.Error(), nil)
+			return
+		}
+		// Identifier comes from the URL — overwrite any client-supplied
+		// "name" so the operator can't ask "update foo" while sending
+		// {"name":"bar",…}; newtron would 404 silently or update the wrong
+		// spec depending on its own validation.
+		decoded["name"] = name
+		result, err := c.UpdateSpec(ctx, netID, entry.newtronKind, decoded)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/"+slug+"/"+name, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result)
+	}))
 
 	// ---- Sub-rule: QoS queues ------------------------------------------------
 	// POST   /api/networks/{netID}/qos-policies/{name}/queues    → add-qos-queue
