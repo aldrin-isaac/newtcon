@@ -116,12 +116,24 @@
 .topo-drift-badge circle { fill: var(--color-warning); stroke: var(--color-surface); stroke-width: 1.5; }
 .topo-drift-badge text { fill: var(--color-surface); font-family: var(--font-system); font-size: 10px; font-weight: var(--weight-semibold); pointer-events: none; }
 
-/* Drift overlay (#174.C) — when a device's intent ≠ CONFIG_DB, tint the
- * node's whole outline so the drifted set is visible on a dense canvas
- * without scanning corners for badges. Combines with substrate-state
- * classes; the existing badge still rides on top. */
-.topo-node--drifted > rect { stroke: var(--color-warning); stroke-width: 2.5; }
-.topo-node--drifted:hover > rect, .topo-node--drifted:focus-visible > rect { stroke: var(--color-warning); }
+/* Topology palette (slice #210.A) — five-state classification applied
+ * uniformly across nodes + (in later slices) links / interface pills /
+ * service bindings. Color carries the primary signal; pattern
+ * supplements for color-blind accessibility (dashed = spec-only,
+ * dotted = drift, heavier = down). The drift badge corner-pill from
+ * 174.C still rides on top of drift-state nodes.
+ *
+ * State precedence is encoded by the resolver in topology-palette.ts:
+ * down > drift > ok. Class application is mutually exclusive per
+ * element. */
+.topo-node.topo-elem--spec-only > rect       { stroke: var(--color-info);       stroke-dasharray: 4 3; }
+.topo-node.topo-elem--actuated-ok > rect     { stroke: var(--color-success); }
+.topo-node.topo-elem--actuated-down > rect   { stroke: var(--color-danger);     stroke-width: 2.5; }
+.topo-node.topo-elem--drift > rect           { stroke: var(--color-drift);      stroke-dasharray: 1 3; stroke-width: 2.5; }
+.topo-node.topo-elem--unknown > rect         { stroke: var(--color-text-muted); }
+/* Drift badge corner-pill stays warning-colored to remain visible
+ * against a violet outline. The badge encodes the count; the outline
+ * encodes state. */
 
 /* Layered filter dimming (slice #174.E) — non-matching nodes stay in
  * place so the operator keeps context, but fade out so the filtered
@@ -1331,14 +1343,11 @@
   50% { opacity: 0.45; }
 }
 
-/* "down" and "unrealized" devices look subdued to draw the eye to live ones. */
-.topo-node--down rect:not(.topo-node-selection-ring),
-.topo-node--unrealized rect:not(.topo-node-selection-ring) {
-  stroke-dasharray: 4 3;
-  opacity: 0.7;
-}
-.topo-node--down text,
-.topo-node--unrealized text {
+/* Down + spec-only (unrealized) nodes look subdued so live ones draw
+ * the eye. Outline style is set by the palette classes above; this
+ * controls the text + opacity. */
+.topo-node.topo-elem--actuated-down text,
+.topo-node.topo-elem--spec-only text {
   opacity: 0.7;
 }
 

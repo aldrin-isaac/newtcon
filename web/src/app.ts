@@ -101,6 +101,7 @@ import {
   uniqueZones,
 } from "./topology-filters.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
+import { resolveDevicePalette } from "./topology-palette.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
 // queue introduced in staging.ts, those flows go through enqueue* + applyAll
@@ -1772,15 +1773,18 @@ function renderTopologySVG(
     const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
     const status = opts.statusByDevice?.get(node.name);
     // Phase 2: substrate-agnostic state class. Tooltip carries the detail.
-    const stateClass = status ? ` topo-node--${status.state}` : "";
-    // Drift: count of out-of-sync items between intent and CONFIG_DB.
-    // Orthogonal to substrate state — a "running" device can have drift.
-    // The .topo-node--drifted class tints the node outline so the operator
-    // sees the drifted set at a glance, not just via the corner badge.
+    // Unified palette (slice #210.A) — five-state classification of the
+    // element's actuation observation. Replaces the prior independent
+    // .topo-node--running/--down/--unrealized/--drifted classes with
+    // one .topo-elem--<state> per the resolver. The pending-add /
+    // pending-del / selected / dragging / dimmed classes are
+    // orthogonal (staging/UI state, not actuation state) and continue
+    // to apply alongside.
     const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
-    const driftClass = driftCount > 0 ? " topo-node--drifted" : "";
+    const palette = resolveDevicePalette(status, driftCount);
+    const paletteClass = ` topo-elem--${palette}`;
 
-    const ariaLabelParts = [`Device ${node.name}`, status?.state ?? "unknown"];
+    const ariaLabelParts = [`Device ${node.name}`, palette];
     if (driftCount > 0) {
       ariaLabelParts.push(`drift: ${driftCount} item${driftCount === 1 ? "" : "s"}`);
     }
@@ -1793,8 +1797,7 @@ function renderTopologySVG(
         + (isDimmed ? " topo-node--dimmed" : "")
         + (isPendingAdd ? " topo-node--pending-add" : "")
         + (isPendingRemove ? " topo-node--pending-del" : "")
-        + stateClass
-        + driftClass,
+        + paletteClass,
       role: "button",
       tabindex: "0",
       "aria-label": ariaLabelParts.join(" — "),
@@ -3514,6 +3517,7 @@ interface PollArgs {
   graphSlot: HTMLElement;
   deviceNames: string[];
   onlineByDevice: Map<string, boolean>;
+  driftByDevice: Map<string, number>;
 }
 
 function startTopologyPoll(args: PollArgs): void {
@@ -3526,20 +3530,31 @@ function startTopologyPoll(args: PollArgs): void {
       fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name)));
     }
     const svg = args.graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
-    if (svg) patchDeviceStatuses(svg, fresh);
+    if (svg) patchDeviceStatuses(svg, fresh, args.driftByDevice);
   }, 5000);
 }
 
+// Lifecycle classes for the small status dot inside each device card.
+// Orthogonal to the palette: the dot reads as "what stage of life is
+// this in" (booting pulses) while the outline reads as "is intent +
+// reality aligned" (palette state). Both update together on poll.
 const STATUS_CLASSES = ["running", "booting", "down", "unrealized"] as const;
+const PALETTE_CLASSES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"] as const;
 
-function patchDeviceStatuses(svg: SVGSVGElement, statuses: Map<string, DeviceStatus>): void {
+function patchDeviceStatuses(
+  svg: SVGSVGElement,
+  statuses: Map<string, DeviceStatus>,
+  driftByDevice: Map<string, number>,
+): void {
   for (const [device, status] of statuses) {
     const sel = `g.topo-node[data-device="${CSS.escape(device)}"]`;
     const g = svg.querySelector(sel);
     if (!g) continue;
-    for (const c of STATUS_CLASSES) g.classList.remove(`topo-node--${c}`);
-    g.classList.add(`topo-node--${status.state}`);
-    g.setAttribute("aria-label", `Device ${device} — ${status.state}`);
+    const driftCount = driftByDevice.get(device) ?? 0;
+    const palette = resolveDevicePalette(status, driftCount);
+    for (const c of PALETTE_CLASSES) g.classList.remove(`topo-elem--${c}`);
+    g.classList.add(`topo-elem--${palette}`);
+    g.setAttribute("aria-label", `Device ${device} — ${palette}`);
     const dot = g.querySelector("circle.topo-status-dot");
     if (dot) {
       for (const c of STATUS_CLASSES) dot.classList.remove(`topo-status-dot--${c}`);
@@ -3982,7 +3997,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Phase 2: live-update device badges on a 5s tick. Patches in place — the
     // operator can keep interacting with the panel + drawers while statuses
     // refresh. Restart on every mount so re-renders don't accumulate timers.
-    startTopologyPoll({ network: activeNetwork(), graphSlot, deviceNames, onlineByDevice });
+    startTopologyPoll({ network: activeNetwork(), graphSlot, deviceNames, onlineByDevice, driftByDevice });
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
     const summary = el(

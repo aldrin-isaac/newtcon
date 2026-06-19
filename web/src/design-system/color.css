@@ -45,6 +45,14 @@
   --color-drift-present:       var(--color-warning);
   --color-drift-error:         var(--color-danger);
 
+  /* Topology palette (slice #210.A) — drift gets its own peer color
+   * (violet) so it sits alongside ok/down/spec-only rather than
+   * sharing the warning palette. The other four states reuse existing
+   * tokens (info=blue, success=green, danger=red, text-muted=grey). */
+  --color-drift:               #7c3aed;
+  --color-drift-bg:            #f3eafe;
+  --color-drift-border:        #d4bff5;
+
   --shadow-xs:    0 1px 2px 0 rgb(28 25 23 / 0.04);
   --shadow-sm:    0 1px 2px 0 rgb(28 25 23 / 0.05), 0 1px 3px 0 rgb(28 25 23 / 0.06);
   --shadow-md:    0 2px 4px -1px rgb(28 25 23 / 0.06), 0 4px 6px -2px rgb(28 25 23 / 0.04);
