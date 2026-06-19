@@ -242,163 +242,54 @@ const PATTERNS = {
 // `displaySchemaFor(kind)` (further down) which defaults to this schema but
 // overrides where newtron's GET-detail wire shape diverges from the create
 // request shape (e.g., services: "service_type" on detail, "type" on create).
+// specForms is now a tiny fallback for kinds newtron's schema endpoint
+// doesn't yet describe. The schema-driven dispatch (resolveSlugToKind
+// → fetchSchema → renderSchemaForm) covers every authoring kind newtron
+// registers; this map exists only so the rare schema-orphan kind still
+// has a minimal form to mount.
+//
+// As of PR #240 universal-engine extension, 14 of 15 registered kinds
+// have schemas. Only prefix-lists lacks a parent schema (it's just a
+// named bucket of PrefixListEntry sub-rules); its create form is one
+// field — name.
 const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
-  services: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. transit" },
-    {
-      name: "type", label: "Type", type: "select", required: true,
-      options: ["evpn-irb", "evpn-bridged", "evpn-routed", "irb", "bridged", "routed"],
-    },
-    { name: "ipvpn", label: "IP VPN", type: "text", placeholder: "IP VPN name (if applicable)" },
-    { name: "macvpn", label: "MAC VPN", type: "text", placeholder: "MAC VPN name (if applicable)" },
-    { name: "vrf_type", label: "VRF type", type: "text", placeholder: "e.g. L3" },
-    { name: "qos_policy", label: "QoS policy", type: "text", placeholder: "Policy name (optional)" },
-    { name: "ingress_filter", label: "Ingress filter", type: "text", placeholder: "Filter name (optional)" },
-    { name: "egress_filter", label: "Egress filter", type: "text", placeholder: "Filter name (optional)" },
-    { name: "description", label: "Description", type: "text" },
-  ],
-  ipvpns: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. corp-l3vpn" },
-    {
-      name: "l3vni", label: "L3 VNI", type: "number", required: true,
-      placeholder: "e.g. 10001", min: 1, max: 16777215,
-      help: "24-bit VXLAN VNI for routed traffic. Must be unique across IP VPNs in this network.",
-    },
-    { name: "vrf", label: "VRF", type: "text", placeholder: "VRF name (optional)" },
-    { name: "description", label: "Description", type: "text" },
-  ],
-  macvpns: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. vlan100-vpn" },
-    {
-      name: "vni", label: "VNI", type: "number", required: true,
-      placeholder: "e.g. 100", min: 1, max: 16777215,
-      help: "24-bit VXLAN VNI for bridged traffic. Must be unique across MAC VPNs in this network.",
-    },
-    {
-      name: "vlan_id", label: "VLAN ID", type: "number",
-      placeholder: "e.g. 100", min: 1, max: 4094,
-      help: "Local VLAN ID on each device the MAC VPN binds to. 802.1Q range is 1–4094.",
-    },
-    {
-      name: "anycast_ip", label: "Anycast IP", type: "text",
-      placeholder: "e.g. 10.0.100.1/24",
-      pattern: PATTERNS.IPV4_CIDR,
-      patternTitle: "IPv4 address with optional /prefix (e.g. 10.0.100.1 or 10.0.100.0/24)",
-    },
-    {
-      name: "anycast_mac", label: "Anycast MAC", type: "text",
-      placeholder: "e.g. 00:00:00:00:01:00",
-      pattern: PATTERNS.MAC,
-      patternTitle: "Six hex octets separated by colons or dashes (e.g. 00:00:00:00:01:00)",
-    },
-    { name: "description", label: "Description", type: "text" },
-  ],
-  "qos-policies": [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. voip-qos" },
-    { name: "description", label: "Description", type: "text" },
-  ],
-  filters: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. ingress-acl" },
-    {
-      name: "type", label: "Type", type: "select", required: true,
-      options: ["ipv4", "ipv6", "l2", "acl"],
-    },
-    { name: "description", label: "Description", type: "text" },
-  ],
   "prefix-lists": [
     { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. default-routes" },
   ],
-  "route-policies": [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. import-policy" },
-    { name: "description", label: "Description", type: "text" },
-  ],
-  profiles: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. spine-1" },
-    {
-      name: "mgmt_ip", label: "Management IP", type: "text", required: true,
-      placeholder: "e.g. 192.168.1.1",
-      pattern: PATTERNS.IPV4,
-      patternTitle: "IPv4 address (e.g. 192.168.1.1)",
-    },
-    {
-      name: "loopback_ip", label: "Loopback IP", type: "text", required: true,
-      placeholder: "e.g. 10.0.0.1",
-      pattern: PATTERNS.IPV4,
-      patternTitle: "IPv4 address (e.g. 10.0.0.1)",
-    },
-    { name: "zone", label: "Zone", type: "text", required: true, placeholder: "Zone name" },
-    { name: "platform", label: "Platform", type: "text", placeholder: "Platform name (optional)" },
-    {
-      name: "underlay_asn", label: "Underlay ASN", type: "number",
-      placeholder: "e.g. 65001", min: 1, max: 4294967295,
-      help: "Autonomous System Number for the device's underlay BGP session. Private-use range: 64512–65535 (16-bit) or 4200000000–4294967294 (32-bit).",
-    },
-    { name: "ssh_user", label: "SSH user", type: "text", placeholder: "e.g. admin" },
-  ],
-  zones: [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. datacenter-a" },
-  ],
 };
 
-// displaySpecForms is a per-kind override for the DETAIL-display layout
-// (renderSpecDetailInto). For most spec kinds the create-form schema in
-// specForms matches what newtron returns on GET — those kinds aren't listed
-// here and fall through to specForms via displaySchemaFor().
-//
-// Listed kinds are the ones where the wire-detail shape diverges from the
-// create-request shape:
-//
-//   services: newtron returns "service_type" on GET but accepts "type" on
-//             create. The display schema lists "service_type" so the value
-//             lands in the prominent row labeled "Type" rather than in the
-//             "All fields" disclosure. Heavier sub-fields (ipvpn, macvpn,
-//             vrf_type, qos_policy, ingress_filter, egress_filter) appear
-//             only when newtron returns them set — the disclosure surfaces
-//             them automatically, no display-schema entry needed unless we
-//             want them prominent.
-const displaySpecForms: Partial<Record<SpecKind, FieldDef[]>> = {
-  services: [
-    { name: "name", label: "Name", type: "text" },
-    { name: "service_type", label: "Type", type: "text" },
-    { name: "description", label: "Description", type: "text" },
-  ],
-};
-
-// displaySchemaFor returns the schema renderSpecDetailInto should use to
-// render the GET-detail response for a spec kind. Falls back to the create
-// form schema (specForms) when there is no override — that covers profiles
-// (wire shape matches create shape) and zones (just `name`, excluded from
-// the body — yielding the empty-state render).
+// displaySchemaFor returns the legacy hand-typed display schema for a
+// spec kind. Schema-driven kinds bypass this entirely (renderSpecDetailInto
+// is called directly with the schema fields). This fallback only fires
+// for schema-orphan kinds (prefix-lists today).
 function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
-  return displaySpecForms[kind] ?? specForms[kind];
+  return specForms[kind];
 }
 
 // isEditableKind returns true when a spec kind has any top-level field
 // beyond the identifier — those are the kinds where the Edit button shows
-// up in the detail drawer. Schemas that are just `name` (zones, prefix-
-// lists today) have nothing edit-worthy at the top level; their content
-// lives in sub-rules, managed via the existing sub-rule UI.
+// up in the detail drawer. For schema-driven kinds this resolves async
+// via the schema; the synchronous fallback below covers schema-orphan
+// kinds via specForms.
 function isEditableKind(kind: SpecKind): boolean {
   const fields = specForms[kind];
-  if (!fields) return false;
+  if (!fields) {
+    // Kinds backed by a schema (every kind newtron describes) — Edit
+    // button is reasonable to show by default. The edit flow itself
+    // resolves the schema and renders fields; if no editable fields
+    // exist, the form will just contain the identifier.
+    return true;
+  }
   return fields.some((f) => f.name !== "name");
 }
 
-// prefillFromDetail maps the GET-detail wire shape to the create-form
-// field names so the Edit form starts with the operator's current values.
-//
-// Most kinds are 1:1 — pass-through. Asymmetric kinds need explicit
-// mappings; today services is the only one (wire `service_type` ↔ form
-// `type`, same diversion already handled by displaySpecForms for the
-// read-only render).
-function prefillFromDetail(kind: SpecKind, detail: unknown): Record<string, unknown> {
+// prefillFromDetail copies the GET-detail wire shape into the legacy
+// edit form's field map. Schema-driven kinds use renderSchemaForm's
+// own prefill option (passes the entire detail object verbatim). This
+// helper exists only for the legacy fallback path (schema-orphan kinds).
+function prefillFromDetail(_kind: SpecKind, detail: unknown): Record<string, unknown> {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return {};
-  const d = detail as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...d };
-  if (kind === "services" && "service_type" in d) {
-    out["type"] = d["service_type"];
-  }
-  return out;
+  return { ...detail as Record<string, unknown> };
 }
 
 // enterSpecEditMode replaces the drawer body with an edit form pre-filled
