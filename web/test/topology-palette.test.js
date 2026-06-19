@@ -9,6 +9,8 @@ import {
   resolveDevicePalette,
   resolveLabDevicePalette,
   resolvePhysicalDevicePalette,
+  resolveLabStatusText,
+  resolvePhysicalStatusText,
   resolveLinkPalette,
 } from "../dist/topology-palette.js";
 
@@ -192,5 +194,65 @@ describe("resolveLinkPalette() — worst-of-two endpoint state", () => {
   test("equal endpoints return that state", () => {
     assert.equal(resolveLinkPalette("drift", "drift"), "drift");
     assert.equal(resolveLinkPalette("actuated-ok", "actuated-ok"), "actuated-ok");
+  });
+});
+
+describe("resolveLabStatusText() — Lab-view corner overlay", () => {
+  test("null lab → '' (no overlay; absence is the message)", () => {
+    assert.equal(resolveLabStatusText(null, "leaf1"), "");
+  });
+
+  test("device not in lab → '' (lab doesn't know about it)", () => {
+    assert.equal(resolveLabStatusText({ nodes: {} }, "leaf1"), "");
+  });
+
+  test("phase set → phase wins (more specific than .status)", () => {
+    assert.equal(
+      resolveLabStatusText({ nodes: { leaf1: { status: "running", phase: "patching" } } }, "leaf1"),
+      "patching",
+    );
+    assert.equal(
+      resolveLabStatusText({ nodes: { leaf1: { status: "running", phase: "booting" } } }, "leaf1"),
+      "booting",
+    );
+  });
+
+  test("no phase → .status (running / stopped / error)", () => {
+    assert.equal(
+      resolveLabStatusText({ nodes: { leaf1: { status: "running" } } }, "leaf1"),
+      "running",
+    );
+    assert.equal(
+      resolveLabStatusText({ nodes: { leaf1: { status: "stopped" } } }, "leaf1"),
+      "stopped",
+    );
+    assert.equal(
+      resolveLabStatusText({ nodes: { leaf1: { status: "error" } } }, "leaf1"),
+      "error",
+    );
+  });
+
+  test("missing status + no phase → '' (defensive)", () => {
+    assert.equal(resolveLabStatusText({ nodes: { leaf1: {} } }, "leaf1"), "");
+  });
+});
+
+describe("resolvePhysicalStatusText() — Physical-view corner overlay", () => {
+  test("online undefined → '' (probe in flight)", () => {
+    assert.equal(resolvePhysicalStatusText(undefined, 0), "");
+  });
+
+  test("offline → 'offline' (drift count irrelevant)", () => {
+    assert.equal(resolvePhysicalStatusText(false, 0), "offline");
+    assert.equal(resolvePhysicalStatusText(false, 5), "offline");
+  });
+
+  test("online + drift = 0 → 'online'", () => {
+    assert.equal(resolvePhysicalStatusText(true, 0), "online");
+  });
+
+  test("online + drift > 0 → 'online · N drift' (singular/plural identical — short label)", () => {
+    assert.equal(resolvePhysicalStatusText(true, 1), "online · 1 drift");
+    assert.equal(resolvePhysicalStatusText(true, 3), "online · 3 drift");
   });
 });

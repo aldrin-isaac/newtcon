@@ -116,6 +116,20 @@
 .topo-drift-badge circle { fill: var(--color-warning); stroke: var(--color-surface); stroke-width: 1.5; }
 .topo-drift-badge text { fill: var(--color-surface); font-family: var(--font-system); font-size: 10px; font-weight: var(--weight-semibold); pointer-events: none; }
 
+/* Per-device corner status text (Lab / Physical views). Sits below the
+ * rect's bottom-right; small + muted so it reads as a footnote. Empty
+ * text suppresses rendering (Spec view; in-flight probe). */
+.topo-status-text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  fill: var(--color-text-secondary);
+  text-anchor: end;
+  pointer-events: none;
+}
+.topo-status-text--empty { display: none; }
+
 /* Topology palette (slice #210.A) — five-state classification applied
  * uniformly across nodes + (in later slices) links / interface pills /
  * service bindings. Color carries the primary signal; pattern
