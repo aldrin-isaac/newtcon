@@ -17,6 +17,11 @@ import (
 // body to newtron's create-service verb and returns 201 with the newtron data.
 func TestCreateSpec_Handler_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/newtron/v1/schema" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"data":{"kinds":[]},"error":""}`)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/create-service" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
@@ -83,6 +88,13 @@ func TestCreateSpec_Handler_ValidationFailure(t *testing.T) {
 // delete-zone to newtron with {"name":…} and returns 200.
 func TestDeleteSpec_Handler_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The kind resolver fetches /api/schema on first lookup; return
+		// empty kinds so the legacy specKindMap fallback handles "zones".
+		if r.Method == http.MethodGet && r.URL.Path == "/newtron/v1/schema" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"data":{"kinds":[]},"error":""}`)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/delete-zone" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
@@ -310,6 +322,11 @@ func TestAddRoutePolicyRule_Handler_Success(t *testing.T) {
 func TestUpdateSpec_Handler_Success(t *testing.T) {
 	var gotBody map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/newtron/v1/schema" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"data":{"kinds":[]},"error":""}`)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/update-service" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "wrong path", http.StatusNotFound)
