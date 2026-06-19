@@ -282,18 +282,47 @@ describe("renderSchemaForm() — IPVPNSpec coverage", () => {
     assert.deepEqual(getValues(), {});
   });
 
-  test("map type renders disabled placeholder (out of scope)", async () => {
+  test("map type renders a visible 'not authorable' notice naming what newtron expects", async () => {
     const schema = {
       kind: "X", label: "X", description: "",
       fields: [
-        { name: "labels", label: "Labels", type: "map", required: false },
+        { name: "labels", label: "Labels", type: "map", required: false, item_kind: "FilterSpec" },
       ],
     };
     const { form, getValues } = await renderSchemaForm({ schema });
-    const placeholders = findAllByClass(form, "schema-form-input--unsupported");
-    assert.equal(placeholders.length, 1);
-    assert.equal(placeholders[0].disabled, true);
+    const notice = findFirstByClass(form, "schema-form-notice--unsupported");
+    assert.ok(notice, "notice element mounted");
+    const head = findFirstByClass(notice, "schema-form-notice-head");
+    assert.ok(head.textContent.includes("map of FilterSpec"));
     assert.deepEqual(getValues(), {});
+  });
+
+  test("array of item_kind renders a 'not authorable' notice (no silent drop)", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "rules", label: "Rules", type: "array", required: false, item_kind: "FilterRule" },
+      ],
+    };
+    const { form, getValues } = await renderSchemaForm({ schema });
+    const notice = findFirstByClass(form, "schema-form-notice--unsupported");
+    assert.ok(notice, "notice element mounted");
+    const head = findFirstByClass(notice, "schema-form-notice-head");
+    assert.ok(head.textContent.includes("array of FilterRule"));
+    assert.deepEqual(getValues(), {});
+  });
+
+  test("notice for required field flags the 400 risk explicitly", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "rules", label: "Rules", type: "array", required: true, item_kind: "FilterRule" },
+      ],
+    };
+    const { form } = await renderSchemaForm({ schema });
+    const body = findFirstByClass(form, "schema-form-notice-body");
+    assert.ok(body.textContent.includes("required by newtron"),
+      `notice body should flag required-by-newtron risk; got: "${body.textContent}"`);
   });
 
   test("string field with pattern wires input[pattern]", async () => {

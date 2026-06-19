@@ -247,10 +247,17 @@ async function buildFieldRow(
     }
     case "array": {
       // Primitive arrays render as a comma-separated input. Arrays of
-      // objects (item_kind set) are out of scope for this slice and
-      // render the placeholder.
+      // item_kind objects are NOT authored inline here: the renderer
+      // doesn't support repeatable nested sub-forms yet. Surface the
+      // limitation explicitly so the operator knows the field exists,
+      // what newtron expects, and that submitting empty creates the
+      // spec with no entries.
       if (field.item_kind) {
-        row.appendChild(disabledPlaceholder("array of objects not yet authorable"));
+        const requiredMark = field.required ? " (required by newtron — empty array will be rejected)" : "";
+        row.appendChild(unsupportedNotice(
+          `array of ${field.item_kind}`,
+          `Inline editing of object arrays is not yet supported in newtcon. Submit sends an empty array${requiredMark}.`,
+        ));
         read = () => "";
         break;
       }
@@ -276,9 +283,27 @@ async function buildFieldRow(
       };
       break;
     }
-    case "map":
+    case "map": {
+      // Map fields (e.g. DeviceProfile / ZoneSpec scoped overrides:
+      // `filters: map of FilterSpec`). Authoring maps requires a
+      // dedicated key-and-value UI the renderer doesn't have yet.
+      // Surface the limitation: name what newtron expects, what
+      // happens on submit, and whether it's a hard failure.
+      const valueDesc = field.item_kind ?? field.item_type ?? "value";
+      const requiredMark = field.required ? " (required by newtron — empty map will be rejected)" : "";
+      row.appendChild(unsupportedNotice(
+        `map of ${valueDesc}`,
+        `Inline editing of maps is not yet supported in newtcon. Submit sends an empty map${requiredMark}.`,
+      ));
+      read = () => "";
+      break;
+    }
     default: {
-      row.appendChild(disabledPlaceholder(`${field.type} fields not yet authorable in this form`));
+      const requiredMark = field.required ? " — required by newtron, expect a 400 on submit" : "";
+      row.appendChild(unsupportedNotice(
+        field.type,
+        `Field type "${field.type}" is not yet supported by the schema-form renderer. The field will be omitted from the request${requiredMark}.`,
+      ));
       read = () => "";
       break;
     }
@@ -415,4 +440,24 @@ function disabledPlaceholder(message: string): HTMLElement {
   input.disabled = true;
   input.placeholder = message;
   return input;
+}
+
+/**
+ * unsupportedNotice — visible callout that newtcon doesn't yet author
+ * this field shape, naming what newtron expects so the operator can
+ * decide whether to proceed or work around. Replaces silent disabled
+ * inputs for limitations that affect what actually gets submitted.
+ */
+function unsupportedNotice(shapeDesc: string, detail: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "schema-form-notice schema-form-notice--unsupported";
+  const head = document.createElement("strong");
+  head.className = "schema-form-notice-head";
+  head.textContent = `Not authorable here: ${shapeDesc}`;
+  const body = document.createElement("p");
+  body.className = "schema-form-notice-body";
+  body.textContent = detail;
+  wrap.appendChild(head);
+  wrap.appendChild(body);
+  return wrap;
 }

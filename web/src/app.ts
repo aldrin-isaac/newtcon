@@ -102,7 +102,7 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
-import { fetchSchema } from "./api/newtcon/schema.js";
+import { fetchSchema, resolveSlugToKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
@@ -752,15 +752,11 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
   return { form, getValues, validate: () => form.reportValidity() };
 }
 
-// Kinds whose create form is driven by newtron's schema metadata
-// (PR #240) instead of newtcon's hand-typed specForms entry. Mapping is
-// newtcon-kind → newtron-Go-type-name. Adding a kind here moves it onto
-// the schema-driven path; specForms[kind] becomes dead code for that
-// kind and can be deleted in the follow-up.
-const SCHEMA_KIND_FOR: Partial<Record<SpecKind, string>> = {
-  ipvpns: "IPVPNSpec",
-  services: "ServiceSpec",
-};
+// Schema dispatch is dynamic — given newtcon's URL slug, we look up the
+// newtron kind name from /api/schema's `paths.list` per kind. No
+// hardcoded slug→kind map: newtron is the source of truth for which
+// kinds exist, and newtcon discovers them at runtime. See
+// resolveSlugToKind() in web/src/api/newtcon/schema.ts.
 
 // openCreateDrawer opens the drawer for creating a new spec of the given kind.
 // onSuccess is called after a successful create to refresh the panel list.
@@ -776,15 +772,33 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
   content.appendChild(el("h2", { className: "drawer-name" }, "Add " + kindTitle.toLowerCase().replace(/s$/, "")));
 
-  // Schema-driven path (newtron PR #240). Labels, tooltips, types,
-  // required-ness, and field list all come from newtron's schema
-  // endpoint. UX overrides (smart defaults) layer on top.
-  const schemaKind = SCHEMA_KIND_FOR[kind];
-  if (schemaKind !== undefined) {
-    void renderSchemaDrivenCreate(kind, schemaKind, content, drawer, onSuccess);
-    return;
-  }
+  // Dispatch is dynamic: resolve the URL slug to newtron's kind name
+  // via /api/schema. If newtron knows the kind, use the schema-driven
+  // path; otherwise fall back to legacy specForms. resolveSlugToKind
+  // is async (one lazy fetch per session to build the slug map); we
+  // await it before deciding the path.
+  void (async () => {
+    const schemaKind = await resolveSlugToKind(kind).catch(() => null);
+    if (schemaKind !== null) {
+      void renderSchemaDrivenCreate(kind, schemaKind, content, drawer, onSuccess);
+      return;
+    }
+    // Fall through to the legacy hand-typed specForms path for any
+    // kind newtron's schema endpoint doesn't cover.
+    legacyCreateForm(kind, content, drawer, onSuccess);
+  })();
+}
 
+// legacyCreateForm — fallback path for kinds newtron's schema endpoint
+// doesn't yet describe (e.g. prefix-lists today). Lifted out of
+// openCreateDrawer so the dynamic-dispatch flow can call it without
+// duplicating the original body.
+function legacyCreateForm(
+  kind: SpecKind,
+  content: HTMLElement,
+  drawer: HTMLElement,
+  onSuccess: () => void,
+): void {
   const fields = specForms[kind];
   if (!fields || fields.length === 0) {
     content.appendChild(el("p", { className: "panel-error" }, "No form defined for this spec type."));
