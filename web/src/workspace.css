@@ -1480,6 +1480,13 @@
 .link-drawer-endpoint-body .drawer-kind {
   margin-top: var(--space-sm);
 }
+.link-drawer-endpoint-body .drawer-subkind {
+  margin-top: var(--space-2xs);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+}
 
 /* ---- Topology: docked action panel ----------------------------------- */
 
