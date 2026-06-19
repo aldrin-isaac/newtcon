@@ -102,7 +102,7 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
-import { fetchSchema, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
+import { fetchSchema, fetchSchemaKinds, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
@@ -165,18 +165,52 @@ interface Panel {
   title: string;
 }
 
-const PANELS: Panel[] = [
-  { kind: "services", title: "Services" },
-  { kind: "ipvpns", title: "IP VPNs" },
-  { kind: "macvpns", title: "MAC VPNs" },
-  { kind: "qos-policies", title: "QoS policies" },
-  { kind: "filters", title: "Filters" },
-  { kind: "route-policies", title: "Route policies" },
-  { kind: "prefix-lists", title: "Prefix lists" },
-  { kind: "profiles", title: "Device profiles" },
-  { kind: "zones", title: "Zones" },
-  { kind: "platforms", title: "Platforms" },
-];
+// PANELS is discovered dynamically from newtron's /api/schema. The list
+// is loaded the first time any specs view is mounted (loadPanels()) and
+// cached for the session. Synchronous lookups (kindTitleFor) fall back
+// to humanizing the slug when called before the cache populates.
+//
+// One kind that won't appear in the schema-derived list: prefix-lists
+// (no PrefixListSpec schema). Stitched in as the schema-orphan fallback
+// so its panel still renders.
+let PANELS: Panel[] = [];
+let panelsLoaded: Promise<Panel[]> | null = null;
+
+async function loadPanels(): Promise<Panel[]> {
+  if (panelsLoaded) return panelsLoaded;
+  panelsLoaded = (async () => {
+    const out: Panel[] = [];
+    try {
+      const summaries = await fetchSchemaKinds();
+      for (const s of summaries) {
+        const meta = await fetchSchema(s.kind).catch(() => null);
+        const listPath = meta?.paths?.list;
+        if (!listPath) continue; // embedded / sub-rule — not a top-level panel
+        const m = listPath.match(/\/([^/]+)$/);
+        if (!m) continue;
+        out.push({ kind: m[1]! as SpecKind, title: s.label });
+      }
+    } catch {
+      // Schema endpoint unavailable — fall back to no schema-derived
+      // panels. The prefix-lists fallback still mounts below.
+    }
+    // Schema-orphan kinds get manual panel entries so they still render.
+    // As of today: prefix-lists (just a named bucket of PrefixListEntry
+    // sub-rules, no parent schema). When newtron registers PrefixListSpec
+    // this entry goes away.
+    if (!out.some((p) => p.kind === "prefix-lists")) {
+      out.push({ kind: "prefix-lists" as SpecKind, title: "Prefix lists" });
+    }
+    PANELS = out;
+    return out;
+  })();
+  try {
+    return await panelsLoaded;
+  } catch (e) {
+    panelsLoaded = null;
+    throw e;
+  }
+}
 
 // ---- Form field definitions per spec type ----------------------------------
 // Each field definition describes one HTML input in the "Add" form drawer.
@@ -1680,10 +1714,16 @@ function injectParentName(kind: SpecKind, specName: string, values: Record<strin
   return out;
 }
 
-// kindTitleFor maps a SpecKind back to a human title.
+// kindTitleFor maps a SpecKind back to a human title. Reads the
+// schema-loaded PANELS cache; falls back to a humanized slug when the
+// cache hasn't loaded yet (e.g. a deep link to a detail drawer that
+// fires before the Specs tab mounts).
 function kindTitleFor(kind: SpecKind): string {
   const panel = PANELS.find((p) => p.kind === kind);
-  return panel?.title ?? kind;
+  if (panel) return panel.title;
+  // Humanize the slug: "qos-policies" → "Qos policies", "ipvpns" → "Ipvpns".
+  // Operator sees the canonical label as soon as the schema cache loads.
+  return kind.charAt(0).toUpperCase() + kind.slice(1).replace(/-/g, " ");
 }
 
 async function openDetail(kind: SpecKind, kindTitle: string, name: string): Promise<void> {
@@ -4678,18 +4718,37 @@ function setupTabs(): void {
 
 // ---- Entry ------------------------------------------------------------------
 
-// Spec facets grouped into operator-domain categories. Replaces the flat
-// 10-panel grid with a focused-one-at-a-time layout (secondary sidebar nav).
+// Spec facets grouped into operator-domain categories. Newtcon owns
+// the grouping (UX policy — what's a Service vs. a Policy is editorial),
+// but the panels within each group come from the schema-derived PANELS
+// list. Any panel kind not named here lands in the "Other" fallback
+// group so a new kind newtron registers still appears in the UI.
 const SPEC_GROUPS: { id: string; label: string; kinds: SpecKind[] }[] = [
   { id: "services",  label: "Services",  kinds: ["services", "ipvpns", "macvpns"] },
   { id: "policies",  label: "Policies",  kinds: ["qos-policies", "filters", "route-policies", "prefix-lists"] },
   { id: "inventory", label: "Inventory", kinds: ["profiles", "platforms", "zones"] },
 ];
 
+// resolveGroupings returns the SPEC_GROUPS list extended with an
+// "Other" group containing any kind present in PANELS but not named in
+// SPEC_GROUPS. Catches new kinds newtron registers between releases.
+function resolveGroupings(): { id: string; label: string; kinds: SpecKind[] }[] {
+  const grouped = new Set<string>(SPEC_GROUPS.flatMap((g) => g.kinds));
+  const others = PANELS
+    .map((p) => p.kind)
+    .filter((k) => !grouped.has(k));
+  if (others.length === 0) return SPEC_GROUPS;
+  return [...SPEC_GROUPS, { id: "other", label: "Other", kinds: others }];
+}
+
 let activeFacet: SpecKind = "services";
 
 async function mountSpecsView(root: HTMLElement): Promise<void> {
   root.textContent = "";
+  // Schema-driven panel discovery — fetch the kind list before
+  // building the subnav. Cached for the session after the first call.
+  await loadPanels();
+
   const layout = el("div", { className: "specs-layout" });
   const subnav = el("aside", { className: "specs-subnav" });
   const main = el("div", { className: "specs-main" });
@@ -4711,7 +4770,7 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
 
   function renderSubnav(): void {
     subnav.textContent = "";
-    for (const group of SPEC_GROUPS) {
+    for (const group of resolveGroupings()) {
       const section = el("div", { className: "specs-subnav-section" });
       section.appendChild(el("h3", { className: "specs-subnav-heading" }, group.label));
       const groupList = el("div", { className: "specs-subnav-list" });
