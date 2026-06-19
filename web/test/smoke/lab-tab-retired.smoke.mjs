@@ -40,16 +40,23 @@ try {
   expect(!stragglers.tabLab && !stragglers.panelLab,
     `no Lab tab/panel in DOM: ${JSON.stringify(stragglers)}`);
 
-  // ── 3. Topology toolbar has all 3 lab-lifecycle buttons ─────────────────
+  // ── 3. Topology toolbar (Lab view) has all 3 lab-lifecycle buttons ──────
   await page.click("#tab-topology");
   await new Promise((r) => setTimeout(r, 1500));
+  // View-mode gating (post-#210): lab lifecycle lives in the Lab view.
+  await page.evaluate(() => {
+    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+      .find((el) => el.textContent.trim() === "Lab");
+    if (chip instanceof HTMLElement) chip.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
 
   const toolbarBtns = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".topology-toolbar-btn"))
       .map((b) => b.textContent?.trim()));
-  expect(toolbarBtns.includes("Bring up as lab"), `toolbar has Bring up as lab: ${JSON.stringify(toolbarBtns)}`);
-  expect(toolbarBtns.includes("Provision"),       `toolbar has Provision: ${JSON.stringify(toolbarBtns)}`);
-  expect(toolbarBtns.includes("Tear down lab"),   `toolbar has Tear down lab: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Bring up"),  `toolbar has Bring up: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Provision"), `toolbar has Provision: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Tear down"), `toolbar has Tear down: ${JSON.stringify(toolbarBtns)}`);
 
   // ── 4. Provision click triggers confirm + POST /api/labs/{net}/provision ─
   let provisionConfirmSeen = false;

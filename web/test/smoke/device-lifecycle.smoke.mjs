@@ -1,6 +1,6 @@
 // Headless smoke for phase 3 of the unified-substrate direction:
 //   - Lifecycle section in the device-inspector drawer
-//   - "Tear down lab" toolbar button (mirror of "Bring up as lab")
+//   - "Tear down" toolbar button in Lab view (mirror of "Bring up")
 //
 // Asserts structural presence + correct state-based content.  The full
 // transition (Stop / Start / Tear-down → device boots back up) depends on
@@ -35,27 +35,44 @@ try {
   await page.click("#tab-topology");
   await new Promise((r) => setTimeout(r, 1500));
 
-  // ── 1. Tear-down toolbar button is present ───────────────────────────────
+  // Switch to Lab view so the lifecycle buttons are present in the
+  // toolbar (post-#210 view-mode gating: Spec view doesn't carry lab
+  // lifecycle).
+  await page.evaluate(() => {
+    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+      .find((el) => el.textContent.trim() === "Lab");
+    if (chip instanceof HTMLElement) chip.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+
+  // ── 1. Tear-down toolbar button is present in Lab view ───────────────────
   const tearDownText = await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
-      .find((el) => el.textContent.trim() === "Tear down lab");
+      .find((el) => el.textContent.trim() === "Tear down");
     return b ? { text: b.textContent.trim(), classes: b.className } : null;
   });
-  expect(tearDownText !== null, `toolbar has "Tear down lab" button`);
-  expect(tearDownText?.classes.includes("topology-toolbar-btn--danger"),
-    `tear-down button has --danger styling: ${tearDownText?.classes}`);
+  expect(tearDownText !== null, `Lab view toolbar has "Tear down" button`);
 
   // ── 2. Tear-down click fires a confirm dialog (dismissed automatically) ──
   dialogSawConfirm = false;
   await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
-      .find((el) => el.textContent.trim() === "Tear down lab");
+      .find((el) => el.textContent.trim() === "Tear down");
     b?.click();
   });
   await new Promise((r) => setTimeout(r, 400));
   expect(dialogSawConfirm, "tear-down click triggers confirm dialog");
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-lifecycle-01-topology.png" });
+
+  // Switch back to Spec view so the right-click → Inspect context menu
+  // is available (gated to Spec post-#210).
+  await page.evaluate(() => {
+    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+      .find((el) => el.textContent.trim() === "Spec");
+    if (chip instanceof HTMLElement) chip.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
 
   // ── 3. Open the device inspector for switch1 via right-click → Inspect ───
   // SVG node has class topo-node + data-device. The contextmenu handler in

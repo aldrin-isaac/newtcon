@@ -2789,7 +2789,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
 
   if (status.state === "unrealized") {
     body.appendChild(el("p", { className: "lifecycle-hint" },
-      `No substrate is realizing ${device} yet. Click "Bring up as lab" in the topology toolbar to deploy this network as VMs.`));
+      `No substrate is realizing ${device} yet. Switch to the Lab view and click "Bring up" to deploy this network as VMs.`));
     return;
   }
 
@@ -3718,8 +3718,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // (bring up / provision / tear down) because those operate on the
     // lab, not the spec; Physical view is pure observation (no
     // mutation, no lifecycle).
+    // Toolbar is created here but appended below the view-mode chip
+    // row so the operator reads top-to-bottom as: pick a view → take
+    // an action appropriate to that view.
     const toolbar = el("div", { className: "topology-toolbar" });
-    root.appendChild(toolbar);
 
     const renderToolbar = (): void => {
       toolbar.textContent = "";
@@ -3741,7 +3743,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Lab substrate lifecycle: Bring up → Provision → Tear down.
         // Blue (spec-only) devices become green via Bring up + Provision.
         // Convention: lab name == active network ID (newtron#116 / PR #121).
-        const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Bring up as lab");
+        const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Bring up");
         bringUpBtn.addEventListener("click", () => {
           const network = activeNetwork();
           if (!window.confirm(`Bring up network "${network}" as a lab? VMs will boot for each device in the topology.`)) return;
@@ -3769,7 +3771,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         });
         toolbar.appendChild(provisionBtn);
 
-        const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--danger" }, "Tear down lab");
+        const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Tear down");
         tearDownBtn.addEventListener("click", () => {
           const network = activeNetwork();
           if (!window.confirm(`Tear down lab "${network}"? This will destroy all VMs and their state. The topology spec stays intact.`)) return;
@@ -3778,12 +3780,12 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           postLabDestroy(network)
             .then(() => {
               tearDownBtn.removeAttribute("disabled");
-              tearDownBtn.textContent = "Tear down lab";
+              tearDownBtn.textContent = "Tear down";
               mountTopologyTab(root);
             })
             .catch((err) => {
               tearDownBtn.removeAttribute("disabled");
-              tearDownBtn.textContent = "Tear down lab";
+              tearDownBtn.textContent = "Tear down";
               const msg = err instanceof Error ? err.message : String(err);
               alert(`Tear down failed: ${msg}`);
             });
@@ -3794,7 +3796,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // because physical hardware isn't lifecycle-managed by newtcon).
         // Provision drives spec-only (blue) devices toward actuated-ok
         // (green) by pushing the spec projection at the substrate.
-        const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Provision");
+        const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
         provisionBtn.addEventListener("click", () => {
           const network = activeNetwork();
           if (!window.confirm(`Run provisioning pass against the physical substrate for "${network}"?`)) return;
@@ -3862,6 +3864,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // by a redundant disabled-chip state.
     const viewRow = el("div", { className: "topology-view-row" });
     root.appendChild(viewRow);
+    root.appendChild(toolbar);
     const renderViewRow = (): void => {
       viewRow.textContent = "";
       const label = el("span", { className: "topology-view-label" }, "View:");

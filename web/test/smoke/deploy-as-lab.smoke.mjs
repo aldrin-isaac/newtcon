@@ -41,24 +41,31 @@ try {
   console.log(`→ reload ${BASE} with active network "2node-vs"`);
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
 
-  // Switch to Topology tab.
+  // Switch to Topology tab → Lab view (post-#210 the lifecycle buttons
+  // are gated to the Lab view).
   await page.click("#tab-topology");
   await new Promise((r) => setTimeout(r, 1200));
+  await page.evaluate(() => {
+    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+      .find((el) => el.textContent.trim() === "Lab");
+    if (chip instanceof HTMLElement) chip.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-deploy-01-topology.png" });
 
   // 1. Button is present.
   const btnText = await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll(".topology-toolbar-btn"));
-    const b = btns.find((el) => el.textContent.trim() === "Bring up as lab");
+    const b = btns.find((el) => el.textContent.trim() === "Bring up");
     return b ? b.textContent.trim() : null;
   });
-  expect(btnText === "Bring up as lab", `toolbar button labeled "${btnText}"`);
+  expect(btnText === "Bring up", `toolbar button labeled "${btnText}"`);
 
   // 2-3. Click the button → confirm auto-accepts → modal opens.
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll(".topology-toolbar-btn"));
-    btns.find((el) => el.textContent.trim() === "Bring up as lab")?.click();
+    btns.find((el) => el.textContent.trim() === "Bring up")?.click();
   });
   await new Promise((r) => setTimeout(r, 800));
 

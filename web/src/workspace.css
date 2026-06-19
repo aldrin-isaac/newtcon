@@ -153,7 +153,7 @@
 /* View-mode chip row (slice #210.B) — sits above the zone-filter row.
  * Always mounted so operators see what views exist; unavailable modes
  * render disabled to signal what signal would be needed. */
-.topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0; flex-wrap: wrap; }
+.topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-md); flex-wrap: wrap; }
 .topology-view-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); margin-right: var(--space-xs); }
 .topology-view-chip { font-size: var(--text-xs); padding: 2px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border-default); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); transition: all var(--duration-fast) var(--ease-standard); }
 .topology-view-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
@@ -816,28 +816,6 @@
   cursor: pointer;
 }
 .topology-toolbar-btn:hover { background: var(--color-surface-hover); }
-.topology-toolbar-btn--primary {
-  background: var(--color-action-primary, var(--color-brand-500, #2563eb));
-  color: var(--color-action-primary-text, #fff);
-  border-color: transparent;
-  margin-left: auto;
-}
-.topology-toolbar-btn--primary:hover {
-  background: var(--color-action-primary-hover, var(--color-brand-600, #1d4ed8));
-}
-.topology-toolbar-btn--danger {
-  background: var(--color-surface);
-  color: var(--color-danger, #dc2626);
-  border-color: var(--color-danger, #dc2626);
-}
-.topology-toolbar-btn--danger:hover {
-  background: var(--color-danger, #dc2626);
-  color: #fff;
-}
-.topology-toolbar-btn--danger:disabled {
-  opacity: 0.5;
-  cursor: wait;
-}
 
 /* Deploy-as-lab modal log panel (reuses .network-modal chrome) */
 .deploy-modal {
