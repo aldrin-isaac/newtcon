@@ -287,11 +287,17 @@ func (c *Client) RemoveRoutePolicyRule(ctx context.Context, network, policy stri
 // Per-item sub-rule update (newtcon#173.B + #173.C)
 // ============================================================================
 //
-// Newtron PRs #215/216/217/222 (2026-06-17 late) shipped per-item update
-// verbs for all four sub-rule families. The shape is `POST /update-X`
-// with the identifier in the body — same pattern as Add/Remove, no new
-// URL conventions. The renumber field (new_seq / new_queue_id / new_prefix)
-// is optional except for prefix-list-entry where new_prefix is required.
+// Newtron PRs #215/216/217 shipped per-item update verbs for the three
+// sub-rule families with editable non-key fields. The shape is
+// `POST /update-X` with the identifier in the body — same pattern as
+// Add/Remove. The renumber field (new_seq / new_queue_id) lets the row
+// move within its parent collection in the same call.
+//
+// Prefix-list entries are not part of this family: a prefix-list entry
+// has no fields beyond its key (the prefix CIDR), so newtron #239 deleted
+// `update-prefix-list-entry` outright. Operators rename a prefix by
+// `remove-prefix-list-entry` + `add-prefix-list-entry`.
+//
 // Newtcon's handler layer wraps these as PUT to the identified path for
 // a more REST-ish surface; the conversion happens at the handler.
 
@@ -311,13 +317,6 @@ func (c *Client) UpdateRoutePolicyRule(ctx context.Context, network string, body
 // carries {policy, queue_id, ...queue_fields, new_queue_id?} per newtron PR #217.
 func (c *Client) UpdateQoSQueue(ctx context.Context, network string, body any) (json.RawMessage, error) {
 	return c.networkPost(ctx, network, "update-qos-queue", body)
-}
-
-// UpdatePrefixListEntry sends POST /network/{netID}/update-prefix-list-entry.
-// Body carries {prefix_list, prefix, new_prefix} per newtron PR #222.
-// new_prefix is REQUIRED — a prefix-list entry has no other mutable surface.
-func (c *Client) UpdatePrefixListEntry(ctx context.Context, network string, body any) (json.RawMessage, error) {
-	return c.networkPost(ctx, network, "update-prefix-list-entry", body)
 }
 
 // ShowSpec returns the full newtron payload for a single spec instance.

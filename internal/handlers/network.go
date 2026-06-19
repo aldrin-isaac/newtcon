@@ -409,20 +409,25 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 	}))
 
 	// ---- Sub-rule UPDATE (slice #173.B) ------------------------------------
-	// Per-item in-place edit + reorder for the four sub-rule families.
-	// Newtron PRs #215/216/217/222 ship the update-<sub-rule> verbs;
-	// these handlers wrap them with a RESTful PUT shape:
+	// Per-item in-place edit + reorder for the three sub-rule families
+	// with editable non-key fields. Newtron PRs #215/216/217 ship the
+	// update-<sub-rule> verbs; these handlers wrap them with a RESTful
+	// PUT shape:
 	//
 	//   PUT /api/networks/{netID}/qos-policies/{name}/queues/{queue_id}
 	//   PUT /api/networks/{netID}/filters/{name}/rules/{seq}
 	//   PUT /api/networks/{netID}/route-policies/{name}/rules/{seq}
-	//   PUT /api/networks/{netID}/prefix-lists/{name}/entries/{prefix...}
 	//
 	// Identifier + parent name are taken from the URL path and injected
 	// into the body before forwarding to newtron's update-<X> verb,
 	// which expects them in the request body. The body may carry a
-	// renumber field (new_seq / new_queue_id / new_prefix) — passed
-	// through unchanged.
+	// renumber field (new_seq / new_queue_id) — passed through unchanged.
+	//
+	// Prefix-list entries have no editable fields beyond the key (the
+	// prefix itself), so newtron #239 removed update-prefix-list-entry
+	// entirely. Renaming a prefix-list entry now compiles to
+	// remove-prefix-list-entry + add-prefix-list-entry — there is no
+	// PUT entries/{prefix} route on this server.
 
 	mux.Handle("PUT /api/networks/{netID}/qos-policies/{name}/queues/{queue_id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -505,29 +510,6 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		_, _ = w.Write(result)
 	}))
 
-	mux.Handle("PUT /api/networks/{netID}/prefix-lists/{name}/entries/{prefix...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		netID := r.PathValue("netID")
-		list := r.PathValue("name")
-		prefix := r.PathValue("prefix")
-		body := readJSONBodyAsMap(w, r)
-		if body == nil {
-			return
-		}
-		body["prefix_list"] = list
-		body["prefix"] = prefix
-		// new_prefix is REQUIRED by newtron (a prefix-list entry has no
-		// other mutable surface). Caller must supply it in the body —
-		// newtron's 400 will surface naturally if missing.
-		result, err := c.UpdatePrefixListEntry(ctx, netID, body)
-		if err != nil {
-			writeUpstreamError(w, cid(ctx), err, "PUT /api/networks/"+netID+"/prefix-lists/"+list+"/entries/"+prefix, nil)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(result)
-	}))
 }
 
 // readJSONBodyAsMap reads + parses an HTTP request body as a JSON

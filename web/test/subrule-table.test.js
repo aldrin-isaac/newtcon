@@ -117,22 +117,6 @@ describe("itemKey() — string items", () => {
 });
 
 describe("composeUpdateBody() — slice #173.B", () => {
-  test("string itemType always emits new_prefix (newtron requires it; idempotent on no-change)", () => {
-    const body = composeUpdateBody({ prefix: "10.0.0.0/24" }, "string", undefined, "10.0.0.0/8");
-    assert.deepEqual(body, { new_prefix: "10.0.0.0/24" });
-  });
-
-  test("string itemType emits new_prefix even when prefix matches original (idempotent)", () => {
-    const body = composeUpdateBody({ prefix: "10.0.0.0/8" }, "string", undefined, "10.0.0.0/8");
-    assert.deepEqual(body, { new_prefix: "10.0.0.0/8" });
-  });
-
-  test("string itemType with missing field emits empty new_prefix", () => {
-    // Defensive — real form would have validated required first.
-    const body = composeUpdateBody({}, "string", undefined, "old");
-    assert.deepEqual(body, { new_prefix: "" });
-  });
-
   test("object itemType drops keyField when value unchanged (URL identifies the row)", () => {
     const body = composeUpdateBody(
       { seq: 10, action: "permit", src_ip: "10.0.0.0/8" },

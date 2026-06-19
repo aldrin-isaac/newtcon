@@ -477,41 +477,6 @@ func TestUpdateRoutePolicyRule_Handler(t *testing.T) {
 	}
 }
 
-// TestUpdatePrefixListEntry_Handler verifies PUT /prefix-lists/{name}/entries/{prefix}.
-// new_prefix is required by newtron — the handler passes it through unchanged.
-func TestUpdatePrefixListEntry_Handler(t *testing.T) {
-	var seenBody []byte
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/newtron/v1/networks/default/update-prefix-list-entry" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		seenBody, _ = io.ReadAll(r.Body)
-		fmt.Fprintln(w, `{"data":{"prefix":"10.0.0.0/24"},"error":""}`)
-	}))
-	defer upstream.Close()
-
-	mux := http.NewServeMux()
-	handlers.RegisterNetworkRoutes(mux, handlers.NetworkDeps{Client: newtronc.New(upstream.URL)})
-
-	body, _ := json.Marshal(map[string]string{"new_prefix": "10.0.0.0/24"})
-	req := httptest.NewRequest(http.MethodPut, "/api/networks/default/prefix-lists/PL_CUST/entries/10.0.0.0/8", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !bytes.Contains(seenBody, []byte(`"prefix_list":"PL_CUST"`)) {
-		t.Errorf("URL prefix_list not injected: %s", seenBody)
-	}
-	if !bytes.Contains(seenBody, []byte(`"prefix":"10.0.0.0/8"`)) {
-		t.Errorf("URL prefix (the identifier) not injected: %s", seenBody)
-	}
-	if !bytes.Contains(seenBody, []byte(`"new_prefix":"10.0.0.0/24"`)) {
-		t.Errorf("renumber field not preserved: %s", seenBody)
-	}
-}
-
 // TestUpdateFilterRule_Handler_MalformedJSON verifies the read helper
 // guards against invalid body bodies without reaching upstream.
 func TestUpdateFilterRule_Handler_MalformedJSON(t *testing.T) {
