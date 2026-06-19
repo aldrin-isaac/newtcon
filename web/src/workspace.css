@@ -172,6 +172,14 @@
   width: 16px; height: 16px;
   accent-color: var(--color-accent);
 }
+.schema-form-nested {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  background: var(--color-surface-sunken);
+  margin: 0;
+}
+.schema-form-nested > .schema-form { gap: var(--space-xs); }
 
 /* Topology palette (slice #210.A) — five-state classification applied
  * uniformly across nodes + (in later slices) links / interface pills /

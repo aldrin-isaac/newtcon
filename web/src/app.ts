@@ -759,6 +759,7 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
 // kind and can be deleted in the follow-up.
 const SCHEMA_KIND_FOR: Partial<Record<SpecKind, string>> = {
   ipvpns: "IPVPNSpec",
+  services: "ServiceSpec",
 };
 
 // openCreateDrawer opens the drawer for creating a new spec of the given kind.
