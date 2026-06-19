@@ -238,19 +238,89 @@ describe("renderSchemaForm() — IPVPNSpec coverage", () => {
     assert.equal(getValues().type, "irb");
   });
 
-  test("ref / object / map types render disabled placeholders for now", async () => {
+  test("ref field renders a <select> dropdown (populated async from the ref kind's list path)", async () => {
     const schema = {
       kind: "X", label: "X", description: "",
       fields: [
-        { name: "ipvpn", label: "IP-VPN", type: "ref", required: false, ref_kind: "IPVPNSpec" },
-        { name: "routing", label: "Routing", type: "object", required: false, item_kind: "RoutingSpec" },
+        { name: "ipvpn", label: "IP-VPN", type: "ref", required: true, ref_kind: "IPVPNSpec" },
       ],
     };
     const { form, getValues } = await renderSchemaForm({ schema });
-    const inputs = findAllByClass(form, "schema-form-input--unsupported");
-    assert.equal(inputs.length, 2);
-    assert.equal(inputs.every((i) => i.disabled === true), true);
-    // Body never contains placeholder fields.
+    const inputs = findInputs(form);
+    assert.equal(inputs.length, 1);
+    assert.equal(inputs[0].tagName, "SELECT");
+    assert.equal(inputs[0].required, true);
+    // Unselected → no value, dropped from body.
     assert.deepEqual(getValues(), {});
+  });
+
+  test("object field with item_kind renders a nested <fieldset>", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "routing", label: "Routing", type: "object", required: false, item_kind: "RoutingSpec" },
+      ],
+    };
+    const { form } = await renderSchemaForm({ schema });
+    // Find the nested fieldset by class.
+    const nested = findAllByClass(form, "schema-form-nested");
+    assert.equal(nested.length, 1);
+    assert.equal(nested[0].tagName, "FIELDSET");
+  });
+
+  test("object field without item_kind falls back to disabled placeholder", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "broken", label: "Broken", type: "object", required: false },
+      ],
+    };
+    const { form, getValues } = await renderSchemaForm({ schema });
+    const placeholders = findAllByClass(form, "schema-form-input--unsupported");
+    assert.equal(placeholders.length, 1);
+    assert.equal(placeholders[0].disabled, true);
+    assert.deepEqual(getValues(), {});
+  });
+
+  test("map type renders disabled placeholder (out of scope)", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "labels", label: "Labels", type: "map", required: false },
+      ],
+    };
+    const { form, getValues } = await renderSchemaForm({ schema });
+    const placeholders = findAllByClass(form, "schema-form-input--unsupported");
+    assert.equal(placeholders.length, 1);
+    assert.equal(placeholders[0].disabled, true);
+    assert.deepEqual(getValues(), {});
+  });
+
+  test("string field with pattern wires input[pattern]", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "name", label: "Name", type: "string", required: true,
+          pattern: "^[A-Za-z0-9_-]+$" },
+      ],
+    };
+    const { form } = await renderSchemaForm({ schema });
+    const input = findInputs(form)[0];
+    // In the DOM shim, `pattern` is set via the property (the renderer
+    // assigns input.pattern = ...). Check the shim's recorded value.
+    assert.equal(input.pattern, "^[A-Za-z0-9_-]+$");
+  });
+
+  test("int field wires min/max attrs from schema", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        { name: "vni", label: "VNI", type: "int", required: true, min: 1, max: 16777215 },
+      ],
+    };
+    const { form } = await renderSchemaForm({ schema });
+    const input = findInputs(form)[0];
+    assert.equal(input.min, "1");
+    assert.equal(input.max, "16777215");
   });
 });

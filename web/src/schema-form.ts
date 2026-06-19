@@ -1,4 +1,6 @@
-// schema-form.ts — render a create form from newtron's schema metadata.
+// schema-form.ts — render a create form from newtron's schema metadata
+// (newtron #240, including the universal-engine extension that adds
+// `paths` / `identifier` / `parent_ref` / per-field validation hints).
 //
 // Drives labels + tooltips + types + required-ness from the schema so
 // newtcon stops carrying a parallel hand-typed form definition for each
@@ -6,27 +8,29 @@
 // validators, autofill) via the `overrides` map — the schema tells us
 // the SHAPE, newtcon decides the UX on top.
 //
-// The renderer returns a `{form, getValues, validate}` shape compatible
-// with the existing `buildFormFields` flow in app.ts so the conversion
-// per kind stays local to a single call site.
-//
-// Coverage in this slice:
+// Coverage (current slice):
 //   string  → text input
-//   int     → number input (step 1)
+//   int     → number input (step 1) + min/max attrs
 //   float   → number input (step any)
 //   bool    → checkbox
 //   enum    → <select>
 //   array   → comma-separated text input when item_type is a primitive
-//             (string/int/float). Renders one row per item on read.
+//             (string/int/float)
+//   ref     → <select> populated from the referenced kind's list endpoint
+//             (newtron's paths.list, mapped to newtcon's /api/ space)
+//   object  → recursive nested sub-form (item_kind names the inner kind)
 //
-// Out of scope for this slice (renders a fallback placeholder + logs):
-//   ref     → list-of-names dropdown (needs the kind→list-path map)
-//   object  → nested sub-form (needs recursive renderSchemaForm)
-//   map     → never seen in the 14 kinds yet
-//
-// Follow-up PRs add ref + object as we convert the kinds that need them.
+// Out of scope for this slice (renders a fallback placeholder):
+//   array of item_kind — needed for FilterSpec.rules etc. — follow-up
+//   map                — never seen in the 15 kinds yet
 
-import type { SchemaField, SchemaMeta } from "./api/newtcon/schema.js";
+import {
+  fetchSchema,
+  type SchemaField,
+  type SchemaMeta,
+} from "./api/newtcon/schema.js";
+import { apiFetch } from "./api/newtcon/_transport.js";
+import { activeNetwork } from "./network-switcher.js";
 
 /**
  * SchemaFieldOverride lets the caller layer UX on top of a single
@@ -101,6 +105,7 @@ export async function renderSchemaForm(
       for (const [name, read] of valueReaders) {
         const v = read();
         if (v === "" || v === undefined) continue;
+        if (typeof v === "object" && v !== null && Object.keys(v as object).length === 0) continue;
         out[name] = v;
       }
       return out;
@@ -130,8 +135,6 @@ async function buildFieldRow(
   labelEl.textContent = labelText + (field.required ? " *" : "");
   row.appendChild(labelEl);
 
-  // Tooltip — render `description` as an inline help line so the
-  // operator sees what the field means without hovering.
   if (field.description && field.description !== "") {
     const help = document.createElement("p");
     help.className = "schema-form-help";
@@ -139,9 +142,8 @@ async function buildFieldRow(
     row.appendChild(help);
   }
 
-  // Default value: prefill > schema default > smartDefault override > "".
   let defaultValue: string | number = "";
-  if (prefill !== undefined && prefill !== null) {
+  if (prefill !== undefined && prefill !== null && typeof prefill !== "object") {
     defaultValue = typeof prefill === "number" ? prefill : String(prefill);
   } else if (override.smartDefault) {
     try {
@@ -158,6 +160,7 @@ async function buildFieldRow(
       input.name = field.name;
       input.className = "schema-form-input";
       if (field.required) input.required = true;
+      if (field.pattern) input.pattern = field.pattern;
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
       if (defaultValue !== "") input.value = String(defaultValue);
       row.appendChild(input);
@@ -172,6 +175,8 @@ async function buildFieldRow(
       input.className = "schema-form-input";
       input.step = field.type === "int" ? "1" : "any";
       if (field.required) input.required = true;
+      if (typeof field.min === "number") input.min = String(field.min);
+      if (typeof field.max === "number") input.max = String(field.max);
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
       if (defaultValue !== "") input.value = String(defaultValue);
       row.appendChild(input);
@@ -188,9 +193,6 @@ async function buildFieldRow(
       input.type = "checkbox";
       input.name = field.name;
       input.className = "schema-form-checkbox";
-      // bool prefill arrives via the prefill map (top-level path), not
-      // via the defaultValue branch which is string|number. Look at
-      // the raw prefill so a stored `true` checks the box.
       if (prefill === true || prefill === "true" || prefill === 1) {
         input.checked = true;
       }
@@ -220,10 +222,38 @@ async function buildFieldRow(
       read = () => select.value;
       break;
     }
+    case "ref": {
+      // Fetch the referenced kind's schema → use its paths.list to load
+      // available names, render as a dropdown. ref_kind is required by
+      // the spec; defensive fallback to disabled if missing.
+      const result = await buildRefSelect(field, defaultValue);
+      row.appendChild(result.input);
+      read = result.read;
+      break;
+    }
+    case "object": {
+      // Recurse: fetch the inner kind's schema, build a nested form
+      // visually grouped under the parent label. Read combines the
+      // nested form's values into one object.
+      if (!field.item_kind) {
+        row.appendChild(disabledPlaceholder("object without item_kind"));
+        read = () => "";
+        break;
+      }
+      const nested = await renderNested(field.item_kind, prefill);
+      row.appendChild(nested.container);
+      read = () => nested.getValues();
+      break;
+    }
     case "array": {
-      // Primitive arrays render as a comma-separated input. One row
-      // per item is friendlier UX but a heavier slice; this matches
-      // newtcon's existing pattern for ad-hoc primitive arrays.
+      // Primitive arrays render as a comma-separated input. Arrays of
+      // objects (item_kind set) are out of scope for this slice and
+      // render the placeholder.
+      if (field.item_kind) {
+        row.appendChild(disabledPlaceholder("array of objects not yet authorable"));
+        read = () => "";
+        break;
+      }
       const input = document.createElement("input");
       input.type = "text";
       input.name = field.name;
@@ -246,26 +276,143 @@ async function buildFieldRow(
       };
       break;
     }
-    case "ref":
-    case "object":
     case "map":
     default: {
-      // Out of scope for this slice — render a disabled placeholder
-      // so the operator sees that the field exists but knows it
-      // isn't authorable here yet. JSON textarea would be the most
-      // honest fallback (operator can edit raw); start with a
-      // disabled input so we don't quietly accept malformed data.
-      const input = document.createElement("input");
-      input.type = "text";
-      input.name = field.name;
-      input.className = "schema-form-input schema-form-input--unsupported";
-      input.disabled = true;
-      input.placeholder = `${field.type} fields not yet authorable in this form`;
-      row.appendChild(input);
+      row.appendChild(disabledPlaceholder(`${field.type} fields not yet authorable in this form`));
       read = () => "";
       break;
     }
   }
 
   return { row, read };
+}
+
+// ─── ref dropdown ──────────────────────────────────────────────────
+
+interface RefSelectResult {
+  input: HTMLElement;
+  read: () => string;
+}
+
+async function buildRefSelect(
+  field: SchemaField,
+  defaultValue: string | number,
+): Promise<RefSelectResult> {
+  if (!field.ref_kind) {
+    return {
+      input: disabledPlaceholder("ref without ref_kind"),
+      read: () => "",
+    };
+  }
+  const select = document.createElement("select");
+  select.name = field.name;
+  select.className = "schema-form-input";
+  if (field.required) select.required = true;
+
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = field.required ? "— select —" : "—";
+  select.appendChild(blank);
+
+  // Append a loading placeholder so the field communicates "fetching"
+  // while the list call is in flight. Replaced once names land.
+  const loading = document.createElement("option");
+  loading.value = "";
+  loading.textContent = "loading…";
+  loading.disabled = true;
+  loading.selected = true;
+  select.appendChild(loading);
+
+  // Async-fetch names without blocking the form render. If the fetch
+  // fails (no list path, network error), keep the dropdown empty so
+  // the operator can see something's off; required-field validation
+  // will block submission cleanly.
+  void (async () => {
+    try {
+      const names = await fetchRefNames(field.ref_kind!);
+      loading.remove();
+      blank.selected = true;
+      for (const name of names) {
+        const o = document.createElement("option");
+        o.value = name;
+        o.textContent = name;
+        if (String(defaultValue) === name) o.selected = true;
+        select.appendChild(o);
+      }
+    } catch {
+      loading.textContent = `(list unavailable for ${field.ref_kind})`;
+    }
+  })();
+
+  return {
+    input: select,
+    read: () => select.value,
+  };
+}
+
+/**
+ * fetchRefNames — for a ref kind, fetch its schema (cached) to learn
+ * paths.list, then GET the list and return the names. Newtron's path
+ * uses the `/newtron/v1/` prefix; newtcon-server exposes the same
+ * surface under `/api/`, so we substitute.
+ */
+async function fetchRefNames(refKind: string): Promise<string[]> {
+  const meta = await fetchSchema(refKind);
+  const newtronListPath = meta.paths?.list;
+  if (!newtronListPath) return [];
+  const path = newtronListPath
+    .replace(/^\/newtron\/v1\//, "/api/")
+    .replace("{netID}", encodeURIComponent(activeNetwork()));
+  const body = (await apiFetch(path, { cache: "no-store" })) as
+    | { names?: string[] | null; services?: { name?: string }[] }
+    | null;
+  // List endpoints return either {names: [...]} or, for services,
+  // {services: [{name, type, ...}, ...]}.
+  if (Array.isArray(body?.names)) return body!.names!;
+  if (Array.isArray(body?.services)) return body!.services!.map((s) => s.name ?? "").filter((n) => n !== "");
+  return [];
+}
+
+// ─── nested object ─────────────────────────────────────────────────
+
+interface NestedResult {
+  container: HTMLElement;
+  getValues: () => Record<string, unknown>;
+}
+
+async function renderNested(
+  itemKind: string,
+  prefill: unknown,
+): Promise<NestedResult> {
+  const container = document.createElement("fieldset");
+  container.className = "schema-form-nested";
+
+  try {
+    const innerSchema = await fetchSchema(itemKind);
+    const innerPrefill = (typeof prefill === "object" && prefill !== null)
+      ? prefill as Record<string, unknown>
+      : {};
+    const inner = await renderSchemaForm({
+      schema: innerSchema,
+      prefill: innerPrefill,
+    });
+    container.appendChild(inner.form);
+    return { container, getValues: inner.getValues };
+  } catch (err) {
+    container.appendChild(disabledPlaceholder(
+      `(${itemKind} schema unavailable)`,
+    ));
+    return { container, getValues: () => ({}) };
+  }
+}
+
+// ─── shared helpers ────────────────────────────────────────────────
+
+function disabledPlaceholder(message: string): HTMLElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "schema-form-input schema-form-input--unsupported";
+  input.disabled = true;
+  input.placeholder = message;
+  return input;
 }
