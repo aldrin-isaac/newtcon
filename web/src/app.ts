@@ -1826,23 +1826,44 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
       content.appendChild(controls);
     }
 
-    // Schema-aware rendering when a display schema knows this kind; generic
-    // recursive tree as the fallback so unknown kinds still render. Exclude
-    // the sub-rule wire field (if any) so child rules don't double-display
-    // — they get a dedicated section below via renderSubRuleTable.
-    const fields = displaySchemaFor(kind);
+    // Schema-aware rendering — prefer newtron's schema (canonical labels +
+    // tooltips), fall back to newtcon's hand-typed displaySpecForms /
+    // specForms for kinds without a schema, and finally to the generic
+    // recursive tree so unknown kinds still render.
+    //
+    // Sub-rule wire fields are excluded so child rules don't double-
+    // display — they get a dedicated section below via renderSubRuleTable.
     const subRuleConf = subRuleTables[kind];
-    if (fields) {
+    const extraExcludes = subRuleConf ? [subRuleConf.wireField] : [];
+    const schemaKindForDetail = await resolveSlugToKind(kind).catch(() => null);
+    const schemaForDetail = schemaKindForDetail
+      ? await fetchSchema(schemaKindForDetail).catch(() => null)
+      : null;
+    if (schemaForDetail) {
       const body = el("div");
-      const extraExcludes = subRuleConf ? [subRuleConf.wireField] : [];
-      renderSpecDetailInto(body, fields, detail, extraExcludes);
+      // Adapter: SchemaField → SpecField shape. buildSpecDetailShape
+      // only needs name + label; everything else (type / required /
+      // immutable / etc.) is irrelevant for read-only display.
+      renderSpecDetailInto(
+        body,
+        schemaForDetail.fields.map((f) => ({ name: f.name, label: f.label })),
+        detail,
+        extraExcludes,
+      );
       content.appendChild(body);
     } else {
-      const body = renderValue(detail);
-      if (body instanceof HTMLElement) {
-        body.classList.add("drawer-detail");
+      const fields = displaySchemaFor(kind);
+      if (fields) {
+        const body = el("div");
+        renderSpecDetailInto(body, fields, detail, extraExcludes);
+        content.appendChild(body);
+      } else {
+        const body = renderValue(detail);
+        if (body instanceof HTMLElement) {
+          body.classList.add("drawer-detail");
+        }
+        content.appendChild(body);
       }
-      content.appendChild(body);
     }
 
     // Sub-rules: one unified inline-table section per kind (#173.A).
@@ -2570,7 +2591,7 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
 //
 // Falls back to renderValueInto when data is not an object (defensive
 // against newtron returning a primitive or null).
-function renderSpecDetailInto(container: HTMLElement, fields: FieldDef[], data: unknown, extraExcludes: string[] = []): void {
+function renderSpecDetailInto(container: HTMLElement, fields: Array<{name: string; label: string}>, data: unknown, extraExcludes: string[] = []): void {
   container.textContent = "";
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     renderValueInto(container, data);
