@@ -181,6 +181,27 @@
 }
 .schema-form-nested > .schema-form { gap: var(--space-xs); }
 
+/* Limitation notice — surfaces what newtron expects vs. what newtcon
+ * will actually submit when the field shape isn't yet authorable. */
+.schema-form-notice {
+  border: 1px solid var(--color-warning-border);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.schema-form-notice-head {
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  font-weight: var(--weight-semibold);
+}
+.schema-form-notice-body {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+  margin: 0;
+}
+
 /* Topology palette (slice #210.A) — five-state classification applied
  * uniformly across nodes + (in later slices) links / interface pills /
  * service bindings. Color carries the primary signal; pattern

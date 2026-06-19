@@ -134,4 +134,51 @@ export async function fetchSchema(kind: string): Promise<SchemaMeta> {
 export function resetSchemaCache(): void {
   schemaCache.clear();
   kindsCache = null;
+  slugToKindCache = null;
+}
+
+// Slug → newtron-kind-name map built dynamically by fetching every
+// kind's schema and extracting the URL slug from `paths.list`. Built
+// once per session; later panel / form / list calls hit the cache.
+// Newtcon does not need to know which kinds exist — newtron tells it.
+let slugToKindCache: Promise<Map<string, string>> | null = null;
+
+/**
+ * resolveSlugToKind — for a given URL slug (e.g. "ipvpns",
+ * "qos-policies"), return the newtron kind name (e.g. "IPVPNSpec",
+ * "QoSPolicy"). Returns null when the slug doesn't correspond to a
+ * top-level kind newtron exposes — caller falls back to legacy paths
+ * for kinds that aren't yet schema-described (e.g. prefix-lists).
+ *
+ * Derives the map by walking every registered kind, fetching its
+ * schema, and reading the slug from `paths.list`. Top-level kinds
+ * have `paths.list`; embedded / sub-rule kinds don't.
+ */
+export async function resolveSlugToKind(slug: string): Promise<string | null> {
+  if (!slugToKindCache) {
+    slugToKindCache = (async () => {
+      const summaries = await fetchSchemaKinds();
+      const out = new Map<string, string>();
+      const results = await Promise.allSettled(
+        summaries.map(async (s) => {
+          const meta = await fetchSchema(s.kind);
+          const listPath = meta.paths?.list;
+          if (!listPath) return; // embedded or sub-rule — not addressable by slug
+          // paths.list is "/newtron/v1/networks/{netID}/<slug>"; the
+          // last path segment is the slug.
+          const m = listPath.match(/\/([^/]+)$/);
+          if (m) out.set(m[1]!, s.kind);
+        }),
+      );
+      void results;
+      return out;
+    })();
+    try {
+      await slugToKindCache;
+    } catch (e) {
+      slugToKindCache = null;
+      throw e;
+    }
+  }
+  return (await slugToKindCache).get(slug) ?? null;
 }
