@@ -101,7 +101,21 @@ import {
   uniqueZones,
 } from "./topology-filters.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
-import { resolveDevicePalette } from "./topology-palette.js";
+import {
+  type PaletteState,
+  resolveLabDevicePalette,
+  resolveLinkPalette,
+  resolvePhysicalDevicePalette,
+} from "./topology-palette.js";
+import {
+  type TopologyViewMode,
+  ALL_VIEW_MODES,
+  availableViewModes,
+  defaultViewMode,
+  loadViewMode,
+  saveViewMode,
+  viewModeLabel,
+} from "./topology-view-mode.js";
 // Note: postTopologyDevice / deleteTopologyDevice / postTopologyLink
 // were previously called directly from the topology view. With the staging
 // queue introduced in staging.ts, those flows go through enqueue* + applyAll
@@ -1648,7 +1662,14 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
+// PaletteByDevice — pre-resolved palette state per device, computed
+// in mountTopologyTab based on the active view mode (slice #210.B/C/D).
+// The renderer is palette-agnostic; the view mode is responsible for
+// picking which source feeds each device's state.
+type PaletteByDevice = Map<string, PaletteState>;
+
 interface TopologyRenderOpts {
+  paletteByDevice?: PaletteByDevice;
   onNodeClick: (name: string, ev: MouseEvent) => void;
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
@@ -1732,12 +1753,23 @@ function renderTopologySVG(
   // on or near the line is reliable — bare 1.5px strokes are nearly
   // impossible to hit.
   const dimmed = opts.dimmedNames ?? new Set<string>();
+  const paletteByDevice = opts.paletteByDevice;
   for (const link of links) {
     const from = link.local_device ? positions.get(link.local_device) : undefined;
     const to = link.remote_device ? positions.get(link.remote_device) : undefined;
     if (!from || !to) continue;
     const linkDimmed = (link.local_device !== undefined && dimmed.has(link.local_device))
       || (link.remote_device !== undefined && dimmed.has(link.remote_device));
+    // Link palette inherits the worst endpoint state (slice #210.E
+    // subset): a link to a down or drifted device reads as down /
+    // drifted; spec-only on either end colors the line spec-only;
+    // otherwise it sits clean (actuated-ok) or unknown.
+    let linkPalette: PaletteState = "unknown";
+    if (paletteByDevice && link.local_device && link.remote_device) {
+      const a = paletteByDevice.get(link.local_device) ?? "unknown";
+      const z = paletteByDevice.get(link.remote_device) ?? "unknown";
+      linkPalette = resolveLinkPalette(a, z);
+    }
     if (opts.onLinkClick) {
       const hit = svgEl("line", {
         "class": "topo-link-hit",
@@ -1754,12 +1786,14 @@ function renderTopologySVG(
       svg.appendChild(hit);
     }
     const line = svgEl("line", {
-      "class": "topo-link" + (linkDimmed ? " topo-link--dimmed" : ""),
+      "class": "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : ""),
       x1: String(from.cx),
       y1: String(from.cy),
       x2: String(to.cx),
       y2: String(to.cy),
     });
+    if (link.local_device) line.setAttribute("data-local-device", link.local_device);
+    if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
     svg.appendChild(line);
   }
 
@@ -1773,15 +1807,13 @@ function renderTopologySVG(
     const isPendingRemove = opts.isPendingRemove?.(node.name) ?? false;
     const status = opts.statusByDevice?.get(node.name);
     // Phase 2: substrate-agnostic state class. Tooltip carries the detail.
-    // Unified palette (slice #210.A) — five-state classification of the
-    // element's actuation observation. Replaces the prior independent
-    // .topo-node--running/--down/--unrealized/--drifted classes with
-    // one .topo-elem--<state> per the resolver. The pending-add /
-    // pending-del / selected / dragging / dimmed classes are
-    // orthogonal (staging/UI state, not actuation state) and continue
-    // to apply alongside.
+    // Unified palette (slice #210.A) — caller-pre-resolved per the
+    // active view mode (slice #210.B/C/D). The renderer just looks up
+    // the per-device class; pending-add / pending-del / selected /
+    // dragging / dimmed classes are orthogonal (staging / UI state)
+    // and continue to apply alongside.
     const driftCount = opts.driftByDevice?.get(node.name) ?? 0;
-    const palette = resolveDevicePalette(status, driftCount);
+    const palette: PaletteState = opts.paletteByDevice?.get(node.name) ?? "unknown";
     const paletteClass = ` topo-elem--${palette}`;
 
     const ariaLabelParts = [`Device ${node.name}`, palette];
@@ -3517,7 +3549,21 @@ interface PollArgs {
   graphSlot: HTMLElement;
   deviceNames: string[];
   onlineByDevice: Map<string, boolean>;
-  driftByDevice: Map<string, number>;
+  /**
+   * rebuildPalette — called with the freshly-fetched lab state each
+   * tick so the poller doesn't need to know which view mode is active
+   * or which actuation source feeds it. The mountTopologyTab caller
+   * owns the view mode + drift state and decides per-tick what the
+   * palette should be (slice #210.B/C/D).
+   */
+  rebuildPalette: (labState: LabState | null) => PaletteByDevice;
+  /**
+   * onLabStateRefresh — lets the mount handler keep its own cached
+   * labState ref in sync with what the poll just fetched, so a
+   * post-tick view-mode switch resolves the palette against the
+   * latest signal rather than the initial snapshot.
+   */
+  onLabStateRefresh: (lab: LabState | null) => void;
 }
 
 function startTopologyPoll(args: PollArgs): void {
@@ -3525,12 +3571,14 @@ function startTopologyPoll(args: PollArgs): void {
   topologyPollTimer = window.setInterval(async () => {
     let labState: LabState | null = null;
     try { labState = await fetchLabStatus(args.network); } catch { /* lab unknown — fall back */ }
+    args.onLabStateRefresh(labState);
     const fresh = new Map<string, DeviceStatus>();
     for (const name of args.deviceNames) {
       fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name)));
     }
+    const palette = args.rebuildPalette(labState);
     const svg = args.graphSlot.querySelector("svg.topology-graph") as SVGSVGElement | null;
-    if (svg) patchDeviceStatuses(svg, fresh, args.driftByDevice);
+    if (svg) patchDeviceStatuses(svg, fresh, palette);
   }, 5000);
 }
 
@@ -3544,14 +3592,13 @@ const PALETTE_CLASSES = ["spec-only", "actuated-ok", "actuated-down", "drift", "
 function patchDeviceStatuses(
   svg: SVGSVGElement,
   statuses: Map<string, DeviceStatus>,
-  driftByDevice: Map<string, number>,
+  paletteByDevice: PaletteByDevice,
 ): void {
   for (const [device, status] of statuses) {
     const sel = `g.topo-node[data-device="${CSS.escape(device)}"]`;
     const g = svg.querySelector(sel);
     if (!g) continue;
-    const driftCount = driftByDevice.get(device) ?? 0;
-    const palette = resolveDevicePalette(status, driftCount);
+    const palette: PaletteState = paletteByDevice.get(device) ?? "unknown";
     for (const c of PALETTE_CLASSES) g.classList.remove(`topo-elem--${c}`);
     g.classList.add(`topo-elem--${palette}`);
     g.setAttribute("aria-label", `Device ${device} — ${palette}`);
@@ -3562,6 +3609,20 @@ function patchDeviceStatuses(
     }
     const title = g.querySelector("g.topo-status-badge > title");
     if (title) title.textContent = `${device}: ${status.state} — ${status.detail}`;
+  }
+  // Repaint link lines (slice #210.E subset) — endpoint palette may
+  // have shifted on this tick (device went down, drift surfaced, etc.),
+  // so each link inherits the latest worst-of-two endpoint state.
+  const lines = svg.querySelectorAll("line.topo-link");
+  for (const ln of Array.from(lines)) {
+    const a = ln.getAttribute("data-local-device") ?? "";
+    const z = ln.getAttribute("data-remote-device") ?? "";
+    if (!a || !z) continue;
+    const aPal = paletteByDevice.get(a) ?? "unknown";
+    const zPal = paletteByDevice.get(z) ?? "unknown";
+    const linkPal = resolveLinkPalette(aPal, zPal);
+    for (const c of PALETTE_CLASSES) ln.classList.remove(`topo-elem--${c}`);
+    ln.classList.add(`topo-elem--${linkPal}`);
   }
 }
 
@@ -3617,6 +3678,40 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     for (const name of deviceNames) {
       statusByDevice.set(name, resolveDeviceStatus(name, labState, onlineByDevice.get(name)));
     }
+
+    // Layered Topology views (slice #210.B/C/D) — pick the actuation
+    // source to overlay. The mode is persisted per-network; first visit
+    // gets defaultViewMode() which prefers spec-lab when any lab node
+    // is known, then spec-physical when any /info probe succeeded,
+    // otherwise spec (no actuation overlay). The labState ref is held
+    // here so a post-tick view switch reads the latest snapshot.
+    let labStateRef: LabState | null = labState;
+    const activeNetName = activeNetwork();
+    let viewMode: TopologyViewMode =
+      loadViewMode(activeNetName) ?? defaultViewMode(labState, onlineByDevice);
+    const computePaletteByDevice = (): PaletteByDevice => {
+      const m: PaletteByDevice = new Map<string, PaletteState>();
+      for (const name of deviceNames) {
+        let p: PaletteState;
+        switch (viewMode) {
+          case "spec":
+            p = "spec-only";
+            break;
+          case "spec-lab":
+            p = resolveLabDevicePalette(labStateRef, name);
+            break;
+          case "spec-physical":
+            p = resolvePhysicalDevicePalette(
+              onlineByDevice.get(name),
+              driftByDevice.get(name) ?? 0,
+            );
+            break;
+        }
+        m.set(name, p);
+      }
+      return m;
+    };
+    let paletteByDevice = computePaletteByDevice();
 
     // Build toolbar with Add device and Add link buttons.
     const toolbar = el("div", { className: "topology-toolbar" });
@@ -3735,6 +3830,45 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       }
     } catch { /* profiles unavailable — chip row stays empty */ }
 
+    // View-mode chip row (slice #210.B) — sits above the zone filter
+    // row so the operator sees the actuation-source switch as a
+    // first-class control. The chip is always mounted (even with one
+    // mode available) because operators need to *see* what views exist
+    // even before signals arrive; unavailable modes render disabled.
+    const viewRow = el("div", { className: "topology-view-row" });
+    root.appendChild(viewRow);
+    const renderViewRow = (): void => {
+      viewRow.textContent = "";
+      const label = el("span", { className: "topology-view-label" }, "View:");
+      viewRow.appendChild(label);
+      const available = availableViewModes(labStateRef, onlineByDevice);
+      for (const mode of ALL_VIEW_MODES) {
+        const isActive = mode === viewMode;
+        const isAvail = available.has(mode);
+        const cls = ["topology-view-chip"];
+        if (isActive) cls.push("topology-view-chip--active");
+        if (!isAvail) cls.push("topology-view-chip--disabled");
+        const chip = el("button", {
+          type: "button",
+          className: cls.join(" "),
+          title: isAvail
+            ? `Switch to ${viewModeLabel(mode)}`
+            : `${viewModeLabel(mode)} — no signal available`,
+        }, viewModeLabel(mode)) as HTMLButtonElement;
+        if (!isAvail) chip.disabled = true;
+        chip.addEventListener("click", () => {
+          if (mode === viewMode) return;
+          viewMode = mode;
+          saveViewMode(activeNetName, mode);
+          paletteByDevice = computePaletteByDevice();
+          renderViewRow();
+          renderGraph();
+        });
+        viewRow.appendChild(chip);
+      }
+    };
+    renderViewRow();
+
     // Filter chip row — rendered as its own row below the toolbar. Only
     // mounted when there's more than one distinct zone to pick from; a
     // single-zone topology has nothing to filter by, so the row stays
@@ -3787,7 +3921,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Per-device pinned positions — loaded once at mount, mutated when
     // the operator drag-drops a node, persisted to localStorage. Keyed
     // by the active network so multiple operator topologies don't share.
-    const activeNet = activeNetwork();
+    const activeNet = activeNetName;
     const pinnedPositions = loadPositions(activeNet);
 
     // Topology view: layout is a split — left = SVG diagram + toolbar,
@@ -3862,6 +3996,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       const allNames = (topoData.nodes ?? []).map((n) => n.name);
       const dimmed = applyFilter(filterState, allNames, deviceMetadata).hidden;
       const result = renderTopologySVG(topoData, {
+        paletteByDevice,
         dimmedNames: dimmed,
         onNodeClick: (deviceName, ev) => {
           if (ev.shiftKey) {
@@ -3997,7 +4132,24 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Phase 2: live-update device badges on a 5s tick. Patches in place — the
     // operator can keep interacting with the panel + drawers while statuses
     // refresh. Restart on every mount so re-renders don't accumulate timers.
-    startTopologyPoll({ network: activeNetwork(), graphSlot, deviceNames, onlineByDevice, driftByDevice });
+    startTopologyPoll({
+      network: activeNetName,
+      graphSlot,
+      deviceNames,
+      onlineByDevice,
+      rebuildPalette: (lab) => {
+        labStateRef = lab;
+        paletteByDevice = computePaletteByDevice();
+        return paletteByDevice;
+      },
+      onLabStateRefresh: (lab) => {
+        labStateRef = lab;
+        // Re-render the view chip row when lab availability flips so
+        // the operator can pick a newly-available mode (or sees a
+        // previously available one go disabled).
+        renderViewRow();
+      },
+    });
 
     const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
     const summary = el(
