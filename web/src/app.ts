@@ -15,7 +15,6 @@ import {
   updateQoSQueue,
   updateFilterRule,
   updateRoutePolicyRule,
-  updatePrefixListEntry,
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
@@ -1168,18 +1167,22 @@ function renderSubRuleRow(
       actionsCell.appendChild(makeReorderBtn(kind, specName, conf, key, sortedSeqs, "down"));
     }
     // Edit button (slice #173.B). Swaps the row for an inline edit
-    // form prefilled with the item's current values. Reuses
-    // conf.addFields so add + edit stay shape-aligned.
-    const editBtn = el("button", {
-      type: "button",
-      className: "subrule-edit-btn",
-      title: `Edit ${conf.itemLabel} ${key}`,
-    }, "✎");
-    editBtn.addEventListener("click", () => {
-      const editRow = renderSubRuleEdit(kind, specName, item, conf, row);
-      row.replaceWith(editRow);
-    });
-    actionsCell.appendChild(editBtn);
+    // form prefilled with the item's current values. Suppressed for
+    // itemType "string" (prefix-list entries) — their only "field" is
+    // the key, and newtron #239 removed the update verb. Renaming a
+    // prefix is Remove + Add via the × button + the inline Add form.
+    if (conf.itemType !== "string") {
+      const editBtn = el("button", {
+        type: "button",
+        className: "subrule-edit-btn",
+        title: `Edit ${conf.itemLabel} ${key}`,
+      }, "✎");
+      editBtn.addEventListener("click", () => {
+        const editRow = renderSubRuleEdit(kind, specName, item, conf, row);
+        row.replaceWith(editRow);
+      });
+      actionsCell.appendChild(editBtn);
+    }
 
     const delBtn = el("button", {
       type: "button",
@@ -1222,13 +1225,10 @@ function renderSubRuleEdit(
   const cell = el("td", { className: "subrule-td subrule-td--edit-cell" }) as HTMLTableCellElement;
   cell.colSpan = conf.columns.length + 1;
 
-  // For object items, the addFields field names match the item's wire
-  // shape — prefill is the item itself. For string items (prefix-
-  // lists), the single addField "prefix" maps to the item's string
-  // value.
-  const prefill: Record<string, unknown> = conf.itemType === "string"
-    ? { prefix: typeof item === "string" ? item : String(item) }
-    : { ...(item as Record<string, unknown>) };
+  // Reaches here only for object items (per the gate in renderSubRuleRow).
+  // The addFields field names match the item's wire shape — prefill is
+  // the item itself.
+  const prefill: Record<string, unknown> = { ...(item as Record<string, unknown>) };
 
   const { form, getValues, validate } = buildFormFields(conf.addFields, { prefill });
   cell.appendChild(form);
@@ -1360,7 +1360,12 @@ function deleteSubRuleItem(kind: SpecKind, specName: string, key: string | numbe
 // updateSubRuleItem dispatches to the per-kind update function (slice
 // #173.B). The URL path already identifies the row by its existing
 // keyField; body carries the new field values plus optionally a
-// renumber field (new_seq / new_queue_id / new_prefix).
+// renumber field (new_seq / new_queue_id).
+//
+// Prefix-list entries have no editable field beyond the key, so newtron
+// #239 removed `update-prefix-list-entry`. They never reach this
+// dispatcher — the per-row Edit button is suppressed for itemType
+// "string" in renderSubRuleRow.
 function updateSubRuleItem(
   kind: SpecKind, specName: string,
   key: string | number, body: Record<string, unknown>,
@@ -1369,7 +1374,6 @@ function updateSubRuleItem(
   switch (kind) {
     case "qos-policies":   return updateQoSQueue(specName, Number(key), body);
     case "filters":        return updateFilterRule(specName, Number(key), body);
-    case "prefix-lists":   return updatePrefixListEntry(specName, String(key), body);
     case "route-policies": return updateRoutePolicyRule(specName, Number(key), body);
     default: return Promise.reject(new Error("no update for " + kind));
   }

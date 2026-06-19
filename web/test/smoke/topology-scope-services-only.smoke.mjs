@@ -33,7 +33,7 @@ const FORBIDDEN_ACTION_IDS = [
   "set-property", "clear-property",
   "bind-acl", "unbind-acl",
   "add-bgp-peer", "remove-bgp-peer",
-  "apply-qos", "remove-qos",
+  "bind-qos", "unbind-qos",
 ];
 
 // IDs that MUST be reachable on an interface — port-mode + service binding.

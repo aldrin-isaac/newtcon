@@ -130,11 +130,13 @@ function midpoint(a: number, b: number): number | null {
  * composeUpdateBody (slice #173.B) — turns form-output values into the
  * body shape newtron's update-<sub-rule> verbs expect.
  *
- * Rules:
+ * Only object items are editable in place. Prefix-list entries
+ * (itemType "string") have no editable field besides the key — newtron
+ * #239 removed `update-prefix-list-entry` entirely; the caller compiles
+ * any rename to `remove-prefix-list-entry` + `add-prefix-list-entry`,
+ * which never reaches this helper.
  *
- *   itemType "string" (prefix-list entries):
- *     Always send `new_prefix` — newtron requires it (PR #222), and
- *     the no-change case is idempotent.
+ * Rules:
  *
  *   itemType "object" with keyField:
  *     Drop the keyField from the body (the URL path identifies the
@@ -147,13 +149,10 @@ function midpoint(a: number, b: number): number | null {
  */
 export function composeUpdateBody(
   values: Record<string, unknown>,
-  itemType: SubRuleItemType,
+  _itemType: SubRuleItemType,
   keyField: string | undefined,
   originalKey: string | number,
 ): Record<string, unknown> {
-  if (itemType === "string") {
-    return { new_prefix: String(values["prefix"] ?? "") };
-  }
   const body: Record<string, unknown> = { ...values };
   if (keyField) {
     const formKey = body[keyField];
