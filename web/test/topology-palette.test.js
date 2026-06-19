@@ -87,8 +87,8 @@ describe("resolveDevicePalette()", () => {
 });
 
 describe("resolveLabDevicePalette() — Spec+Lab view (slice #210.D)", () => {
-  test("null lab → unknown", () => {
-    assert.equal(resolveLabDevicePalette(null, "leaf1"), "unknown");
+  test("null lab → spec-only (no lab actuating the spec — blue, not grey)", () => {
+    assert.equal(resolveLabDevicePalette(null, "leaf1"), "spec-only");
   });
 
   test("lab doesn't know about device → spec-only", () => {

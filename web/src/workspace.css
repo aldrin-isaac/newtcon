@@ -158,8 +158,6 @@
 .topology-view-chip { font-size: var(--text-xs); padding: 2px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border-default); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); transition: all var(--duration-fast) var(--ease-standard); }
 .topology-view-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
 .topology-view-chip--active { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); font-weight: var(--weight-medium); }
-.topology-view-chip--disabled { opacity: 0.4; cursor: not-allowed; }
-.topology-view-chip--disabled:hover { border-color: var(--color-border-default); color: var(--color-text-secondary); }
 
 /* Filter chip row — sits between toolbar and SVG split. Only mounted
  * when there's more than one distinct zone to pick from. */

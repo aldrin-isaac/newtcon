@@ -89,11 +89,17 @@ export function resolveDevicePalette(
  * resolveLabDevicePalette — per-view resolver for the Spec+Lab view
  * (slice #210.D). Source: newtlab lifecycle per device.
  *
- *   labState null      → unknown (lab fetch in flight)
+ *   labState null      → spec-only (no lab actuating this spec)
  *   no labNode         → spec-only (lab doesn't know about this device)
  *   status stopped/err → actuated-down
  *   phase present      → unknown (booting — mid-transition)
  *   status running     → actuated-ok
+ *
+ * `null` lab state is treated as "no lab actuation" rather than
+ * "unknown" — `fetchLabStatus` either returns a state or throws (404
+ * = lab not deployed). The mount handler stores null on throw, so by
+ * render time we definitively know no lab is realizing the spec —
+ * blue is the right answer.
  *
  * Drift is NOT a lab-side concept (drift compares intent to CONFIG_DB
  * which is physical-side). In lab view, an unset port that the spec
@@ -104,7 +110,7 @@ export function resolveLabDevicePalette(
   labState: LabState | null,
   device: string,
 ): PaletteState {
-  if (!labState) return "unknown";
+  if (!labState) return "spec-only";
   const labNode = labState.nodes?.[device];
   if (!labNode) return "spec-only";
   if (labNode.status === "stopped" || labNode.status === "error") return "actuated-down";
