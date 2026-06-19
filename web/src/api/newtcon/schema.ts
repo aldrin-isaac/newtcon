@@ -39,6 +39,25 @@ export interface SchemaField {
   ref_kind?: string;   // type === "ref"
   item_type?: string;  // type === "array" | "map" of primitives
   item_kind?: string;  // type === "array" | "map" | "object" of structs
+  // Validation hints (newtron #240 — universal-engine extension).
+  // UIs flow these to HTML attributes for client-side checks; the
+  // server still validates server-side.
+  pattern?: string;    // regex value must match
+  min?: number;        // inclusive lower bound (type === "int")
+  max?: number;        // inclusive upper bound (type === "int")
+  format?: string;     // semantic hint: "cidr" | "ipv4" | "ipv6" | "mac" | "asn"
+  immutable?: boolean; // true → suppress edit input in update-mode forms
+}
+
+// SchemaPaths are URL templates with {netID} (always) and {name}
+// (on `show` for top-level kinds) placeholders the caller substitutes.
+// Empty / absent fields mean the verb does not exist for this kind.
+export interface SchemaPaths {
+  list?: string;
+  show?: string;
+  create?: string;
+  update?: string;
+  delete?: string;
 }
 
 export interface SchemaMeta {
@@ -46,6 +65,15 @@ export interface SchemaMeta {
   label: string;
   description: string;
   fields: SchemaField[];
+  /** Wire name of the field that addresses one row (e.g. "name",
+   *  "seq", "queue_id"). Top-level kinds default to "name". */
+  identifier?: string;
+  /** Sub-rule kinds only: wire field name carrying the parent's name
+   *  in request bodies (e.g. "filter" for FilterRule). */
+  parent_ref?: string;
+  /** HTTP path templates. Embedded-only kinds (RoutingSpec, etc.)
+   *  omit `paths` entirely. */
+  paths?: SchemaPaths;
 }
 
 // ─── Cache ─────────────────────────────────────────────────────────
