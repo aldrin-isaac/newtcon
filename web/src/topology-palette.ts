@@ -14,6 +14,7 @@
 // unreachable device.
 
 import type { DeviceStatus } from "./device-status.js";
+import type { LabState } from "./api/newtcon/lab.js";
 
 /**
  * The five element-state classes the topology palette uses. Maps to
@@ -82,4 +83,86 @@ export function resolveDevicePalette(
     case "booting":    return "unknown";
     case "running":    return driftCount > 0 ? "drift" : "actuated-ok";
   }
+}
+
+/**
+ * resolveLabDevicePalette — per-view resolver for the Spec+Lab view
+ * (slice #210.D). Source: newtlab lifecycle per device.
+ *
+ *   labState null      → unknown (lab fetch in flight)
+ *   no labNode         → spec-only (lab doesn't know about this device)
+ *   status stopped/err → actuated-down
+ *   phase present      → unknown (booting — mid-transition)
+ *   status running     → actuated-ok
+ *
+ * Drift is NOT a lab-side concept (drift compares intent to CONFIG_DB
+ * which is physical-side). In lab view, an unset port that the spec
+ * declares isn't drift; it's just lifecycle. Drift surfaces only in
+ * the physical view.
+ */
+export function resolveLabDevicePalette(
+  labState: LabState | null,
+  device: string,
+): PaletteState {
+  if (!labState) return "unknown";
+  const labNode = labState.nodes?.[device];
+  if (!labNode) return "spec-only";
+  if (labNode.status === "stopped" || labNode.status === "error") return "actuated-down";
+  if (labNode.phase) return "unknown"; // mid-boot
+  if (labNode.status === "running") return "actuated-ok";
+  return "unknown";
+}
+
+/**
+ * resolvePhysicalDevicePalette — per-view resolver for the
+ * Spec+Physical view (slice #210.C). Source: newtron /info reachability
+ * + drift count.
+ *
+ *   online undefined    → unknown (probe in flight)
+ *   !online             → spec-only (no physical actuation evidence —
+ *                         could be "not deployed" or "currently
+ *                         unreachable"; conservative read as spec-only)
+ *   online + drift > 0  → drift
+ *   online              → actuated-ok
+ *
+ * "down" as a state isn't currently distinguishable here (newtron's
+ * /info probe doesn't surface "device crashed vs never existed"). If
+ * newtron later differentiates those, this resolver folds the new
+ * signal in.
+ */
+export function resolvePhysicalDevicePalette(
+  online: boolean | undefined,
+  driftCount: number,
+): PaletteState {
+  if (online === undefined) return "unknown";
+  if (!online) return "spec-only";
+  if (driftCount > 0) return "drift";
+  return "actuated-ok";
+}
+
+/**
+ * resolveLinkPalette — pure: pick the more-attention-worthy state of
+ * the two endpoints. Used to color link lines (slice #210.E, subset).
+ *
+ * Priority order matches operator attention:
+ *   actuated-down (worst — reachability)
+ *   drift         (warning — config disagrees)
+ *   spec-only     (no actuation yet)
+ *   actuated-ok   (clean)
+ *   unknown       (no info)
+ *
+ * The link inherits the worst endpoint's state — if one side is down,
+ * the link is effectively down; if one side is drifted, the link
+ * inherits that warning.
+ */
+const LINK_PRIORITY: Record<PaletteState, number> = {
+  unknown: 0,
+  "actuated-ok": 1,
+  "spec-only": 2,
+  drift: 3,
+  "actuated-down": 4,
+};
+
+export function resolveLinkPalette(a: PaletteState, z: PaletteState): PaletteState {
+  return LINK_PRIORITY[a] >= LINK_PRIORITY[z] ? a : z;
 }
