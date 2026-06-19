@@ -16,6 +16,7 @@ import {
   loadHistory,
 } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
+import { confirmInline } from "./confirm-inline.js";
 import { planUndo, type UndoPlan } from "./undo-plan.js";
 import {
   enqueueDeviceAction,
@@ -49,8 +50,14 @@ export function mountHistoryTab(root: HTMLElement): void {
     `${entries.length} entr${entries.length === 1 ? "y" : "ies"}`);
   controls.appendChild(countLine);
   const clearBtn = el("button", { type: "button", className: "history-clear-btn" }, "Clear history");
-  clearBtn.addEventListener("click", () => {
-    if (!window.confirm(`Clear ${entries.length} history entr${entries.length === 1 ? "y" : "ies"} for "${network}"?`)) return;
+  clearBtn.addEventListener("click", async () => {
+    const ok = await confirmInline({
+      title: `Clear ${entries.length} history entr${entries.length === 1 ? "y" : "ies"}?`,
+      body: `For network "${network}". The history is local to this browser and only used for the History tab.`,
+      danger: true,
+      confirmLabel: "Clear",
+    });
+    if (!ok) return;
     clearHistory(network);
     mountHistoryTab(root);
   });

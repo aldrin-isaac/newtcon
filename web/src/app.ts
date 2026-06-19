@@ -100,6 +100,8 @@ import {
   uniqueZones,
 } from "./topology-filters.js";
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
+import { confirmInline } from "./confirm-inline.js";
+import { showToast } from "./toast.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
@@ -1190,7 +1192,13 @@ function renderSubRuleRow(
       title: `Remove ${conf.itemLabel} ${key}`,
     }, "×");
     delBtn.addEventListener("click", async () => {
-      if (!window.confirm(`Remove ${conf.itemLabel} ${key} from ${specName}?`)) return;
+      const ok = await confirmInline({
+        title: `Remove ${conf.itemLabel} ${key}?`,
+        body: `From ${specName}.`,
+        danger: true,
+        confirmLabel: "Remove",
+      });
+      if (!ok) return;
       delBtn.disabled = true;
       try {
         await deleteSubRuleItem(kind, specName, key);
@@ -1200,7 +1208,7 @@ function renderSubRuleRow(
         const msg = err instanceof ApiError
           ? translateErrorKind(err.kind) + ": " + err.message
           : String(err);
-        alert("Remove failed: " + msg);
+        showToast({ kind: "error", title: "Remove failed", body: msg });
       }
     });
     actionsCell.appendChild(delBtn);
@@ -1439,7 +1447,7 @@ function makeReorderBtn(
       const msg = err instanceof ApiError
         ? translateErrorKind(err.kind) + ": " + err.message
         : String(err);
-      alert("Reorder failed: " + msg);
+      showToast({ kind: "error", title: "Reorder failed", body: msg });
     }
   });
   return btn;
@@ -2439,14 +2447,20 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
                 const msg = err instanceof ApiError
                   ? translateErrorKind(err.kind) + ": " + err.message
                   : String(err);
-                alert("Refresh failed: " + msg);
+                showToast({ kind: "error", title: "Refresh failed", body: msg });
               }
             });
             actionsRow.appendChild(refreshBtn);
 
             const unbindBtn = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Unbind service");
             unbindBtn.addEventListener("click", async () => {
-              if (!window.confirm(`Unbind service from interface ${name}? This cannot be undone.`)) return;
+              const ok = await confirmInline({
+                title: `Unbind service from ${name}?`,
+                body: "This cannot be undone.",
+                danger: true,
+                confirmLabel: "Unbind",
+              });
+              if (!ok) return;
               unbindBtn.disabled = true;
               unbindBtn.textContent = "Unbinding…";
               try {
@@ -2458,7 +2472,7 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
                 const msg = err instanceof ApiError
                   ? translateErrorKind(err.kind) + ": " + err.message
                   : String(err);
-                alert("Unbind failed: " + msg);
+                showToast({ kind: "error", title: "Unbind failed", body: msg });
               }
             });
             actionsRow.appendChild(unbindBtn);
@@ -2469,8 +2483,13 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
           // if the interface is not a link endpoint it returns 404, which is surfaced.
           const removeLinkBtn = el("button", { type: "button", className: "iface-action-btn" }, "Remove link");
           removeLinkBtn.title = "Remove the topology link that uses this interface as an endpoint";
-          removeLinkBtn.addEventListener("click", () => {
-            if (!window.confirm(`Remove the link on interface ${name}?`)) return;
+          removeLinkBtn.addEventListener("click", async () => {
+            const ok = await confirmInline({
+              title: `Remove the link on ${name}?`,
+              danger: true,
+              confirmLabel: "Remove link",
+            });
+            if (!ok) return;
             removeLinkBtn.disabled = true;
             removeLinkBtn.textContent = "Removing…";
             deleteTopologyLink(device, name)
@@ -2483,7 +2502,7 @@ function renderInterfaceTab(container: HTMLElement, device: string, data: unknow
                 const msg = err instanceof ApiError
                   ? translateErrorKind(err.kind) + ": " + err.message
                   : String(err);
-                alert("Remove link failed: " + msg);
+                showToast({ kind: "error", title: "Remove link failed", body: msg });
               });
           });
           actionsRow.appendChild(removeLinkBtn);
@@ -2609,9 +2628,11 @@ function renderReconcileSection(device: string): HTMLElement {
         const applyBtn = el("button", { type: "button", className: "reconcile-btn reconcile-btn--apply" }, "Apply reconcile (atomic per device)");
         out.appendChild(applyBtn);
         applyBtn.addEventListener("click", async () => {
-          const ok = window.confirm(
-            `Reconcile ${device}? This will write the corrective changes to the device's CONFIG_DB atomically. Verify the preview above first.`,
-          );
+          const ok = await confirmInline({
+            title: `Reconcile ${device}?`,
+            body: "Corrective changes will be written to the device's CONFIG_DB atomically. Verify the preview above first.",
+            confirmLabel: "Apply reconcile",
+          });
           if (!ok) return;
           applyBtn.disabled = true;
           previewBtn.disabled = true;
@@ -2802,8 +2823,14 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
     const actions = el("div", { className: "lifecycle-actions" });
     if (status.state === "running" || status.state === "booting") {
       const stop = el("button", { type: "button", className: "btn btn-danger btn-sm" }, "Stop VM");
-      stop.addEventListener("click", () => {
-        if (!window.confirm(`Stop VM "${device}" in lab "${network}"? The device will go offline.`)) return;
+      stop.addEventListener("click", async () => {
+        const ok = await confirmInline({
+          title: `Stop VM "${device}"?`,
+          body: `In lab "${network}". The device will go offline.`,
+          danger: true,
+          confirmLabel: "Stop",
+        });
+        if (!ok) return;
         stop.setAttribute("disabled", "");
         stop.textContent = "Stopping…";
         postLabStopNode(network, device)
@@ -2811,7 +2838,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
           .catch((err) => {
             stop.removeAttribute("disabled");
             stop.textContent = "Stop VM";
-            alert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
+            showToast({ kind: "error", title: "Stop failed", body: err instanceof Error ? err.message : String(err) });
           });
       });
       actions.appendChild(stop);
@@ -2826,7 +2853,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
           .catch((err) => {
             start.removeAttribute("disabled");
             start.textContent = "Start VM";
-            alert(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
+            showToast({ kind: "error", title: "Start failed", body: err instanceof Error ? err.message : String(err) });
           });
       });
       actions.appendChild(start);
@@ -3748,17 +3775,27 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Blue (spec-only) devices become green via Bring up + Provision.
         // Convention: lab name == active network ID (newtron#116 / PR #121).
         const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Bring up");
-        bringUpBtn.addEventListener("click", () => {
+        bringUpBtn.addEventListener("click", async () => {
           const network = activeNetwork();
-          if (!window.confirm(`Bring up network "${network}" as a lab? VMs will boot for each device in the topology.`)) return;
+          const ok = await confirmInline({
+            title: `Bring up "${network}" as a lab?`,
+            body: "VMs will boot for each device in the topology.",
+            confirmLabel: "Bring up",
+          });
+          if (!ok) return;
           openDeployModal(network);
         });
         toolbar.appendChild(bringUpBtn);
 
         const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
-        provisionBtn.addEventListener("click", () => {
+        provisionBtn.addEventListener("click", async () => {
           const network = activeNetwork();
-          if (!window.confirm(`Run provisioning pass on lab "${network}"? Requires VMs to be up.`)) return;
+          const ok = await confirmInline({
+            title: `Run provisioning on lab "${network}"?`,
+            body: "Requires VMs to be up.",
+            confirmLabel: "Provision",
+          });
+          if (!ok) return;
           provisionBtn.setAttribute("disabled", "");
           provisionBtn.textContent = "Provisioning…";
           postLabProvision(network)
@@ -3770,15 +3807,21 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               provisionBtn.removeAttribute("disabled");
               provisionBtn.textContent = "Provision";
               const msg = err instanceof Error ? err.message : String(err);
-              alert(`Provision failed: ${msg}`);
+              showToast({ kind: "error", title: "Provision failed", body: msg });
             });
         });
         toolbar.appendChild(provisionBtn);
 
         const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Tear down");
-        tearDownBtn.addEventListener("click", () => {
+        tearDownBtn.addEventListener("click", async () => {
           const network = activeNetwork();
-          if (!window.confirm(`Tear down lab "${network}"? This will destroy all VMs and their state. The topology spec stays intact.`)) return;
+          const ok = await confirmInline({
+            title: `Tear down lab "${network}"?`,
+            body: "All VMs and their state will be destroyed. The topology spec stays intact.",
+            danger: true,
+            confirmLabel: "Tear down",
+          });
+          if (!ok) return;
           tearDownBtn.setAttribute("disabled", "");
           tearDownBtn.textContent = "Tearing down…";
           postLabDestroy(network)
@@ -3791,7 +3834,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               tearDownBtn.removeAttribute("disabled");
               tearDownBtn.textContent = "Tear down";
               const msg = err instanceof Error ? err.message : String(err);
-              alert(`Tear down failed: ${msg}`);
+              showToast({ kind: "error", title: "Tear down failed", body: msg });
             });
         });
         toolbar.appendChild(tearDownBtn);
@@ -3801,9 +3844,13 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Provision drives spec-only (blue) devices toward actuated-ok
         // (green) by pushing the spec projection at the substrate.
         const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
-        provisionBtn.addEventListener("click", () => {
+        provisionBtn.addEventListener("click", async () => {
           const network = activeNetwork();
-          if (!window.confirm(`Run provisioning pass against the physical substrate for "${network}"?`)) return;
+          const ok = await confirmInline({
+            title: `Provision physical substrate for "${network}"?`,
+            confirmLabel: "Provision",
+          });
+          if (!ok) return;
           provisionBtn.setAttribute("disabled", "");
           provisionBtn.textContent = "Provisioning…";
           // newtcon currently routes both lab and physical provisioning
@@ -3818,7 +3865,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               provisionBtn.removeAttribute("disabled");
               provisionBtn.textContent = "Provision";
               const msg = err instanceof Error ? err.message : String(err);
-              alert(`Provision failed: ${msg}`);
+              showToast({ kind: "error", title: "Provision failed", body: msg });
             });
         });
         toolbar.appendChild(provisionBtn);
@@ -4117,9 +4164,14 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       viewState = fitToBounds(lastResultBounds, rect.width, rect.height);
       svgEl.setAttribute("viewBox", viewBoxStr(viewState));
     });
-    resetPosBtn.addEventListener("click", () => {
+    resetPosBtn.addEventListener("click", async () => {
       if (pinnedPositions.size === 0) return;
-      if (!window.confirm(`Reset ${pinnedPositions.size} pinned node position${pinnedPositions.size === 1 ? "" : "s"} to the grid layout?`)) return;
+      const ok = await confirmInline({
+        title: `Reset ${pinnedPositions.size} pinned node position${pinnedPositions.size === 1 ? "" : "s"}?`,
+        body: "Nodes will return to the grid layout.",
+        confirmLabel: "Reset",
+      });
+      if (!ok) return;
       pinnedPositions.clear();
       clearPositions(activeNet);
       renderGraph();

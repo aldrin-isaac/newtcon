@@ -15,6 +15,8 @@ import { iconSVG } from "./icons.js";
 import { apiFetch, apiSend } from "./api/newtcon/_transport.js";
 import { apiPath } from "./api-path.js";
 import { formatErrorBrief as formatError } from "./render-error.js";
+import { confirmInline } from "./confirm-inline.js";
+import { showToast } from "./toast.js";
 import {
   NODE_ACTIONS,
   INTERFACE_ACTIONS,
@@ -292,11 +294,14 @@ function renderSaveDiscardRow(devices: string[], onChanged: () => void): HTMLEle
   if (queued === 0) applyBtn.setAttribute("disabled", "");
   applyBtn.addEventListener("click", async () => {
     if (queued === 0) return;
-    const msg = devices.length === 1
-      ? `Apply ${queued} queued change${queued === 1 ? "" : "s"} on ${devices[0]}? This sends the changes to newtron now.`
-      : `Apply ${queued} queued change${queued === 1 ? "" : "s"} across ${devices.length} devices?`;
-    if (!window.confirm(msg)) return;
-    if (!window.confirm("Are you sure? This will modify the running device(s).")) return;
+    const ok = await confirmInline({
+      title: devices.length === 1
+        ? `Apply ${queued} change${queued === 1 ? "" : "s"} on ${devices[0]}?`
+        : `Apply ${queued} change${queued === 1 ? "" : "s"} across ${devices.length} devices?`,
+      body: "Changes are sent to newtron and modify the running device(s).",
+      confirmLabel: "Apply",
+    });
+    if (!ok) return;
     applyBtn.setAttribute("disabled", "");
     applyBtn.textContent = "Applying…";
     const errs: string[] = [];
@@ -304,7 +309,13 @@ function renderSaveDiscardRow(devices: string[], onChanged: () => void): HTMLEle
       const r = await applyDevice(d);
       for (const f of r.failed) errs.push(`${describePending(f.pending)}: ${f.error}`);
     }
-    if (errs.length > 0) alert(`Some changes failed to apply:\n\n${errs.join("\n")}`);
+    if (errs.length > 0) {
+      showToast({
+        kind: "error",
+        title: `${errs.length} change${errs.length === 1 ? "" : "s"} failed to apply`,
+        body: errs.join("\n"),
+      });
+    }
     onChanged();
   });
   row.appendChild(applyBtn);
@@ -312,13 +323,17 @@ function renderSaveDiscardRow(devices: string[], onChanged: () => void): HTMLEle
   const discardBtn = el("button", { type: "button", className: "btn btn-danger btn-sm" + (queued === 0 ? " btn-disabled" : "") },
     "Discard changes");
   if (queued === 0) discardBtn.setAttribute("disabled", "");
-  discardBtn.addEventListener("click", () => {
+  discardBtn.addEventListener("click", async () => {
     if (queued === 0) return;
-    const msg = devices.length === 1
-      ? `Discard ${queued} queued change${queued === 1 ? "" : "s"} for ${devices[0]}? Nothing is sent to newtron.`
-      : `Discard ${queued} queued change${queued === 1 ? "" : "s"} across ${devices.length} devices? Nothing is sent to newtron.`;
-    if (!window.confirm(msg)) return;
-    if (!window.confirm("Are you sure?")) return;
+    const ok = await confirmInline({
+      title: devices.length === 1
+        ? `Discard ${queued} change${queued === 1 ? "" : "s"} for ${devices[0]}?`
+        : `Discard ${queued} change${queued === 1 ? "" : "s"} across ${devices.length} devices?`,
+      body: "Nothing is sent to newtron.",
+      danger: true,
+      confirmLabel: "Discard",
+    });
+    if (!ok) return;
     for (const d of devices) discardDevice(d);
     onChanged();
   });
@@ -470,12 +485,10 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
 
   // No-fields path: confirm + queue (do not POST). Apply changes runs the queue.
   if ((action.fields ?? []).length === 0) {
-    if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
-    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
-    queueActionFromForm(action, target, {});
-    flash(anchor, "Queued");
-    deps.onChange();
+    void queueActionWithConfirm(action, target, {}, () => {
+      flash(anchor, "Queued");
+      deps.onChange();
+    });
     return;
   }
 
@@ -521,18 +534,44 @@ function openActionForm(action: ActionDef, target: ActionTarget, anchor: HTMLEle
       }
       body[field.name] = coerceFieldValue(field, raw);
     }
-    if (action.confirm && !window.confirm(action.confirm)) return;
-    if (!window.confirm(`Queue "${action.label}"? Click Apply changes to apply.`)) return;
-    if (action.danger && !window.confirm("Are you sure? This is destructive.")) return;
-    try {
-      queueActionFromForm(action, target, body);
+    void queueActionWithConfirm(action, target, body, () => {
       formWrap.remove();
       flash(anchor, "Queued");
       deps.onChange();
-    } catch (e) {
+    }, (e) => {
       errOut.appendChild(panelError(formatError(e)));
-    }
+    });
   });
+}
+
+// queueActionWithConfirm folds the per-action confirm + base queue
+// confirm + (when destructive) danger confirmation into a single
+// confirmInline call. Replaces the prior three-stacked window.confirm
+// sequence (slice — inline-dialogs polish).
+async function queueActionWithConfirm(
+  action: ActionDef,
+  target: ActionTarget,
+  body: Record<string, unknown>,
+  onQueued: () => void,
+  onError?: (e: unknown) => void,
+): Promise<void> {
+  const bodyParts: string[] = [];
+  if (action.confirm) bodyParts.push(action.confirm);
+  bodyParts.push("Click Apply changes to send it to newtron.");
+  if (action.danger) bodyParts.push("This is destructive.");
+  const ok = await confirmInline({
+    title: `Queue "${action.label}"?`,
+    body: bodyParts.join("\n\n"),
+    danger: !!action.danger,
+    confirmLabel: "Queue",
+  });
+  if (!ok) return;
+  try {
+    queueActionFromForm(action, target, body);
+    onQueued();
+  } catch (e) {
+    if (onError) onError(e);
+  }
 }
 
 // Queue an action (does NOT POST). For node-multi, queues one per device.

@@ -49,7 +49,20 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
-page.on("dialog", (d) => { void d.dismiss(); });
+// Inline confirm modal auto-dismiss — this smoke must NEVER let an
+// action go through; the goal is to verify which actions are reachable,
+// not to fire them.
+await page.evaluateOnNewDocument(() => {
+  const install = () => new MutationObserver(() => {
+    const btn = document.querySelector(".confirm-modal-btn--cancel");
+    if (btn instanceof HTMLElement) btn.click();
+  }).observe(document.body, { childList: true, subtree: true });
+  if (document.readyState === "loading") {
+    addEventListener("DOMContentLoaded", install);
+  } else {
+    install();
+  }
+});
 
 try {
   // Pre-seed active network = a registered one.

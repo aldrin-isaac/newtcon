@@ -22,7 +22,18 @@ const vlanID = 3700 + Math.floor(Math.random() * 200);
 
 try {
   const page = await browser.newPage();
-  page.on("dialog", (d) => d.accept());
+  await page.evaluateOnNewDocument(() => {
+    // Inline confirm modal auto-accept; replaces native-dialog handler.
+    const install = () => new MutationObserver(() => {
+      const btn = document.querySelector(".confirm-modal-btn--confirm");
+      if (btn instanceof HTMLElement) btn.click();
+    }).observe(document.body, { childList: true, subtree: true });
+    if (document.readyState === "loading") {
+      addEventListener("DOMContentLoaded", install);
+    } else {
+      install();
+    }
+  });
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
   console.log(`→ open ${BASE}`);

@@ -9,6 +9,7 @@
 // Backend: GET /api/networks (list) + POST /api/networks (register).
 
 import { iconSVG } from "./icons.js";
+import { confirmInline } from "./confirm-inline.js";
 
 const STORAGE_KEY = "newtcon.activeNetwork";
 const DEFAULT_NET = "default";
@@ -74,9 +75,14 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
       <span class="network-switcher-item-icon">${iconSVG(isActive ? "check" : "network")}</span>
       <span class="network-switcher-item-id">${escapeHtml(info.id)}</span>
       <span class="network-switcher-item-topology">${escapeHtml(info.topology || "—")}</span>`;
-    item.addEventListener("click", () => {
+    item.addEventListener("click", async () => {
       if (isActive) { closeDropdown(); return; }
-      if (!window.confirm(`Switch active network to "${info.id}" (${info.topology || info.dir})? The page will reload.`)) return;
+      const ok = await confirmInline({
+        title: `Switch to "${info.id}"?`,
+        body: `Topology: ${info.topology || info.dir}\n\nThe page will reload.`,
+        confirmLabel: "Switch",
+      });
+      if (!ok) return;
       setActiveNetwork(info.id);
       window.location.reload();
     });
@@ -179,7 +185,14 @@ function openRegisterModal(): void {
       errorOut.hidden = false;
       return;
     }
-    if (!window.confirm(`Create new topology "${id}" at ${dir}? Empty layout will be scaffolded.`)) return;
+    {
+      const ok = await confirmInline({
+        title: `Create new topology "${id}"?`,
+        body: `Newtron will scaffold an empty layout at ${dir}.`,
+        confirmLabel: "Create",
+      });
+      if (!ok) return;
+    }
     try {
       const r = await fetch("/api/networks", {
         method: "POST",

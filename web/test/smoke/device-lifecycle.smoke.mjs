@@ -22,11 +22,6 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
-let dialogSawConfirm = false;
-page.on("dialog", (d) => {
-  dialogSawConfirm = true;
-  void d.dismiss();  // don't actually destroy the lab
-});
 
 try {
   await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
@@ -53,15 +48,21 @@ try {
   });
   expect(tearDownText !== null, `Lab view toolbar has "Tear down" button`);
 
-  // ── 2. Tear-down click fires a confirm dialog (dismissed automatically) ──
-  dialogSawConfirm = false;
+  // ── 2. Tear-down click mounts the inline confirm modal ──────────────────
   await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
       .find((el) => el.textContent.trim() === "Tear down");
     b?.click();
   });
-  await new Promise((r) => setTimeout(r, 400));
-  expect(dialogSawConfirm, "tear-down click triggers confirm dialog");
+  await new Promise((r) => setTimeout(r, 200));
+  const confirmModal = await page.$(".confirm-overlay");
+  expect(!!confirmModal, "tear-down click mounts the inline confirm modal");
+  // Cancel so the lab is not actually destroyed by the smoke run.
+  await page.evaluate(() => {
+    const cancel = document.querySelector(".confirm-modal-btn--cancel");
+    if (cancel instanceof HTMLElement) cancel.click();
+  });
+  await new Promise((r) => setTimeout(r, 200));
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-lifecycle-01-topology.png" });
 

@@ -29,8 +29,8 @@ page.on("request", (req) => {
   }
 });
 
-// Auto-accept the confirm() dialog so the test can proceed.
-page.on("dialog", (d) => { void d.accept(); });
+// (Inline confirm modal replaces window.confirm — accepted below by
+//  clicking the modal's Confirm button.)
 
 try {
   // Pre-seed localStorage so the active network points at a registered one.
@@ -62,10 +62,16 @@ try {
   });
   expect(btnText === "Bring up", `toolbar button labeled "${btnText}"`);
 
-  // 2-3. Click the button → confirm auto-accepts → modal opens.
+  // 2-3. Click the button → inline confirm modal mounts → click Confirm
+  // → deploy modal opens.
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll(".topology-toolbar-btn"));
     btns.find((el) => el.textContent.trim() === "Bring up")?.click();
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  await page.evaluate(() => {
+    const confirm = document.querySelector(".confirm-modal-btn--confirm");
+    if (confirm instanceof HTMLElement) confirm.click();
   });
   await new Promise((r) => setTimeout(r, 800));
 
