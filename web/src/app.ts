@@ -3713,89 +3713,113 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     };
     let paletteByDevice = computePaletteByDevice();
 
-    // Build toolbar with Add device and Add link buttons.
+    // Toolbar — buttons gate by view mode (slice #210 polish): Spec
+    // view is the only place that authors the topology spec (create
+    // node / add link); Lab view exposes lab substrate lifecycle
+    // (bring up / provision / tear down) because those operate on the
+    // lab, not the spec; Physical view is pure observation (no
+    // mutation, no lifecycle).
     const toolbar = el("div", { className: "topology-toolbar" });
-
-    const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Create node");
-    createNodeBtn.addEventListener("click", () => {
-      openCreateNodeDrawer(() => mountTopologyTab(root));
-    });
-    toolbar.appendChild(createNodeBtn);
-
-    const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
-    addLinkBtn.addEventListener("click", () => {
-      // Pass known device names; interface names pre-populated as empty (lazy).
-      openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
-    });
-    toolbar.appendChild(addLinkBtn);
-
-    // Bring up as lab: newtlab boots VMs named after this network's topology
-    // devices. Phase 1 of the unified-substrate direction — newtlab is plumbing,
-    // not a separate domain. Once VMs are up, they're addressable through the
-    // same per-device surface as physical hardware (future phase).
-    //
-    // Convention: lab name == active network ID (newtron#116 / PR #121 made
-    // this the default on newtlab's side, so identity is mechanical).
-    const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Bring up as lab");
-    bringUpBtn.addEventListener("click", () => {
-      const network = activeNetwork();
-      if (!window.confirm(`Bring up network "${network}" as a lab? VMs will boot for each device in the topology.`)) return;
-      openDeployModal(network);
-    });
-    toolbar.appendChild(bringUpBtn);
-
-    // Provision — newtlab's post-deploy provisioning pass. Phase 4 moved
-    // this here from the retired Lab tab. Operator's typical flow:
-    // Bring up → (wait for VMs to settle) → Provision → use the lab. Some
-    // deploys carry `provision:true` and skip this; others split it out.
-    const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
-    provisionBtn.addEventListener("click", () => {
-      const network = activeNetwork();
-      if (!window.confirm(`Run provisioning pass on lab "${network}"? Requires VMs to be up.`)) return;
-      provisionBtn.setAttribute("disabled", "");
-      provisionBtn.textContent = "Provisioning…";
-      postLabProvision(network)
-        .then(() => {
-          provisionBtn.removeAttribute("disabled");
-          provisionBtn.textContent = "Provision";
-        })
-        .catch((err) => {
-          provisionBtn.removeAttribute("disabled");
-          provisionBtn.textContent = "Provision";
-          const msg = err instanceof Error ? err.message : String(err);
-          alert(`Provision failed: ${msg}`);
-        });
-    });
-    toolbar.appendChild(provisionBtn);
-
-    // Tear down — mirror of Bring up. Destructive: extra-warning confirm,
-    // danger styling. Phase 3 ships this in the toolbar so the operator never
-    // has to leave the Topology tab for lab lifecycle.
-    const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--danger" }, "Tear down lab");
-    tearDownBtn.addEventListener("click", () => {
-      const network = activeNetwork();
-      if (!window.confirm(`Tear down lab "${network}"? This will destroy all VMs and their state. The topology spec stays intact.`)) return;
-      tearDownBtn.setAttribute("disabled", "");
-      tearDownBtn.textContent = "Tearing down…";
-      postLabDestroy(network)
-        .then(() => {
-          tearDownBtn.removeAttribute("disabled");
-          tearDownBtn.textContent = "Tear down lab";
-          // The 5s topology poll will pick up the new state within 5s and
-          // patch device badges back to "unrealized"; force an immediate
-          // re-render too so the operator sees the change without waiting.
-          mountTopologyTab(root);
-        })
-        .catch((err) => {
-          tearDownBtn.removeAttribute("disabled");
-          tearDownBtn.textContent = "Tear down lab";
-          const msg = err instanceof Error ? err.message : String(err);
-          alert(`Tear down failed: ${msg}`);
-        });
-    });
-    toolbar.appendChild(tearDownBtn);
-
     root.appendChild(toolbar);
+
+    const renderToolbar = (): void => {
+      toolbar.textContent = "";
+      if (viewMode === "spec") {
+        // Spec authoring — Create node / Add link mutate the topology
+        // spec. Lab + physical lifecycle live in their respective views.
+        const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Create node");
+        createNodeBtn.addEventListener("click", () => {
+          openCreateNodeDrawer(() => mountTopologyTab(root));
+        });
+        toolbar.appendChild(createNodeBtn);
+
+        const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
+        addLinkBtn.addEventListener("click", () => {
+          openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
+        });
+        toolbar.appendChild(addLinkBtn);
+      } else if (viewMode === "spec-lab") {
+        // Lab substrate lifecycle: Bring up → Provision → Tear down.
+        // Blue (spec-only) devices become green via Bring up + Provision.
+        // Convention: lab name == active network ID (newtron#116 / PR #121).
+        const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Bring up as lab");
+        bringUpBtn.addEventListener("click", () => {
+          const network = activeNetwork();
+          if (!window.confirm(`Bring up network "${network}" as a lab? VMs will boot for each device in the topology.`)) return;
+          openDeployModal(network);
+        });
+        toolbar.appendChild(bringUpBtn);
+
+        const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
+        provisionBtn.addEventListener("click", () => {
+          const network = activeNetwork();
+          if (!window.confirm(`Run provisioning pass on lab "${network}"? Requires VMs to be up.`)) return;
+          provisionBtn.setAttribute("disabled", "");
+          provisionBtn.textContent = "Provisioning…";
+          postLabProvision(network)
+            .then(() => {
+              provisionBtn.removeAttribute("disabled");
+              provisionBtn.textContent = "Provision";
+            })
+            .catch((err) => {
+              provisionBtn.removeAttribute("disabled");
+              provisionBtn.textContent = "Provision";
+              const msg = err instanceof Error ? err.message : String(err);
+              alert(`Provision failed: ${msg}`);
+            });
+        });
+        toolbar.appendChild(provisionBtn);
+
+        const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--danger" }, "Tear down lab");
+        tearDownBtn.addEventListener("click", () => {
+          const network = activeNetwork();
+          if (!window.confirm(`Tear down lab "${network}"? This will destroy all VMs and their state. The topology spec stays intact.`)) return;
+          tearDownBtn.setAttribute("disabled", "");
+          tearDownBtn.textContent = "Tearing down…";
+          postLabDestroy(network)
+            .then(() => {
+              tearDownBtn.removeAttribute("disabled");
+              tearDownBtn.textContent = "Tear down lab";
+              mountTopologyTab(root);
+            })
+            .catch((err) => {
+              tearDownBtn.removeAttribute("disabled");
+              tearDownBtn.textContent = "Tear down lab";
+              const msg = err instanceof Error ? err.message : String(err);
+              alert(`Tear down failed: ${msg}`);
+            });
+        });
+        toolbar.appendChild(tearDownBtn);
+      } else {
+        // Physical substrate — only Provision (no bring-up / tear-down
+        // because physical hardware isn't lifecycle-managed by newtcon).
+        // Provision drives spec-only (blue) devices toward actuated-ok
+        // (green) by pushing the spec projection at the substrate.
+        const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn topology-toolbar-btn--primary" }, "Provision");
+        provisionBtn.addEventListener("click", () => {
+          const network = activeNetwork();
+          if (!window.confirm(`Run provisioning pass against the physical substrate for "${network}"?`)) return;
+          provisionBtn.setAttribute("disabled", "");
+          provisionBtn.textContent = "Provisioning…";
+          // newtcon currently routes both lab and physical provisioning
+          // through the same backend pass. If newtron later splits the
+          // primitives, swap this call for the physical-specific one.
+          postLabProvision(network)
+            .then(() => {
+              provisionBtn.removeAttribute("disabled");
+              provisionBtn.textContent = "Provision";
+            })
+            .catch((err) => {
+              provisionBtn.removeAttribute("disabled");
+              provisionBtn.textContent = "Provision";
+              const msg = err instanceof Error ? err.message : String(err);
+              alert(`Provision failed: ${msg}`);
+            });
+        });
+        toolbar.appendChild(provisionBtn);
+      }
+    };
+    renderToolbar();
 
     // Teaching empty state (slice #169.B). When the topology has zero
     // committed devices AND no pending add-device in the queue, skip
@@ -3861,8 +3885,16 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           viewMode = mode;
           saveViewMode(activeNetName, mode);
           paletteByDevice = computePaletteByDevice();
+          // View mode change re-renders the chip row (active highlight),
+          // the toolbar (different mutation buttons per view), the
+          // graph (palette swap), the panel (hidden in observation
+          // views), and the drift summary (Physical-only).
           renderViewRow();
+          renderToolbar();
+          selected.clear();
           renderGraph();
+          renderPanel();
+          renderDriftSummary();
         });
         viewRow.appendChild(chip);
       }
@@ -3995,39 +4027,48 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       // renderTopologySVG which applies the dim class to nodes + links.
       const allNames = (topoData.nodes ?? []).map((n) => n.name);
       const dimmed = applyFilter(filterState, allNames, deviceMetadata).hidden;
+      // Spec view = authoring (select + side panel + right-click
+      // context menu + node delete). Observation views (Lab / Physical)
+      // = left-click opens the drawer directly for inspection; right-
+      // click + delete affordance omitted.
+      const isSpec = viewMode === "spec";
+      const specOnlyOpts = isSpec
+        ? {
+            onNodeContextMenu: (deviceName: string, ev: MouseEvent) => {
+              showContextMenu(NODE_ACTIONS, {
+                kind: "node",
+                device: deviceName,
+                anchorX: ev.clientX,
+                anchorY: ev.clientY,
+                onComplete: () => mountTopologyTab(root),
+                onInspect: () => openNodeDrawer(deviceName),
+              });
+            },
+            onNodeDelete: (deviceName: string) => {
+              enqueueTopologyRemoveDevice(deviceName);
+              mountTopologyTab(root);
+            },
+          }
+        : {};
       const result = renderTopologySVG(topoData, {
         paletteByDevice,
         dimmedNames: dimmed,
-        onNodeClick: (deviceName, ev) => {
-          if (ev.shiftKey) {
-            if (selected.has(deviceName)) selected.delete(deviceName);
-            else selected.add(deviceName);
-          } else {
-            selected.clear();
-            selected.add(deviceName);
-          }
-          renderGraph();
-          renderPanel();
-        },
-        onNodeContextMenu: (deviceName, ev) => {
-          // Right-click keeps the floating menu as a quick power-user gesture.
-          showContextMenu(NODE_ACTIONS, {
-            kind: "node",
-            device: deviceName,
-            anchorX: ev.clientX,
-            anchorY: ev.clientY,
-            onComplete: () => mountTopologyTab(root),
-            onInspect: () => openNodeDrawer(deviceName),
-          });
-        },
+        onNodeClick: isSpec
+          ? (deviceName, ev) => {
+              if (ev.shiftKey) {
+                if (selected.has(deviceName)) selected.delete(deviceName);
+                else selected.add(deviceName);
+              } else {
+                selected.clear();
+                selected.add(deviceName);
+              }
+              renderGraph();
+              renderPanel();
+            }
+          : (deviceName) => { openNodeDrawer(deviceName); },
         driftByDevice,
         statusByDevice,
-        onNodeDelete: (deviceName) => {
-          // Stage the remove rather than fire immediately; toggles if already queued.
-          enqueueTopologyRemoveDevice(deviceName);
-          mountTopologyTab(root);
-        },
-        selected,
+        selected: isSpec ? selected : new Set<string>(),
         isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
         isPendingRemove: (n) => isDevicePendingRemove(n),
         viewState,
@@ -4036,10 +4077,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         onNodeMoved: (name, pos) => {
           pinnedPositions.set(name, pos);
           savePosition(activeNet, name, pos);
-          // Re-render to redraw links from the new node position.
           renderGraph();
         },
         onLinkClick: (link) => openLinkDrawer(link, rawDevices),
+        ...specOnlyOpts,
       });
       // SVG sits behind the toolbar (toolbar is z-indexed above).
       graphSlot.insertBefore(result.svg, zoomToolbar);
@@ -4092,6 +4133,15 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
 
     const renderPanel = (): void => {
+      if (viewMode !== "spec") {
+        // Observation views — hide the action panel entirely so the
+        // SVG fills the width. Drawer (left-click) is the inspection
+        // affordance; spec mutation is unavailable here by design.
+        panelRoot.style.display = "none";
+        panelRoot.textContent = "";
+        return;
+      }
+      panelRoot.style.display = "";
       renderActionPanel(
         { devices: Array.from(selected) },
         {
@@ -4106,8 +4156,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       );
     };
 
-    // Background-dismiss menu on outside graph clicks.
+    // Background-dismiss selection on outside graph clicks (Spec only —
+    // observation views don't carry selection state).
     graphSlot.addEventListener("click", (e) => {
+      if (viewMode !== "spec") return;
       if (e.target === graphSlot || (e.target as Element).tagName?.toLowerCase() === "svg") {
         selected.clear();
         renderGraph();
@@ -4115,11 +4167,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       }
     });
 
-    // Right-click on empty canvas → "Create node" affordance. Per-device
-    // right-click is handled inside renderTopologySVG via onNodeContextMenu;
-    // here we only handle clicks on the canvas background (graphSlot or
-    // the <svg> element itself), not on device <g> elements.
+    // Right-click on empty canvas → "Create node" affordance. Suppressed
+    // in observation views (no spec mutation there). Per-device
+    // right-click is handled inside renderTopologySVG.
     graphSlot.addEventListener("contextmenu", (e) => {
+      if (viewMode !== "spec") return;
       const tag = (e.target as Element).tagName?.toLowerCase();
       if (e.target !== graphSlot && tag !== "svg") return;
       e.preventDefault();
@@ -4151,15 +4203,25 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       },
     });
 
-    const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
-    const summary = el(
-      "p",
-      { className: totalDrift > 0 ? "topology-drift-summary topology-drift-summary--present" : "topology-drift-summary" },
-      totalDrift > 0
-        ? `${totalDrift} drift item${totalDrift === 1 ? "" : "s"} across ${driftByDevice.size} device${driftByDevice.size === 1 ? "" : "s"} — click a device to inspect.`
-        : "No drift detected on any device.",
-    );
-    root.appendChild(summary);
+    // Drift summary is a physical-substrate signal — surface only in
+    // Physical view. Re-renders alongside view-mode changes via
+    // renderDriftSummary().
+    const driftSummaryRow = el("div");
+    root.appendChild(driftSummaryRow);
+    const renderDriftSummary = (): void => {
+      driftSummaryRow.textContent = "";
+      if (viewMode !== "spec-physical") return;
+      const totalDrift = Array.from(driftByDevice.values()).reduce((a, b) => a + b, 0);
+      const summary = el(
+        "p",
+        { className: totalDrift > 0 ? "topology-drift-summary topology-drift-summary--present" : "topology-drift-summary" },
+        totalDrift > 0
+          ? `${totalDrift} drift item${totalDrift === 1 ? "" : "s"} across ${driftByDevice.size} device${driftByDevice.size === 1 ? "" : "s"} — click a device to inspect.`
+          : "No drift detected on any device.",
+      );
+      driftSummaryRow.appendChild(summary);
+    };
+    renderDriftSummary();
   } catch (err) {
     root.textContent = "";
     if (err instanceof ApiError && err.kind === "newtron_unavailable") {

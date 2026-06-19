@@ -35,9 +35,9 @@ describe("ALL_VIEW_MODES", () => {
 
 describe("viewModeLabel()", () => {
   test("operator-facing labels are stable", () => {
-    assert.equal(viewModeLabel("spec"), "Spec only");
-    assert.equal(viewModeLabel("spec-lab"), "Spec + Lab");
-    assert.equal(viewModeLabel("spec-physical"), "Spec + Physical");
+    assert.equal(viewModeLabel("spec"), "Spec");
+    assert.equal(viewModeLabel("spec-lab"), "Lab");
+    assert.equal(viewModeLabel("spec-physical"), "Physical");
   });
 });
 
