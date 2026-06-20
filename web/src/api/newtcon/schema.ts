@@ -10,7 +10,7 @@
 // runtime (they're derived from struct tags at newtron boot), so
 // fetching the same kind twice serves the second call from memory.
 
-import { apiFetch } from "./_transport.js";
+import { ApiError } from "./services.js";
 
 // ─── Wire-shape types ──────────────────────────────────────────────
 
@@ -82,15 +82,79 @@ export interface SchemaMeta {
   paths?: SchemaPaths;
 }
 
-// ─── Cache ─────────────────────────────────────────────────────────
+// ─── Cache + conditional fetch ─────────────────────────────────────
 
 // One pending promise per kind so concurrent callers share the
-// in-flight fetch. Resolved entries stay forever for the session
-// (the schema is boot-time data on newtron's side; invalidation comes
-// from `visibilitychange` HEAD checks, not from age).
+// in-flight fetch. Resolved entries stay forever for the session;
+// invalidation comes from `visibilitychange` HEAD checks against
+// /api/schema/all, not from age. When the upstream schema rolls
+// (newtron restart with new build time), the visibility-change
+// listener observes a 200 instead of a 304 and drops every cache.
 const schemaCache = new Map<string, Promise<SchemaMeta>>();
 let kindsCache: Promise<SchemaKindSummary[]> | null = null;
 let allSchemasCache: Promise<SchemaMeta[]> | null = null;
+
+// Last-Modified per schema URL — populated from the response header
+// on every successful schemaFetch, consulted on the next request
+// (sent as If-Modified-Since) and on visibility-change refresh.
+const lastModifiedByURL = new Map<string, string>();
+
+/**
+ * schemaFetch — schema-endpoint-specific wrapper around native fetch.
+ * Sends If-Modified-Since when we have a cached Last-Modified for the
+ * URL; stores the response's Last-Modified for the next request.
+ *
+ * Returns the parsed body on 200, or `null` on 304. Callers that
+ * receive null know the existing in-memory cache is still valid (this
+ * code path is only reached via the visibility-change refresh, since
+ * the per-kind caches are checked before any HTTP call).
+ *
+ * Why a separate fetch helper instead of extending apiFetch: schemas
+ * are the only endpoints with conditional-fetch semantics today, and
+ * apiFetch staying generic keeps every other call free of caching
+ * concerns it doesn't have.
+ */
+async function schemaFetch(url: string): Promise<unknown | null> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const lm = lastModifiedByURL.get(url);
+  if (lm) headers["If-Modified-Since"] = lm;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, { headers, cache: "no-store" });
+  } catch (cause) {
+    throw new Error(`network error: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+
+  if (resp.status === 304) return null;
+  if (!resp.ok) {
+    // Surface the same ApiError shape apiFetch uses so callers see
+    // consistent error types regardless of which fetch path ran.
+    let envelope: { error: { kind: string; message: string; details: Record<string, unknown> } } = {
+      error: { kind: "internal", message: resp.statusText, details: {} },
+    };
+    try {
+      const parsed = (await resp.json()) as { error?: { kind?: string; message?: string; details?: Record<string, unknown> } };
+      if (parsed?.error) {
+        envelope = {
+          error: {
+            kind: parsed.error.kind ?? "internal",
+            message: parsed.error.message ?? resp.statusText,
+            details: parsed.error.details ?? {},
+          },
+        };
+      }
+    } catch { /* empty / non-JSON body — keep the statusText fallback */ }
+    throw new ApiError(resp.status, envelope);
+  }
+  const newLM = resp.headers.get("Last-Modified");
+  if (newLM) lastModifiedByURL.set(url, newLM);
+  try {
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * fetchSchemaKinds returns the full list of registered authoring kinds,
@@ -102,9 +166,7 @@ let allSchemasCache: Promise<SchemaMeta[]> | null = null;
 export async function fetchSchemaKinds(): Promise<SchemaKindSummary[]> {
   if (kindsCache) return kindsCache;
   kindsCache = (async () => {
-    const body = (await apiFetch("/api/schema", { cache: "no-store" })) as
-      | { kinds?: SchemaKindSummary[] }
-      | null;
+    const body = (await schemaFetch("/api/schema")) as { kinds?: SchemaKindSummary[] } | null;
     return Array.isArray(body?.kinds) ? body!.kinds! : [];
   })();
   try {
@@ -128,9 +190,7 @@ export async function fetchSchemaKinds(): Promise<SchemaKindSummary[]> {
 export async function fetchAllSchemas(): Promise<SchemaMeta[]> {
   if (allSchemasCache) return allSchemasCache;
   allSchemasCache = (async () => {
-    const body = (await apiFetch("/api/schema/all", { cache: "no-store" })) as
-      | { schemas?: SchemaMeta[] }
-      | null;
+    const body = (await schemaFetch("/api/schema/all")) as { schemas?: SchemaMeta[] } | null;
     const schemas = Array.isArray(body?.schemas) ? body!.schemas! : [];
     // Warm the per-kind cache so fetchSchema(kind) hits memory after
     // this call. Wrap each in a resolved promise to match the
@@ -159,10 +219,7 @@ export async function fetchSchema(kind: string): Promise<SchemaMeta> {
   const hit = schemaCache.get(kind);
   if (hit) return hit;
   const p = (async () => {
-    return (await apiFetch(
-      `/api/schema/${encodeURIComponent(kind)}`,
-      { cache: "no-store" },
-    )) as SchemaMeta;
+    return (await schemaFetch(`/api/schema/${encodeURIComponent(kind)}`)) as SchemaMeta;
   })();
   schemaCache.set(kind, p);
   try {
@@ -174,14 +231,66 @@ export async function fetchSchema(kind: string): Promise<SchemaMeta> {
 }
 
 /**
- * resetSchemaCache — testing hook only. Production code should never
- * need to clear the cache.
+ * refreshIfChanged issues a HEAD against /api/schema/all with
+ * If-Modified-Since set to the last value we saw. On 200 (changed),
+ * drops every schema cache so the next access re-fetches; on 304
+ * (unchanged), keeps the caches as-is. Failures swallowed silently —
+ * a transient network blip shouldn't clobber a working cache.
+ *
+ * Triggered from the visibilitychange listener installed at module
+ * load: when the operator's tab regains focus after being hidden, we
+ * check whether newtron has rolled in the meantime.
  */
-export function resetSchemaCache(): void {
+export async function refreshIfChanged(): Promise<void> {
+  const url = "/api/schema/all";
+  const lm = lastModifiedByURL.get(url);
+  if (!lm) return; // never fetched; nothing to refresh against
+  try {
+    const resp = await fetch(url, {
+      method: "HEAD",
+      headers: { "If-Modified-Since": lm, Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (resp.status === 200) {
+      const newLM = resp.headers.get("Last-Modified");
+      // The next schemaFetch will compare against this value via
+      // If-Modified-Since; either way the cache is gone so a full
+      // round-trip happens.
+      if (newLM) lastModifiedByURL.set(url, newLM);
+      resetSchemaCache({ keepValidators: true });
+    }
+    // 304 → unchanged, no action.
+  } catch {
+    // Network blip; ignore.
+  }
+}
+
+// Install the visibility-change listener at module load. Idempotent —
+// the schema module is loaded exactly once per browser context.
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void refreshIfChanged();
+    }
+  });
+}
+
+/**
+ * resetSchemaCache — testing hook + visibility-change invalidation path.
+ * Production code outside this module shouldn't call it; the
+ * visibility-change handler is the canonical invalidator.
+ *
+ * opts.keepValidators: preserve the Last-Modified map so the next fetch
+ * can still send If-Modified-Since (used after a 200 from the freshness
+ * HEAD — we want a real re-fetch but with the new validator on the
+ * wire so we don't waste bandwidth on the same-deploy schema).
+ */
+export function resetSchemaCache(opts: { keepValidators?: boolean } = {}): void {
   schemaCache.clear();
   kindsCache = null;
   allSchemasCache = null;
   slugToKindCache = null;
+  if (!opts.keepValidators) lastModifiedByURL.clear();
 }
 
 // Slug → newtron-kind-name map built dynamically by fetching every
