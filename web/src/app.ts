@@ -102,7 +102,7 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
-import { fetchSchema, fetchSchemaKinds, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
+import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
@@ -165,14 +165,11 @@ interface Panel {
   title: string;
 }
 
-// PANELS is discovered dynamically from newtron's /api/schema. The list
-// is loaded the first time any specs view is mounted (loadPanels()) and
-// cached for the session. Synchronous lookups (kindTitleFor) fall back
-// to humanizing the slug when called before the cache populates.
-//
-// One kind that won't appear in the schema-derived list: prefix-lists
-// (no PrefixListSpec schema). Stitched in as the schema-orphan fallback
-// so its panel still renders.
+// PANELS is discovered dynamically from newtron's /api/schema/all. One
+// HTTP round-trip returns every registered SchemaMeta; the list is
+// loaded on first specs-view mount and cached for the session.
+// Synchronous lookups (kindTitleFor) fall back to humanizing the slug
+// when called before the cache populates.
 let PANELS: Panel[] = [];
 let panelsLoaded: Promise<Panel[]> | null = null;
 
@@ -181,25 +178,18 @@ async function loadPanels(): Promise<Panel[]> {
   panelsLoaded = (async () => {
     const out: Panel[] = [];
     try {
-      const summaries = await fetchSchemaKinds();
-      for (const s of summaries) {
-        const meta = await fetchSchema(s.kind).catch(() => null);
-        const listPath = meta?.paths?.list;
+      const schemas = await fetchAllSchemas();
+      for (const meta of schemas) {
+        const listPath = meta.paths?.list;
         if (!listPath) continue; // embedded / sub-rule — not a top-level panel
         const m = listPath.match(/\/([^/]+)$/);
         if (!m) continue;
-        out.push({ kind: m[1]! as SpecKind, title: s.label });
+        out.push({ kind: m[1]! as SpecKind, title: meta.label });
       }
     } catch {
-      // Schema endpoint unavailable — fall back to no schema-derived
-      // panels. The prefix-lists fallback still mounts below.
-    }
-    // Schema-orphan kinds get manual panel entries so they still render.
-    // As of today: prefix-lists (just a named bucket of PrefixListEntry
-    // sub-rules, no parent schema). When newtron registers PrefixListSpec
-    // this entry goes away.
-    if (!out.some((p) => p.kind === "prefix-lists")) {
-      out.push({ kind: "prefix-lists" as SpecKind, title: "Prefix lists" });
+      // Schema endpoint unavailable — no panels. The Specs view will
+      // mount with an empty subnav; the operator sees the error in the
+      // network panel via standard ApiError flow.
     }
     PANELS = out;
     return out;
@@ -279,18 +269,14 @@ const PATTERNS = {
 // specForms is now a tiny fallback for kinds newtron's schema endpoint
 // doesn't yet describe. The schema-driven dispatch (resolveSlugToKind
 // → fetchSchema → renderSchemaForm) covers every authoring kind newtron
-// registers; this map exists only so the rare schema-orphan kind still
-// has a minimal form to mount.
+// registers; this map exists only as a safety net for schema-orphan
+// kinds that newtron may register without metadata in the future.
 //
-// As of PR #240 universal-engine extension, 14 of 15 registered kinds
-// have schemas. Only prefix-lists lacks a parent schema (it's just a
-// named bucket of PrefixListEntry sub-rules); its create form is one
-// field — name.
-const specForms: Partial<Record<SpecKind, FieldDef[]>> = {
-  "prefix-lists": [
-    { name: "name", label: "Name", type: "text", required: true, placeholder: "e.g. default-routes" },
-  ],
-};
+// Empty as of newtron #242 — every registered kind has a schema. The
+// fallback path stays wired (legacyCreateForm / legacyEditForm) so the
+// system degrades gracefully when newtron-schema is unreachable or a
+// future kind ships without metadata.
+const specForms: Partial<Record<SpecKind, FieldDef[]>> = {};
 
 // displaySchemaFor returns the legacy hand-typed display schema for a
 // spec kind. Schema-driven kinds bypass this entirely (renderSpecDetailInto
@@ -411,8 +397,21 @@ async function renderSchemaDrivenEdit(
       // The PUT URL identifies the row; newtcon-server overwrites any
       // identifier in the body with the URL value. Strip the
       // identifier here too to keep the wire payload clean.
+      //
+      // Sub-collection fields (array/map of item_kind — e.g. rules,
+      // queues) flow into `values` as empty per renderSchemaForm's
+      // "not authorable" notice path. newtron preserves sub-collections
+      // on update-X per docs/newtron/api.md §5 (sub-rule verbs own the
+      // sub-collection lifecycle), so emitting an empty array doesn't
+      // wipe existing rules — but stripping here is belt-and-braces
+      // against any future contract change.
       const idField = schema.identifier || "name";
       delete values[idField];
+      for (const f of schema.fields) {
+        if ((f.type === "array" || f.type === "map") && f.item_kind) {
+          delete values[f.name];
+        }
+      }
       await updateSpec(kind, name, values);
       void openDetail(kind, kindTitle, name);
     } catch (err) {

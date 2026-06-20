@@ -79,14 +79,19 @@ export interface SchemaMeta {
 // ─── Cache ─────────────────────────────────────────────────────────
 
 // One pending promise per kind so concurrent callers share the
-// in-flight fetch. Resolved entries stay forever (the schema is
-// boot-time data on newtron's side).
+// in-flight fetch. Resolved entries stay forever for the session
+// (the schema is boot-time data on newtron's side; invalidation comes
+// from `visibilitychange` HEAD checks, not from age).
 const schemaCache = new Map<string, Promise<SchemaMeta>>();
 let kindsCache: Promise<SchemaKindSummary[]> | null = null;
+let allSchemasCache: Promise<SchemaMeta[]> | null = null;
 
 /**
  * fetchSchemaKinds returns the full list of registered authoring kinds,
  * alphabetical by kind name. Cached for the session.
+ *
+ * Prefer fetchAllSchemas when the caller needs the per-kind fields too —
+ * one HTTP round-trip vs N+1 (summary + per-kind).
  */
 export async function fetchSchemaKinds(): Promise<SchemaKindSummary[]> {
   if (kindsCache) return kindsCache;
@@ -100,6 +105,41 @@ export async function fetchSchemaKinds(): Promise<SchemaKindSummary[]> {
     return await kindsCache;
   } catch (e) {
     kindsCache = null; // allow retry on next call
+    throw e;
+  }
+}
+
+/**
+ * fetchAllSchemas returns every registered kind's full SchemaMeta in
+ * one HTTP round-trip (newtron PR #242). Side-effect: warms the
+ * per-kind schemaCache so subsequent fetchSchema(kind) calls hit
+ * memory.
+ *
+ * Use this for cold-start flows (panel discovery, kind resolver) that
+ * need full metadata for every kind. The narrower fetchSchemaKinds
+ * stays for callers that need only the summary.
+ */
+export async function fetchAllSchemas(): Promise<SchemaMeta[]> {
+  if (allSchemasCache) return allSchemasCache;
+  allSchemasCache = (async () => {
+    const body = (await apiFetch("/api/schema/all", { cache: "no-store" })) as
+      | { schemas?: SchemaMeta[] }
+      | null;
+    const schemas = Array.isArray(body?.schemas) ? body!.schemas! : [];
+    // Warm the per-kind cache so fetchSchema(kind) hits memory after
+    // this call. Wrap each in a resolved promise to match the
+    // schemaCache value shape.
+    for (const meta of schemas) {
+      if (meta.kind) {
+        schemaCache.set(meta.kind, Promise.resolve(meta));
+      }
+    }
+    return schemas;
+  })();
+  try {
+    return await allSchemasCache;
+  } catch (e) {
+    allSchemasCache = null;
     throw e;
   }
 }
@@ -134,6 +174,7 @@ export async function fetchSchema(kind: string): Promise<SchemaMeta> {
 export function resetSchemaCache(): void {
   schemaCache.clear();
   kindsCache = null;
+  allSchemasCache = null;
   slugToKindCache = null;
 }
 
