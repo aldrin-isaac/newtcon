@@ -4551,11 +4551,19 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Observation views — hide the action panel entirely so the
         // SVG fills the width. Drawer (left-click) is the inspection
         // affordance; spec mutation is unavailable here by design.
+        //
+        // Also collapse the grid column: display:none on the panel
+        // itself doesn't collapse the .topology-split grid track, so
+        // the 380px right column would stay allocated and leave a
+        // visible empty margin. .topology-split--no-panel switches the
+        // grid to a single 1fr column.
         panelRoot.style.display = "none";
         panelRoot.textContent = "";
+        split.classList.add("topology-split--no-panel");
         return;
       }
       panelRoot.style.display = "";
+      split.classList.remove("topology-split--no-panel");
       renderActionPanel(
         { devices: Array.from(selected) },
         {

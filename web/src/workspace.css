@@ -1508,6 +1508,12 @@
    * spec-tab pre-graph rows (view chips, toolbar, filter chips). */
   min-height: calc(100vh - 280px);
 }
+/* Observation views (Lab / Physical) hide the right-side action
+ * panel; collapse the grid track so the empty column doesn't leave a
+ * visible 380px margin on the right of the topology canvas. */
+.topology-split--no-panel {
+  grid-template-columns: 1fr;
+}
 .topology-graph-slot {
   position: relative;
   background: var(--color-surface);
