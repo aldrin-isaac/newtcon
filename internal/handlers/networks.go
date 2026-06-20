@@ -1,16 +1,19 @@
-// networks.go — list and register newtron networks. Backs the topology-
+// networks.go — list and create newtron networks. Backs the topology-
 // switcher UI in newtcon's web frontend.
 //
 // Routes (registered in cmd/newtcon-server/main.go):
 //
 //	GET  /api/networks   → proxies newtron GET  /newtron/v1/networks
-//	POST /api/networks   → proxies newtron POST /newtron/v1/networks
-//	                       (supports scaffold:true to create the spec dir
-//	                       and register in one call — newtron PR #110)
+//	POST /api/networks   → proxies newtron POST /newtron/v1/networks.
+//	                       Wire is `{id, description?}` only (newtron
+//	                       PRs #245 + #251). Status code is 201 when
+//	                       newtron materialised the slot, 200 when the
+//	                       id was already registered.
 //
-// The active network for read/write traffic is positional in the URL path
-// (/api/networks/{netID}/..., per PR #135). These two routes are the *meta*
-// surface for managing networks themselves; they carry no netID segment.
+// The active network for read/write traffic is positional in the URL
+// path (/api/networks/{netID}/..., per PR #135). These two routes are
+// the *meta* surface for managing networks themselves; they carry no
+// netID segment.
 
 package handlers
 
@@ -26,11 +29,11 @@ import (
 // networksClient is the minimal interface NewNetworksHandler needs.
 type networksClient interface {
 	ListNetworksDetail(ctx context.Context) ([]newtronc.NetworkInfo, error)
-	RegisterNetwork(ctx context.Context, id, specDir string, scaffold bool, description string) (string, error)
+	CreateNetwork(ctx context.Context, id, description string) (newtronc.NetworkInfo, bool, error)
 }
 
-// NewNetworksHandler registers GET /api/networks and POST /api/networks on
-// the supplied mux. correlationID is the same CorrelationIDFromContext
+// NewNetworksHandler registers GET /api/networks and POST /api/networks
+// on the supplied mux. correlationID is the same CorrelationIDFromContext
 // accessor the other handlers wire so error envelopes carry the request ID.
 func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func(context.Context) string) {
 	mux.Handle("GET /api/networks", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,8 +51,6 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
 			ID          string `json:"id"`
-			Dir         string `json:"dir"`
-			Scaffold    bool   `json:"scaffold,omitempty"`
 			Description string `json:"description,omitempty"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -58,19 +59,26 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 				"POST /api/networks", nil)
 			return
 		}
-		if req.ID == "" || req.Dir == "" {
+		if req.ID == "" {
 			writeUpstreamError(w, correlationID(r.Context()),
-				&newtronc.ValidationError{Body: []byte("id and dir are required")},
+				&newtronc.ValidationError{Body: []byte("id is required")},
 				"POST /api/networks", nil)
 			return
 		}
-		id, err := c.RegisterNetwork(r.Context(), req.ID, req.Dir, req.Scaffold, req.Description)
+		info, existed, err := c.CreateNetwork(r.Context(), req.ID, req.Description)
 		if err != nil {
 			writeUpstreamError(w, correlationID(r.Context()), err, "POST /api/networks", nil)
 			return
 		}
+		// Propagate the 201-vs-200 distinction so the UI can branch
+		// (a "New topology" modal renders "name already taken" when
+		// the operator picks an existing id).
+		status := http.StatusCreated
+		if existed {
+			status = http.StatusOK
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(info)
 	}))
 }

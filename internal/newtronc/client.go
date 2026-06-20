@@ -132,10 +132,10 @@ type newtronAPIResponse struct {
 // unchanged. Callers Sprintf relative paths onto the helper output; they MUST
 // NOT concatenate "/newtron/v1" themselves.
 //
-// There is no newtrunBase(): newtrun's /newtrun/v1/topologies has been removed
-// (spec-scaffolding moved to POST /newtron/v1/networks {scaffold:true}; see
-// [Client.RegisterNetwork]). Add a newtrunBase() helper if and when a real
-// newtrun endpoint surfaces.
+// There is no newtrunBase(): newtrun's /newtrun/v1/topologies has been
+// removed (scaffolding folded into POST /newtron/v1/networks per newtron
+// PRs #245 + #251; see [Client.CreateNetwork]). Add a newtrunBase()
+// helper if and when a real newtrun endpoint surfaces.
 
 func (c *Client) newtronBase() string    { return c.baseURL + "/newtron/v1" }
 func (c *Client) newtServerBase() string { return c.baseURL + "/newt-server/v1" }
@@ -297,76 +297,70 @@ func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
 	return data.Status == "ok", data.Version
 }
 
-// RegisterNetwork registers a network with newtron. Mirrors the wire shape
-// documented in newtron's docs/newtron/api.md §POST /newtron/v1/networks:
+// CreateNetwork creates a network in newtron, or no-ops idempotently if
+// a network with the given id is already registered. Wire shape per
+// newtron's docs/newtron/api.md §POST /newtron/v1/networks (newtron
+// PRs #245 + #251):
 //
-//	{"id":..., "dir":..., "scaffold":..., "description":...}
+//	{"id":..., "description":...}
 //
-// When scaffold=false (the default), `dir` must already contain a valid
-// network layout and newtron loads it as-is. When scaffold=true, newtron
-// creates an empty spec layout at `dir` (zero-valued network.json + the
-// nodes/ subdirectory) before registering. description is only consulted on
-// scaffold=true and seeds topology.json's description field.
+// `id` is the only required field. newtron resolves the on-disk path
+// itself (--networks-base/id) — newtcon never carries paths on the
+// wire. `description` seeds topology.json when the slot is new; it's
+// ignored on existing slots (no rewrite of authored specs).
 //
-// Wire field renamed spec_dir → dir per newtron PR #208 (2026-06-17):
-// after the layout collapse, the directory IS the network root.
+// The `existed` return distinguishes the two success cases:
+//
+//	201 Created → existed=false (slot was new to the server: either
+//	              disk slot was empty and got materialized, or disk
+//	              slot had specs that got loaded just now)
+//	200 OK      → existed=true  (id was already registered in memory)
+//
+// A "name already taken" UX branches on existed. There's no 409
+// response on this endpoint anymore — same id always resolves to the
+// same dir, so the cross-dir disambiguation 409 used to carry is
+// structurally impossible.
 //
 // Error mapping (newtron docs api.md §Status codes):
 //
-//	400 → *ValidationError (missing id/dir or invalid JSON)
-//	409 → *ConflictError   (id already registered OR scaffold-into-initialized-dir)
-//	5xx → *UnavailableError (spec directory load error)
-//
-// Callers cannot disambiguate the two 409 causes from the typed error alone;
-// the underlying response body (preserved in *ConflictError.Body) carries the
-// distinguishing message from newtron.
-//
-// Returns the network ID newtron acknowledged.
-func (c *Client) RegisterNetwork(ctx context.Context, id, dir string, scaffold bool, description string) (string, error) {
-	body := map[string]any{
-		"id":  id,
-		"dir": dir,
+//	400 → *ValidationError (id missing / wrong shape, invalid JSON)
+//	5xx → *UnavailableError (filesystem failure materializing the slot)
+func (c *Client) CreateNetwork(ctx context.Context, id, description string) (info NetworkInfo, existed bool, err error) {
+	body := map[string]any{"id": id}
+	if description != "" {
+		body["description"] = description
 	}
-	if scaffold {
-		body["scaffold"] = true
-		if description != "" {
-			body["description"] = description
-		}
+	b, mErr := json.Marshal(body)
+	if mErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", mErr)}
 	}
-	b, err := json.Marshal(body)
-	if err != nil {
-		return "", &UnavailableError{Cause: fmt.Sprintf("marshalling request: %v", err)}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.newtronBase()+"/networks", bytes.NewReader(b))
-	if err != nil {
-		return "", &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	req, rErr := http.NewRequestWithContext(ctx, http.MethodPost, c.newtronBase()+"/networks", bytes.NewReader(b))
+	if rErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: fmt.Sprintf("building request: %v", rErr)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", &UnavailableError{Cause: err.Error()}
+	resp, dErr := c.httpClient.Do(req)
+	if dErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: dErr.Error()}
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	respBody, bErr := io.ReadAll(resp.Body)
+	if bErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", bErr)}
 	}
-	if err := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); err != nil {
-		return "", err
+	if cErr := classifyResponse(resp.StatusCode, respBody, http.StatusOK, http.StatusCreated); cErr != nil {
+		return NetworkInfo{}, false, cErr
 	}
 	var env newtronAPIResponse
-	if err := json.Unmarshal(respBody, &env); err != nil {
-		return "", &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	if jErr := json.Unmarshal(respBody, &env); jErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", jErr)}
 	}
 	if env.Error != "" {
-		return "", &UnavailableError{Cause: env.Error}
+		return NetworkInfo{}, false, &UnavailableError{Cause: env.Error}
 	}
-	var data struct {
-		ID string `json:"id"`
+	if jErr := json.Unmarshal(env.Data, &info); jErr != nil {
+		return NetworkInfo{}, false, &UnavailableError{Cause: fmt.Sprintf("decoding CreateNetwork response: %v", jErr)}
 	}
-	if err := json.Unmarshal(env.Data, &data); err != nil {
-		return "", &UnavailableError{Cause: fmt.Sprintf("decoding RegisterNetwork response: %v", err)}
-	}
-	return data.ID, nil
+	return info, resp.StatusCode == http.StatusOK, nil
 }

@@ -2,7 +2,6 @@ package newtronc_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -157,17 +156,18 @@ func asUnavailableError(err error, target **newtronc.UnavailableError) bool {
 }
 
 // ============================================================================
-// RegisterNetwork — pins the four rows of docs/newtron/api.md
-// §POST /newtron/v1/network "behavior matrix":
+// CreateNetwork — pins the three states of newtron's
+// docs/newtron/api.md §POST /newtron/v1/networks (PRs #245 + #251):
 //
-//	scaffold=false + valid spec  → 201 register
-//	scaffold=true  + missing dir → scaffold + register, 201
-//	scaffold=true  + initialized → 409 (ConflictError)
-//	id already registered        → 409 (ConflictError)
-//	missing id/dir               → 400 (ValidationError)
+//	201 Created → slot materialised (new)        → existed=false
+//	200 OK      → id already registered          → existed=true
+//	400         → malformed id / missing id      → ValidationError
+//
+// No 409 path on this endpoint anymore — same id always resolves to
+// the same dir, so cross-dir disambiguation is structurally impossible.
 // ============================================================================
 
-func TestClient_RegisterNetwork_RegisterExisting(t *testing.T) {
+func TestClient_CreateNetwork_Created(t *testing.T) {
 	var seenBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks" {
@@ -176,107 +176,87 @@ func TestClient_RegisterNetwork_RegisterExisting(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		seenBody = string(body)
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprintln(w, `{"data":{"id":"lab"}}`)
+		fmt.Fprintln(w, `{"data":{"id":"lab","dir":"/etc/newtron/networks/lab","has_topology":true,"topology":"lab","nodes":[]}}`)
 	}))
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	id, err := c.RegisterNetwork(context.Background(), "lab", "/etc/newtron/lab", false, "")
+	info, existed, err := c.CreateNetwork(context.Background(), "lab", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if id != "lab" {
-		t.Errorf("got id=%q, want %q", id, "lab")
+	if existed {
+		t.Errorf("201 should map to existed=false")
 	}
-	// scaffold=false MUST NOT serialize the scaffold/description fields — they're
-	// additive on RegisterNetworkRequest, and the client should look identical
-	// to a pre-scaffold caller for the default path.
-	if !strings.Contains(seenBody, `"id":"lab"`) || !strings.Contains(seenBody, `"dir":"/etc/newtron/lab"`) {
-		t.Errorf("body missing required fields: %s", seenBody)
+	if info.ID != "lab" || info.Dir != "/etc/newtron/networks/lab" {
+		t.Errorf("response NetworkInfo not decoded: %+v", info)
+	}
+	if !strings.Contains(seenBody, `"id":"lab"`) {
+		t.Errorf("body missing id: %s", seenBody)
+	}
+	// No `dir` or `scaffold` on the wire — both removed by newtron PRs
+	// #245 + #251.
+	if strings.Contains(seenBody, `"dir":`) {
+		t.Errorf("body should not include dir: %s", seenBody)
 	}
 	if strings.Contains(seenBody, "scaffold") {
-		t.Errorf("body should not include scaffold when scaffold=false: %s", seenBody)
+		t.Errorf("body should not include scaffold: %s", seenBody)
 	}
+	// Empty description is omitted.
 	if strings.Contains(seenBody, "description") {
-		t.Errorf("body should not include description when scaffold=false: %s", seenBody)
+		t.Errorf("empty description should be omitted: %s", seenBody)
 	}
 }
 
-func TestClient_RegisterNetwork_ScaffoldAndRegister(t *testing.T) {
+func TestClient_CreateNetwork_AlreadyExisted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{"data":{"id":"demo","dir":"/etc/newtron/networks/demo","has_topology":true,"topology":"demo","nodes":["a","b"]}}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	info, existed, err := c.CreateNetwork(context.Background(), "demo", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !existed {
+		t.Errorf("200 should map to existed=true")
+	}
+	if len(info.Nodes) != 2 {
+		t.Errorf("decoded NetworkInfo.Nodes lost on 200: %+v", info)
+	}
+}
+
+func TestClient_CreateNetwork_DescriptionFlows(t *testing.T) {
 	var seenBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		seenBody = string(body)
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprintln(w, `{"data":{"id":"demo-1"}}`)
+		fmt.Fprintln(w, `{"data":{"id":"demo-1","dir":"/etc/newtron/networks/demo-1","has_topology":true,"topology":"demo-1","nodes":[]}}`)
 	}))
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	id, err := c.RegisterNetwork(context.Background(), "demo-1", "/var/topologies/demo-1/specs", true, "Demo network")
+	_, _, err := c.CreateNetwork(context.Background(), "demo-1", "Demo network")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if id != "demo-1" {
-		t.Errorf("got id=%q, want %q", id, "demo-1")
-	}
-	if !strings.Contains(seenBody, `"scaffold":true`) {
-		t.Errorf("body missing scaffold=true: %s", seenBody)
 	}
 	if !strings.Contains(seenBody, `"description":"Demo network"`) {
 		t.Errorf("body missing description: %s", seenBody)
 	}
 }
 
-func TestClient_RegisterNetwork_ConflictOnAlreadyRegistered(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintln(w, `{"error":"network 'lab' already registered"}`)
-	}))
-	defer srv.Close()
-
-	c := newtronc.New(srv.URL)
-	_, err := c.RegisterNetwork(context.Background(), "lab", "/etc/newtron/lab", false, "")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	var ce *newtronc.ConflictError
-	if !errors.As(err, &ce) {
-		t.Errorf("expected *ConflictError, got %T: %v", err, err)
-	}
-}
-
-// TestClient_RegisterNetwork_ConflictOnScaffoldInitialized pins the 409 that
-// newtron returns when scaffold=true but `dir` already contains a layout.
-// Same typed error as the "id already registered" 409 — callers disambiguate
-// via *ConflictError.Body (open question #2 in the migration plan).
-func TestClient_RegisterNetwork_ConflictOnScaffoldInitialized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintln(w, `{"error":"scaffold target /tmp/foo: directory not empty"}`)
-	}))
-	defer srv.Close()
-
-	c := newtronc.New(srv.URL)
-	_, err := c.RegisterNetwork(context.Background(), "demo-1", "/tmp/foo", true, "")
-	var ce *newtronc.ConflictError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected *ConflictError, got %T: %v", err, err)
-	}
-	if !strings.Contains(string(ce.Body), "directory not empty") {
-		t.Errorf("expected scaffold-conflict message in body, got: %s", ce.Body)
-	}
-}
-
-func TestClient_RegisterNetwork_ValidationOnMissingFields(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestClient_CreateNetwork_ValidationOnMissingFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, `{"error":"id and dir are required"}`)
+		fmt.Fprintln(w, `{"error":"id is required"}`)
 	}))
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	_, err := c.RegisterNetwork(context.Background(), "", "", false, "")
+	_, _, err := c.CreateNetwork(context.Background(), "", "")
 	if _, ok := err.(*newtronc.ValidationError); !ok {
 		t.Errorf("expected *ValidationError, got %T: %v", err, err)
 	}
