@@ -105,7 +105,11 @@
 /* Topology */
 .topology-canvas { display: flex; flex-direction: column; }
 .topology-graph-host { background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: var(--space-md); min-height: 360px; overflow: auto; }
-.topology-graph { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+/* SVG fills its slot — pan/zoom is via viewBox, not via the element
+ * dimensions. width:100% height:100% lets the wrapper sizing drive
+ * the visible canvas; the SVG's own width/height attributes set the
+ * natural aspect (preserved via preserveAspectRatio). */
+.topology-graph { display: block; width: 100%; height: 100%; }
 .topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; pointer-events: none; }
 .topo-link-hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 .topo-link-hit:hover + .topo-link { stroke: var(--color-accent); stroke-width: 2; }
@@ -1490,16 +1494,26 @@
   display: grid;
   grid-template-columns: 1fr minmax(320px, 380px);
   gap: var(--space-md);
-  align-items: start;
+  align-items: stretch;
+  /* Stretch the split to (approximately) the remaining viewport height
+   * so the graph slot gets a meaningful canvas instead of a 360px
+   * letterbox. The 280px reserve covers app shell + nav + tab strip +
+   * spec-tab pre-graph rows (view chips, toolbar, filter chips). */
+  min-height: calc(100vh - 280px);
 }
 .topology-graph-slot {
   position: relative;
-  min-height: 360px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  padding: var(--space-md);
-  overflow: auto;
+  /* No padding — the SVG fills the slot and viewBox handles framing,
+   * so padding would just shrink the canvas. */
+  /* No overflow:auto — the SVG always fills the slot 100%; viewBox
+   * pan+zoom is the only navigation model. Native scrollbars would
+   * conflict with drag-pan. */
+  overflow: hidden;
+  /* Sub-grid placement keeps the slot row-tall in the split grid. */
+  min-height: 0;
 }
 
 /* Zoom toolbar — floats top-right inside the graph slot. */
