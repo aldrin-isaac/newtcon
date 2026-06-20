@@ -47,6 +47,12 @@ export interface SchemaField {
   max?: number;        // inclusive upper bound (type === "int")
   format?: string;     // semantic hint: "cidr" | "ipv4" | "ipv6" | "mac" | "asn"
   immutable?: boolean; // true → suppress edit input in update-mode forms
+  // Conditional required (newtron #243). When the static `required` is
+  // false AND the condition below evaluates true against the current
+  // form values, the field becomes required. Structured tree, not a
+  // DSL — see web/src/required-when.ts for the evaluator + tree
+  // shapes. Unknown / malformed values evaluate to "not required."
+  required_when?: import("../../required-when.js").RequiredWhen;
 }
 
 // SchemaPaths are URL templates with {netID} (always) and {name}

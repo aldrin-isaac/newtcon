@@ -153,6 +153,13 @@
   line-height: var(--leading-normal);
   margin: 0;
 }
+/* Conditional-required hint (newtron #243). Same visual weight as
+ * the schema description but italicised so it reads as a constraint
+ * marker rather than reference content. */
+.schema-form-help--condition {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
 .schema-form-input {
   font-size: var(--text-sm);
   padding: var(--space-xs) var(--space-sm);

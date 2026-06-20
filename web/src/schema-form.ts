@@ -31,6 +31,10 @@ import {
 } from "./api/newtcon/schema.js";
 import { apiFetch } from "./api/newtcon/_transport.js";
 import { activeNetwork } from "./network-switcher.js";
+import {
+  evaluateRequiredWhen,
+  formatRequiredWhen,
+} from "./required-when.js";
 
 /**
  * SchemaFieldOverride lets the caller layer UX on top of a single
@@ -94,6 +98,24 @@ export async function renderSchemaForm(
   const overrides = opts.overrides ?? {};
   const skip = opts.skipFields ?? new Set<string>();
 
+  // Trackers for conditional-required fields. Populated alongside the
+  // field rows; consulted by the form-change listener to re-evaluate
+  // `required_when` against current values and toggle input.required.
+  // Each tracker also carries the row's "required *" marker so the
+  // visible label updates with the input state.
+  interface RequiredWhenTracker {
+    field: SchemaField;
+    input: HTMLInputElement | HTMLSelectElement;
+    labelEl: HTMLElement;
+  }
+  const trackers: RequiredWhenTracker[] = [];
+
+  const readAllValues = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [name, read] of valueReaders) out[name] = read();
+    return out;
+  };
+
   for (const field of opts.schema.fields) {
     if (skip.has(field.name)) continue;
     const override = overrides[field.name] ?? {};
@@ -101,6 +123,54 @@ export async function renderSchemaForm(
     const row = await buildFieldRow(field, prefill[field.name], override, !!opts.editMode);
     form.appendChild(row.row);
     valueReaders.set(field.name, row.read);
+
+    // Conditional-required hookup. Static required=true wins (no
+    // toggling needed; the input is always required). Only register
+    // a tracker when the schema declares required_when AND the
+    // static required is false.
+    if (field.required_when && !field.required) {
+      const input = row.row.querySelector("input, select") as
+        HTMLInputElement | HTMLSelectElement | null;
+      const labelEl = row.row.querySelector(".schema-form-label") as HTMLElement | null;
+      if (input && labelEl) {
+        trackers.push({ field, input, labelEl });
+        // Render the condition as inline help so the operator sees
+        // *when* it becomes required, not just *that* it might.
+        // Sits alongside any schema-provided description.
+        const tip = document.createElement("p");
+        tip.className = "schema-form-help schema-form-help--condition";
+        tip.textContent = formatRequiredWhen(field.required_when, opts.schema.fields);
+        if (tip.textContent !== "") {
+          // Insert below any pre-existing description help line.
+          row.row.appendChild(tip);
+        }
+      }
+    }
+  }
+
+  // Re-evaluate every tracker against the current values. Toggles
+  // input.required and updates the visible "*" marker on the label.
+  // Called once on mount (in case prefill / smart-defaults already
+  // satisfy a condition) and on every form-value change.
+  const refreshConditionalRequired = (): void => {
+    if (trackers.length === 0) return;
+    const values = readAllValues();
+    for (const t of trackers) {
+      const req = evaluateRequiredWhen(t.field.required_when, values);
+      t.input.required = req;
+      // Strip a trailing " *" (if any) then re-append when required —
+      // keeps the label in sync without re-rendering the row.
+      const base = t.labelEl.textContent?.replace(/\s\*$/, "") ?? t.field.label;
+      t.labelEl.textContent = req ? base + " *" : base;
+    }
+  };
+  refreshConditionalRequired();
+
+  // Single listener at the form level — input bubbles from every
+  // input/select inside, so we don't need per-input wiring.
+  if (trackers.length > 0) {
+    form.addEventListener("input", refreshConditionalRequired);
+    form.addEventListener("change", refreshConditionalRequired);
   }
 
   return {
