@@ -137,25 +137,26 @@ async function toggleDropdown(trigger: HTMLElement): Promise<void> {
 // ---- Register-new modal --------------------------------------------------
 
 function openRegisterModal(): void {
-  // Trivial in-place modal (no framework). Three fields: id, dir,
-  // description. scaffold:true is always sent — the operator is creating
-  // a *new* topology here; for "register an existing dir" use the
-  // newtron CLI (out of scope for v1 of the switcher).
+  // Two fields — id + optional description. Newtron resolves the path
+  // itself from its --networks-base config (newtron PRs #245 + #251);
+  // newtcon never carries paths on the wire.
   //
-  // Field renamed spec_dir → dir per newtron PR #208 — the layout
-  // collapse means the directory IS the network root, not just where
-  // spec files live.
+  // The endpoint is idempotent: 201 means newtron materialised the
+  // slot, 200 means an id with that name was already registered. The
+  // modal branches on the status code so the operator gets a clear
+  // "name taken" message instead of an opaque success when they typed
+  // an existing id.
   const overlay = document.createElement("div");
   overlay.className = "network-modal-overlay";
   overlay.innerHTML = `
     <div class="network-modal">
       <h2 class="network-modal-title">New topology</h2>
-      <p class="network-modal-hint">Creates an empty layout at the given path and registers it as a network. The network.json + nodes/ subdirectory are scaffolded; populate them through the UI or the newtron CLI.</p>
+      <p class="network-modal-hint">Creates an empty layout under newtron's configured networks base. Specs are populated through the UI or the newtron CLI.</p>
       <form class="network-modal-form">
         <label class="form-label">Network ID *</label>
-        <input class="form-control" name="id" placeholder="e.g. demo-1" required />
-        <label class="form-label">Directory (absolute path) *</label>
-        <input class="form-control" name="dir" placeholder="e.g. /var/topologies/demo-1" required />
+        <input class="form-control" name="id" placeholder="e.g. demo-1"
+               required pattern="[A-Za-z0-9_-]{1,64}"
+               title="Letters, digits, underscore, hyphen — 1 to 64 chars" />
         <label class="form-label">Description</label>
         <input class="form-control" name="description" placeholder="What this network is for (optional)" />
         <div class="network-modal-error" hidden></div>
@@ -178,17 +179,16 @@ function openRegisterModal(): void {
     errorOut.hidden = true;
     const data = new FormData(form);
     const id = String(data.get("id") ?? "").trim();
-    const dir = String(data.get("dir") ?? "").trim();
     const description = String(data.get("description") ?? "").trim();
-    if (!id || !dir) {
-      errorOut.textContent = "Network ID and directory are required.";
+    if (!id) {
+      errorOut.textContent = "Network ID is required.";
       errorOut.hidden = false;
       return;
     }
     {
       const ok = await confirmInline({
         title: `Create new topology "${id}"?`,
-        body: `Newtron will scaffold an empty layout at ${dir}.`,
+        body: "Newtron will materialise an empty layout under its --networks-base.",
         confirmLabel: "Create",
       });
       if (!ok) return;
@@ -197,15 +197,24 @@ function openRegisterModal(): void {
       const r = await fetch("/api/networks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, dir, description, scaffold: true }),
+        body: JSON.stringify({ id, description }),
       });
+      if (r.status === 200) {
+        // Idempotent re-call — name already taken by an existing
+        // registration. Surface explicitly so the operator can pick a
+        // different id rather than silently switching into the
+        // existing network.
+        errorOut.textContent = `A network with id "${id}" already exists. Pick a different name.`;
+        errorOut.hidden = false;
+        return;
+      }
       if (!r.ok) {
         const body = await r.text();
         errorOut.textContent = `${r.status}: ${body}`;
         errorOut.hidden = false;
         return;
       }
-      // Switch to the new network and reload.
+      // 201 Created — switch to the new network and reload.
       setActiveNetwork(id);
       window.location.reload();
     } catch (err) {
