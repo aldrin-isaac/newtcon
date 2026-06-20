@@ -4497,6 +4497,28 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       // zoom bounds + fit relative to a stable reference.
       lastNaturalWidth = result.width;
       lastResultBounds = { minX: 0, minY: 0, maxX: result.width, maxY: result.height };
+
+      // First-mount fit: the SVG uses preserveAspectRatio="xMidYMid meet",
+      // so a viewBox whose aspect differs from the slot's aspect would
+      // letterbox the diagram (centered with padding on the longer axis).
+      // That centering throws off the screen-to-viewBox math used by
+      // wheel-zoom and drag-pan because clientX/clientY map to a region
+      // inside the slot that doesn't cover the full slot. Compute a
+      // fit-to-bounds viewBox that matches the slot's aspect on initial
+      // render — the diagram still occupies its natural area, the
+      // viewBox just extends to slot aspect with even margin.
+      //
+      // requestAnimationFrame ensures getBoundingClientRect runs after
+      // layout when the SVG is actually sized.
+      if (viewState === undefined) {
+        requestAnimationFrame(() => {
+          const rect = result.svg.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            viewState = fitToBounds(lastResultBounds, rect.width, rect.height);
+            result.svg.setAttribute("viewBox", viewBoxStr(viewState));
+          }
+        });
+      }
     };
     let lastNaturalWidth = 1;
     let lastResultBounds = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
