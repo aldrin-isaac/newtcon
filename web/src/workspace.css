@@ -81,6 +81,15 @@
 .status-dot--unknown { background: var(--color-text-muted); }
 
 .app-content { overflow: auto; padding: var(--space-page-y) var(--space-page-x); }
+/* Topology view trades the bottom page chrome for canvas room — the
+ * view already has its own internal padding via the toolbar + chip
+ * rows + split. Zeroing app-content's vertical padding when the
+ * topology view is the active panel lets the canvas reach the
+ * bottom of the viewport. The hidden attribute on the other view
+ * panels makes :has(> .view-topology:not([hidden])) reliable. */
+.app-content:has(> .view-topology:not([hidden])) {
+  padding-block: 0;
+}
 .view { animation: view-enter var(--duration-base) var(--ease-decelerate); }
 @keyframes view-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -1503,10 +1512,13 @@
   gap: var(--space-md);
   align-items: stretch;
   /* Stretch the split to (approximately) the remaining viewport height
-   * so the graph slot gets a meaningful canvas instead of a 360px
-   * letterbox. The 280px reserve covers app shell + nav + tab strip +
-   * spec-tab pre-graph rows (view chips, toolbar, filter chips). */
-  min-height: calc(100vh - 280px);
+   * so the graph slot gets a meaningful canvas. The 240px reserve
+   * measures the pre-canvas chrome on the topology view: app shell
+   * header (~50) + tab strip (~40) + view chips (~32) + toolbar (~40)
+   * + filter chips (~32) + gaps (~46). Tighter than the prior 280px
+   * reserve, and the app-content's vertical padding is zeroed for the
+   * topology view so the reserve is the only floor. */
+  min-height: calc(100vh - 240px);
 }
 /* Observation views (Lab / Physical) hide the right-side action
  * panel; collapse the grid track so the empty column doesn't leave a
