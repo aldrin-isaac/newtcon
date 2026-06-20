@@ -4378,6 +4378,16 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, resetPosBtn);
     graphSlot.appendChild(zoomToolbar);
 
+    // Navigation hint — small chip in the bottom-left of the slot so
+    // the operator sees the affordances without having to discover
+    // them by accident. Pure CSS positioning (.topology-nav-hint).
+    const navHint = el(
+      "div",
+      { className: "topology-nav-hint", ariaHidden: "true" },
+      "scroll to zoom · drag to pan",
+    );
+    graphSlot.appendChild(navHint);
+
     // Interface lists pulled from the topology declaration (works offline);
     // live-fetched lists merge in via the panel module's source cache.
     const interfacesByDevice: Map<string, string[]> = new Map();
