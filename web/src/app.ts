@@ -4674,6 +4674,14 @@ function setupTabs(): void {
   type TabName = "specs" | "topology" | "permissions" | "history" | "audit";
 
   const activateTab = (name: TabName): void => {
+    // Drawers (spec detail, node inspector, sub-rule add forms) live in
+    // #detail-drawer overlaid on top of the workspace. Switching tabs
+    // changes the panel behind the drawer; leaving it open would
+    // display stale content (e.g. a Service detail floating over the
+    // Topology view). Close on every tab switch — Escape closes
+    // similarly; tab clicks should too.
+    closeDetail();
+
     const isSpecs = name === "specs";
     const isTopology = name === "topology";
     const isPermissions = name === "permissions";
