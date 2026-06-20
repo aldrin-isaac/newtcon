@@ -3090,16 +3090,30 @@ function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unk
 //
 // Phase 4 may move this into a standalone module if the lifecycle surface
 // grows further (console viewer, log tail, etc.).
-async function renderLifecycleSection(host: HTMLElement, device: string): Promise<void> {
+async function renderLifecycleSection(host: HTMLElement, device: string, viewMode?: TopologyViewMode): Promise<void> {
   host.textContent = "";
-  host.appendChild(el("p", { className: "lifecycle-header" }, "Lifecycle"));
+  // Section label reflects the substrate the drawer is showing — same
+  // operator-intent framing as the topology view chips. Default
+  // ("Lifecycle") covers the cases where the drawer is opened outside
+  // a view-mode context.
+  const sectionLabel = viewMode === "spec-physical" ? "Physical state"
+    : viewMode === "spec-lab" ? "Lab VM"
+    : viewMode === "spec" ? "Spec"
+    : "Lifecycle";
+  host.appendChild(el("p", { className: "lifecycle-header" }, sectionLabel));
   const body = el("div", { className: "lifecycle-body" });
   body.appendChild(el("p", { className: "lifecycle-loading" }, "Checking substrate…"));
   host.appendChild(body);
 
   const network = activeNetwork();
   let labState: LabState | null = null;
-  try { labState = await fetchLabStatus(network); } catch { /* lab unknown */ }
+  // Physical view inspects the physical substrate only — don't even
+  // fetch lab state, so a coincidentally-running lab VM with the same
+  // name can't bleed VM details into the drawer. Same principle for
+  // Spec view (intent only, no actuation).
+  if (viewMode !== "spec-physical" && viewMode !== "spec") {
+    try { labState = await fetchLabStatus(network); } catch { /* lab unknown */ }
+  }
   let online: boolean | undefined;
   try { await fetchNodeInfo(device); online = true; } catch { online = false; }
 
@@ -3108,8 +3122,32 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
 
   body.textContent = "";
 
-  // State pill: substrate-agnostic state on the left, substrate detail on the
-  // right (the same content the topology badge tooltip shows).
+  // Spec view: intent only. Show a single hint that the device is
+  // declared but no actuation overlay is being requested here.
+  if (viewMode === "spec") {
+    body.appendChild(el("p", { className: "lifecycle-hint" },
+      `${device} is declared in this network's topology spec. Switch to Lab or Physical to inspect actuation state.`));
+    return;
+  }
+
+  // Physical view: physical-substrate state only. Skip the lab pill
+  // and any VM affordances even when a lab happens to be running.
+  if (viewMode === "spec-physical") {
+    const pill = el("div", { className: `lifecycle-pill lifecycle-pill--${online ? "running" : "down"}` });
+    pill.appendChild(el("span", { className: "lifecycle-pill-state" }, online ? "online" : "offline"));
+    pill.appendChild(el("span", { className: "lifecycle-pill-detail" },
+      online ? "physical device reachable" : "no response from device"));
+    body.appendChild(pill);
+    if (!online) {
+      body.appendChild(el("p", { className: "lifecycle-hint" },
+        `Newtron's /info probe got no response from ${device}. The device may be unreachable, not yet provisioned, or running but firewalled.`));
+    }
+    return;
+  }
+
+  // Lab view (and the default "Lifecycle" fallback path for legacy
+  // openNodeDrawer callers) — show the substrate pill, lab VM
+  // controls, and SSH/console snippets.
   const pill = el("div", { className: `lifecycle-pill lifecycle-pill--${status.state}` });
   pill.appendChild(el("span", { className: "lifecycle-pill-state" }, status.state));
   pill.appendChild(el("span", { className: "lifecycle-pill-detail" }, status.detail));
@@ -3137,7 +3175,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
         stop.setAttribute("disabled", "");
         stop.textContent = "Stopping…";
         postLabStopNode(network, device)
-          .then(() => renderLifecycleSection(host, device))
+          .then(() => renderLifecycleSection(host, device, viewMode))
           .catch((err) => {
             stop.removeAttribute("disabled");
             stop.textContent = "Stop VM";
@@ -3152,7 +3190,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string): Promis
         start.setAttribute("disabled", "");
         start.textContent = "Starting…";
         postLabStartNode(network, device)
-          .then(() => renderLifecycleSection(host, device))
+          .then(() => renderLifecycleSection(host, device, viewMode))
           .catch((err) => {
             start.removeAttribute("disabled");
             start.textContent = "Start VM";
@@ -3322,9 +3360,17 @@ function renderLiveDataError(
   return el("p", { className: "panel-error" }, formatErrorBrief(err));
 }
 
-// openNodeDrawer opens the detail drawer for a device and renders node-inspector
-// sub-tabs. Each sub-tab fetches its data lazily on first activation.
-function openNodeDrawer(device: string): void {
+// openNodeDrawer opens the detail drawer for a device and renders
+// node-inspector sub-tabs. Each sub-tab fetches its data lazily on
+// first activation.
+//
+// viewMode (optional) — the topology view-mode the drawer was opened
+// from. Threads through to renderLifecycleSection so the substrate
+// section matches the operator's view intent: Lab view shows VM
+// state + SSH/console; Physical view shows only physical-substrate
+// state (no lab VM bleed-through); Spec view shows a "no actuation"
+// hint. Defaults to "Lifecycle" (legacy behavior) when omitted.
+function openNodeDrawer(device: string, viewMode?: TopologyViewMode): void {
   const drawer = document.getElementById("detail-drawer");
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
@@ -3342,7 +3388,7 @@ function openNodeDrawer(device: string): void {
   // populated asynchronously from newtlab status.
   const lifecycleSection = el("section", { className: "lifecycle-section" });
   content.appendChild(lifecycleSection);
-  void renderLifecycleSection(lifecycleSection, device);
+  void renderLifecycleSection(lifecycleSection, device, viewMode);
 
   // Sub-tab strip.
   const tabStrip = el("nav", { className: "node-tabs", role: "tablist", ariaLabel: "Device information" });
@@ -4449,7 +4495,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
                 anchorX: ev.clientX,
                 anchorY: ev.clientY,
                 onComplete: () => mountTopologyTab(root),
-                onInspect: () => openNodeDrawer(deviceName),
+                onInspect: () => openNodeDrawer(deviceName, viewMode),
               });
             },
             onNodeDelete: (deviceName: string) => {
@@ -4474,7 +4520,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               renderGraph();
               renderPanel();
             }
-          : (deviceName) => { openNodeDrawer(deviceName); },
+          : (deviceName) => { openNodeDrawer(deviceName, viewMode); },
         driftByDevice,
         statusByDevice,
         selected: isSpec ? selected : new Set<string>(),
