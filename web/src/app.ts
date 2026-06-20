@@ -2022,10 +2022,15 @@ function renderTopologySVG(
   const naturalViewBox = `0 0 ${svgW} ${svgH}`;
   const initialViewBox = opts.viewState ? viewBoxStr(opts.viewState) : naturalViewBox;
 
+  // No width/height attrs — CSS sizes the SVG to fill its slot, and
+  // viewBox + preserveAspectRatio handle the coordinate mapping. This
+  // lets the topology canvas grow to match the page viewport without
+  // the SVG fighting browser scrollbars. preserveAspectRatio defaults
+  // to xMidYMid meet, which centres the content and never squashes —
+  // the right default for a network diagram.
   const svg = svgEl("svg", {
-    width: String(svgW),
-    height: String(svgH),
     viewBox: initialViewBox,
+    preserveAspectRatio: "xMidYMid meet",
     "class": "topology-graph",
     role: "img",
     "aria-label": "Network topology diagram",
