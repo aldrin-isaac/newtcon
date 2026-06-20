@@ -3780,7 +3780,7 @@ async function renderStateTab(container: HTMLElement, device: string): Promise<v
           body.appendChild(el("p", { className: "node-summary-stat-clean" }, "(none)"));
           return;
         }
-        renderValueInto(body, data);
+        renderStateSubsection(sub.id, body, data);
       }).catch((err) => renderErrorInto(body, err));
     });
 
@@ -3807,6 +3807,193 @@ function countItems(data: unknown): number {
   if (Array.isArray(data)) return data.length;
   if (data && typeof data === "object") return Object.keys(data).length;
   return 0;
+}
+
+// renderStateSubsection — dispatches to a per-domain renderer for the
+// State tab's sub-sections. Each renderer knows the shape of its own
+// endpoint and emits a tabular or labeled view; falls back to a
+// generic auto-table for shapes we haven't specifically handled.
+function renderStateSubsection(
+  id: typeof STATE_SUBSECTIONS[number]["id"],
+  body: HTMLElement,
+  data: unknown,
+): void {
+  switch (id) {
+    case "bgp":       renderBGPStatus(body, data); break;
+    case "evpn":      renderEVPNStatus(body, data); break;
+    case "neighbors": renderAutoTable(body, data); break;
+    case "vlans":
+    case "vrfs":
+    case "acls":
+    case "lags":      renderAutoTable(body, data); break;
+  }
+}
+
+// renderBGPStatus — BGP /status returns
+//   { local_as, router_id, loopback_ip, neighbors: [{address, vrf, type, remote_as, admin_status}], evpn_peers: [string] }
+// Rendered as: top-level facts as labeled rows + neighbors table +
+// EVPN peer chips. Falls back to generic tree for unfamiliar shapes.
+function renderBGPStatus(body: HTMLElement, data: unknown): void {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    renderValueInto(body, data);
+    return;
+  }
+  const d = data as Record<string, unknown>;
+  const facts: Array<[string, unknown]> = [
+    ["Local ASN", d.local_as],
+    ["Router ID", d.router_id],
+    ["Loopback IP", d.loopback_ip],
+  ];
+  const factDl = el("dl", { className: "node-summary-dl" });
+  for (const [label, value] of facts) {
+    if (value === undefined || value === null || value === "") continue;
+    factDl.appendChild(el("dt", { className: "node-summary-dt" }, label));
+    factDl.appendChild(el("dd", { className: "node-summary-dd" }, String(value)));
+  }
+  body.appendChild(factDl);
+
+  const neighbors = Array.isArray(d.neighbors) ? d.neighbors : [];
+  if (neighbors.length > 0) {
+    body.appendChild(el("p", { className: "node-subsection-label" }, "Neighbors"));
+    renderAutoTable(body, neighbors);
+  }
+  const evpnPeers = Array.isArray(d.evpn_peers) ? d.evpn_peers : [];
+  if (evpnPeers.length > 0) {
+    body.appendChild(el("p", { className: "node-subsection-label" }, "EVPN peers"));
+    const chips = el("p", { className: "node-chip-row" });
+    for (const p of evpnPeers) {
+      chips.appendChild(el("span", { className: "node-chip" }, String(p)));
+    }
+    body.appendChild(chips);
+  }
+}
+
+// renderEVPNStatus — EVPN /status returns
+//   { vteps: {name: ip}, nvos: {name: vtep}, vni_count: number }
+// Small structured object; render as labeled groups.
+function renderEVPNStatus(body: HTMLElement, data: unknown): void {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    renderValueInto(body, data);
+    return;
+  }
+  const d = data as Record<string, unknown>;
+  const vteps = (d.vteps && typeof d.vteps === "object") ? d.vteps as Record<string, unknown> : {};
+  const nvos  = (d.nvos  && typeof d.nvos  === "object") ? d.nvos  as Record<string, unknown> : {};
+  const vniCount = typeof d.vni_count === "number" ? d.vni_count : null;
+
+  if (vniCount !== null) {
+    const row = el("p", { className: "node-summary-stat-row" });
+    row.appendChild(el("span", { className: "node-summary-stat-total" }, String(vniCount)));
+    row.appendChild(el("span", { className: "node-summary-stat-label" }, `VNI${vniCount === 1 ? "" : "s"}`));
+    body.appendChild(row);
+  }
+  if (Object.keys(vteps).length > 0) {
+    body.appendChild(el("p", { className: "node-subsection-label" }, "VTEPs"));
+    const dl = el("dl", { className: "node-summary-dl" });
+    for (const [k, v] of Object.entries(vteps)) {
+      dl.appendChild(el("dt", { className: "node-summary-dt" }, k));
+      dl.appendChild(el("dd", { className: "node-summary-dd" }, String(v)));
+    }
+    body.appendChild(dl);
+  }
+  if (Object.keys(nvos).length > 0) {
+    body.appendChild(el("p", { className: "node-subsection-label" }, "NVOs"));
+    const dl = el("dl", { className: "node-summary-dl" });
+    for (const [k, v] of Object.entries(nvos)) {
+      dl.appendChild(el("dt", { className: "node-summary-dt" }, k));
+      dl.appendChild(el("dd", { className: "node-summary-dd" }, String(v)));
+    }
+    body.appendChild(dl);
+  }
+}
+
+// renderAutoTable — generic renderer for "array of homogeneous objects":
+// derives columns from the union of keys, renders as <table>. Falls
+// back to renderValueInto for shapes that aren't tabular (single
+// object, mixed-shape array, primitives).
+function renderAutoTable(body: HTMLElement, data: unknown): void {
+  if (!Array.isArray(data) || data.length === 0) {
+    renderValueInto(body, data);
+    return;
+  }
+  // All items must be plain objects for table mode; one non-object
+  // and we fall back to the tree renderer (safer than rendering a
+  // wonky table with blank cells).
+  const allObjects = data.every((x) => x && typeof x === "object" && !Array.isArray(x));
+  if (!allObjects) {
+    renderValueInto(body, data);
+    return;
+  }
+  const rows = data as Array<Record<string, unknown>>;
+  // Column order: first-row insertion order, plus any keys other
+  // rows add at the end (rare but possible).
+  const cols: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    for (const k of Object.keys(row)) {
+      if (!seen.has(k)) { seen.add(k); cols.push(k); }
+    }
+  }
+  const table = el("table", { className: "node-state-table" });
+  const thead = el("thead", {});
+  const trHead = el("tr", {});
+  for (const c of cols) {
+    trHead.appendChild(el("th", { className: "node-state-th" }, humanizeKey(c)));
+  }
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = el("tbody", {});
+  for (const row of rows) {
+    const tr = el("tr", {});
+    for (const c of cols) {
+      const v = row[c];
+      const cell = el("td", { className: "node-state-td" });
+      if (v === undefined || v === null || v === "") {
+        cell.appendChild(el("span", { className: "node-state-td--empty" }, "—"));
+      } else if (typeof v === "object") {
+        // Nested object/array in a cell — collapse to a short JSON
+        // marker rather than blow out the column width.
+        cell.appendChild(el("code", { className: "node-state-td--nested" },
+          Array.isArray(v) ? `[${v.length}]` : `{${Object.keys(v).length}}`));
+      } else {
+        cell.appendChild(document.createTextNode(String(v)));
+      }
+      tr.appendChild(cell);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  body.appendChild(table);
+}
+
+// humanizeKey — wire field name → operator label. Snake-case turned
+// into Title Case so columns read as words rather than identifiers.
+//   "admin_status" → "Admin status"
+//   "remote_as"    → "Remote ASN"  (special-case common acronyms)
+function humanizeKey(key: string): string {
+  const special: Record<string, string> = {
+    as:     "ASN",
+    asn:    "ASN",
+    ip:     "IP",
+    vrf:    "VRF",
+    vlan:   "VLAN",
+    vni:    "VNI",
+    bgp:    "BGP",
+    evpn:   "EVPN",
+    id:     "ID",
+    url:    "URL",
+    mac:    "MAC",
+    sonic:  "SONiC",
+  };
+  const parts = key.split(/[_\-]/);
+  const titled = parts.map((p, i) => {
+    const lower = p.toLowerCase();
+    if (special[lower]) return special[lower];
+    if (i === 0) return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+    return p.toLowerCase();
+  });
+  return titled.join(" ");
 }
 
 // renderRawSection — collapsed disclosure rendering the three
