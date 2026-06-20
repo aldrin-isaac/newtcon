@@ -1,11 +1,14 @@
 // kind_resolver.go — given a URL slug, resolve the newtron kind name
 // + per-verb paths used to forward CRUD requests.
 //
-// Schema is the source of truth: at first use, the resolver walks
-// newtron's /api/schema and caches the slug → SchemaMeta map for the
-// process lifetime. Static specKindMap remains as a fallback when
-// newtron is unreachable at boot or doesn't yet describe a kind
-// (e.g. prefix-lists has no PrefixListSpec schema today).
+// Schema is the source of truth: at first use, the resolver fetches
+// /newtron/v1/schema/all (one HTTP round-trip) and caches the slug →
+// SchemaMeta map for the process lifetime. legacySpecKindMap is the
+// safety net used only when newtron is unreachable at boot.
+//
+// As of newtron #242, every registered kind has a schema (including
+// PrefixListSpec); legacySpecKindMap stays for unreachable-newtron
+// resilience, not for kind coverage.
 //
 // Single source of truth means a new kind newtron registers becomes
 // authorable through newtcon-server with no code change.
@@ -44,10 +47,15 @@ type kindEntry struct {
 }
 
 // legacySpecKindMap mirrors the historical hand-typed slug → newtron
-// singular mapping. Used when the schema endpoint is unreachable at
-// boot OR for slugs newtron doesn't expose via /api/schema today
-// (prefix-lists). When newtron's schema covers every kind, this map
-// can be dropped.
+// singular mapping. Used as a safety net when /schema/all is
+// unreachable at first request — keeps the basic CRUD verbs working
+// against a newtron that's reachable for spec ops but happens to fail
+// on the schema endpoint.
+//
+// Every entry here is also covered by the schema; the schema-derived
+// map wins (see ensureLoaded). When this map is empty, the resolver
+// has no fallback — that's fine, but until we trust the schema
+// endpoint as bullet-proof, the safety net stays.
 var legacySpecKindMap = map[string]string{
 	"services":       "service",
 	"ipvpns":         "ipvpn",
@@ -92,23 +100,16 @@ func (r *kindResolver) ensureLoaded(ctx context.Context) {
 	}
 	r.loaded = true // mark even on error so we don't retry every request
 
-	// Step 1 — schema-derived entries. Walk every kind newtron exposes;
+	// Step 1 — schema-derived entries. Fetch every kind's full
+	// SchemaMeta in one round-trip via /schema/all (newtron #242), then
 	// keep only the top-level kinds (those with a list path), since
 	// embedded / sub-rule kinds aren't addressable by URL slug.
-	if payload, err := r.client.FetchSchemaKinds(ctx); err == nil {
+	if payload, err := r.client.FetchAllSchemas(ctx); err == nil {
 		var env struct {
-			Kinds []types.SchemaKindSummary `json:"kinds"`
+			Schemas []types.SchemaMeta `json:"schemas"`
 		}
 		if err := json.Unmarshal(payload, &env); err == nil {
-			for _, s := range env.Kinds {
-				metaPayload, err := r.client.FetchSchema(ctx, s.Kind)
-				if err != nil {
-					continue
-				}
-				var meta types.SchemaMeta
-				if err := json.Unmarshal(metaPayload, &meta); err != nil {
-					continue
-				}
+			for _, meta := range env.Schemas {
 				if meta.Paths.List == "" {
 					continue
 				}

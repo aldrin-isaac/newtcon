@@ -38,6 +38,15 @@ func (c *Client) FetchSchema(ctx context.Context, kind string) (json.RawMessage,
 	return c.getAndDecode(ctx, fmt.Sprintf("%s/schema/%s", c.newtronBase(), kind))
 }
 
+// FetchAllSchemas calls GET /newtron/v1/schema/all (newtron PR #242)
+// and returns the "data" payload — every registered kind's full
+// SchemaMeta in one round-trip. Preferred over FetchSchemaKinds +
+// per-kind FetchSchema when the caller needs full metadata for every
+// kind (e.g. cold-start kind resolution).
+func (c *Client) FetchAllSchemas(ctx context.Context) (json.RawMessage, error) {
+	return c.getAndDecode(ctx, c.newtronBase()+"/schema/all")
+}
+
 // getAndDecode — shared GET-and-unwrap-envelope path used by both
 // schema endpoints. Keeps the wire shape mapping in one place.
 func (c *Client) getAndDecode(ctx context.Context, url string) (json.RawMessage, error) {
