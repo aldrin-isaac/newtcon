@@ -1353,6 +1353,207 @@
   cursor: not-allowed;
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   Device-inspector drawer — header + Summary + State + Spec + Raw
+   New drawer structure: 6 tabs replacing the prior 14-tab strip.
+   ────────────────────────────────────────────────────────────────── */
+
+.node-drawer-header {
+  margin: 0 0 var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.node-drawer-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.node-drawer-name {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.node-drawer-badges {
+  display: flex;
+  gap: var(--space-2xs);
+  flex-wrap: wrap;
+}
+.node-drawer-badge {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-xs);
+  border-radius: 999px;
+  font-weight: var(--weight-medium);
+}
+.node-drawer-badge--drift {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+.node-drawer-badge--running {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+}
+.node-drawer-badge--down {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+}
+.node-drawer-subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+.node-drawer-actions {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+.node-drawer-action-btn {
+  font-size: var(--text-sm);
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-family: var(--font-system);
+  cursor: pointer;
+}
+.node-drawer-action-btn:hover { background: var(--color-surface-hover); }
+.node-drawer-action-btn--primary {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+
+/* Summary tab — at-a-glance cards (Identity / Interfaces / Drift) */
+.node-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+.node-summary-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+.node-summary-card-title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  margin: 0 0 var(--space-xs);
+}
+.node-summary-card-body { font-size: var(--text-sm); }
+.node-summary-loading { color: var(--color-text-muted); font-style: italic; margin: 0; }
+.node-summary-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-sm); margin: 0; }
+.node-summary-dt { color: var(--color-text-muted); font-size: var(--text-xs); }
+.node-summary-dd { margin: 0; color: var(--color-text-primary); font-family: var(--font-mono); font-size: var(--text-xs); }
+.node-summary-stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-2xs);
+  flex-wrap: wrap;
+}
+.node-summary-stat-total { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.node-summary-stat-label { color: var(--color-text-secondary); font-size: var(--text-xs); }
+.node-summary-stat-pill {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2xs);
+  border-radius: 999px;
+  font-weight: var(--weight-medium);
+}
+.node-summary-stat-pill--up   { background: var(--color-success-bg); color: var(--color-success); }
+.node-summary-stat-pill--down { background: var(--color-danger-bg);  color: var(--color-danger); }
+.node-summary-stat-pill--drift{ background: var(--color-warning-bg); color: var(--color-warning); }
+.node-summary-stat-clean { color: var(--color-success); margin: 0; font-size: var(--text-sm); }
+.node-summary-stat-hint  { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-2xs) 0 0; }
+
+/* State tab — disclosure-per-domain */
+.node-state-intro {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-sm);
+}
+.node-state-section {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2xs);
+  background: var(--color-surface);
+}
+.node-state-section-summary {
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.node-state-section-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  flex: 1;
+}
+.node-state-section-badge {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+.node-state-section-body { padding: var(--space-sm); border-top: 1px solid var(--color-border-subtle); }
+
+/* Spec tab — visually distinct so the operator's eye reads
+ * "declared intent" vs "observed reality". Tinted background +
+ * left-accent border. */
+.node-tab-panel--spec {
+  background: var(--color-accent-bg);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+.node-spec-intro {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-sm);
+}
+.node-spec-body { background: var(--color-surface); border-radius: var(--radius-sm); padding: var(--space-sm); }
+
+/* Per-device history stub (slice C will replace) */
+.node-history-stub { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0; }
+
+/* Raw (debugging) disclosure at the drawer bottom */
+.node-raw-wrap {
+  margin-top: var(--space-md);
+  border-top: 1px dashed var(--color-border-subtle);
+  padding-top: var(--space-sm);
+}
+.node-raw-summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+}
+.node-raw-body { margin-top: var(--space-xs); }
+.node-raw-section {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2xs);
+  background: var(--color-surface-sunken);
+}
+.node-raw-section-summary {
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+}
+.node-raw-section-body { padding: var(--space-sm); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface); }
+
 /* ---- Device-inspector Lifecycle section (phase 3 unified-substrate) ---- */
 
 .lifecycle-section {

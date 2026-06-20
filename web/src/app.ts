@@ -2435,12 +2435,29 @@ function renderTopologySVG(
 
 // ---- Node inspector drawer --------------------------------------------------
 
-// NODE_TABS defines the sub-tabs in operator-domain words (no internal jargon
-// vocabulary, per vocabulary discipline in the slice spec).
+// NODE_TABS — the 6 primary tabs the device drawer surfaces. Down from
+// 14 (collapsed VLANs / VRFs / ACLs / BGP / EVPN / LAGs / Neighbors
+// under "State"; tucked Config DB / Intent Tree / Projection under a
+// "Raw" disclosure rendered below the panels). Ordered by operator
+// priority: Summary (at-a-glance dashboard) → Interfaces (most-acted-
+// on surface) → State (observed reality, grouped) → Spec (declared
+// intent, visually distinct) → Drift (actionable diff, first-class)
+// → History (audit timeline).
 const NODE_TABS = [
-  { id: "overview",  label: "Overview" },
-  { id: "profile",   label: "Profile" },
+  { id: "summary",    label: "Summary" },
   { id: "interfaces", label: "Interfaces" },
+  { id: "state",      label: "State" },
+  { id: "spec",       label: "Spec" },
+  { id: "drift",      label: "Drift" },
+  { id: "history",    label: "History" },
+] as const;
+
+type NodeTabId = typeof NODE_TABS[number]["id"];
+
+// State sub-sections rendered inside the State tab as collapsible
+// disclosures. Each fetches lazily on first expansion; sections with
+// no data show "—" inline instead of empty disclosures.
+const STATE_SUBSECTIONS = [
   { id: "vlans",     label: "VLANs" },
   { id: "vrfs",      label: "VRFs" },
   { id: "acls",      label: "ACLs" },
@@ -2448,13 +2465,17 @@ const NODE_TABS = [
   { id: "evpn",      label: "EVPN" },
   { id: "lags",      label: "LAGs" },
   { id: "neighbors", label: "Neighbors" },
-  { id: "configdb",  label: "Config DB" },
-  { id: "drift",     label: "Drift" },
-  { id: "projection", label: "Projection" },
-  { id: "intent-tree", label: "Intent Tree" },
 ] as const;
 
-type NodeTabId = typeof NODE_TABS[number]["id"];
+// Raw / debug-only data — Config DB / Intent Tree / Projection. These
+// are storage-layer reads useful for power-user debugging but
+// rarely the operator's first stop. Tucked behind a disclosure
+// labelled "Raw" below the tab panels.
+const RAW_SECTIONS = [
+  { id: "configdb",    label: "Config DB" },
+  { id: "projection",  label: "Projection" },
+  { id: "intent-tree", label: "Intent Tree" },
+] as const;
 
 // renderLoadingInto clears a container and shows a loading indicator.
 function renderLoadingInto(container: HTMLElement): void {
@@ -3379,28 +3400,51 @@ function openNodeDrawer(device: string, viewMode?: TopologyViewMode): void {
   drawer.classList.add("open");
   content.textContent = "";
 
-  // Header.
-  content.appendChild(el("p", { className: "drawer-kind" }, "Device"));
-  content.appendChild(el("h2", { className: "drawer-name" }, device));
+  // ── Header ──────────────────────────────────────────────────────
+  // Three rows: name + status badges · subtitle · quick-action row.
+  // All three fill in async — name + viewMode are sync; identity
+  // chips wait on /info; drift badge waits on /drift; action buttons
+  // wait on labState. The skeleton renders immediately so the drawer
+  // doesn't look blank during the round-trips.
+  const header = el("header", { className: "node-drawer-header" });
+  const titleRow = el("div", { className: "node-drawer-title-row" });
+  const titleName = el("h2", { className: "node-drawer-name" }, device);
+  titleRow.appendChild(titleName);
+  const badges = el("div", { className: "node-drawer-badges" });
+  titleRow.appendChild(badges);
+  header.appendChild(titleRow);
 
-  // Phase 3: Lifecycle section — substrate badge + start/stop + SSH/console
-  // snippets when the device is a lab VM. Renders empty placeholder first;
-  // populated asynchronously from newtlab status.
+  const subtitle = el("p", { className: "node-drawer-subtitle" }, "");
+  header.appendChild(subtitle);
+
+  const actions = el("div", { className: "node-drawer-actions" });
+  header.appendChild(actions);
+
+  content.appendChild(header);
+
+  // Async-populate header chips + badges + actions. Per-source
+  // failures degrade silently — operator still gets the rest of the
+  // header rendered.
+  void renderDrawerHeader(badges, subtitle, actions, device, viewMode);
+
+  // Lifecycle section (existing) — view-mode-aware substrate state +
+  // Start/Stop/SSH/console. Stays for now; the Summary tab also
+  // surfaces the substrate state from its own pull, so this section
+  // is a touch redundant in observation views — kept here as the
+  // canonical "lifecycle controls live here" surface until per-domain
+  // renderers absorb its action buttons.
   const lifecycleSection = el("section", { className: "lifecycle-section" });
   content.appendChild(lifecycleSection);
   void renderLifecycleSection(lifecycleSection, device, viewMode);
 
-  // Sub-tab strip.
+  // ── Tab strip + panels ─────────────────────────────────────────
   const tabStrip = el("nav", { className: "node-tabs", role: "tablist", ariaLabel: "Device information" });
-
-  // Tab panels container — each panel is rendered lazily.
   const panelsContainer = el("div", {});
 
   const panels = new Map<NodeTabId, HTMLElement>();
   const tabButtons = new Map<NodeTabId, HTMLButtonElement>();
   const fetched = new Set<NodeTabId>();
 
-  // activateTab shows the given tab panel and marks the button active.
   const activateTab = (id: NodeTabId): void => {
     for (const [tid, btn] of tabButtons) {
       btn.classList.toggle("node-tab--active", tid === id);
@@ -3428,7 +3472,9 @@ function openNodeDrawer(device: string, viewMode?: TopologyViewMode): void {
     tabStrip.appendChild(btn);
     tabButtons.set(tab.id, btn);
 
-    const panel = el("div", { className: "node-tab-panel" });
+    const panel = el("div", {
+      className: "node-tab-panel" + (tab.id === "spec" ? " node-tab-panel--spec" : ""),
+    });
     panel.setAttribute("id", `node-panel-${tab.id}`);
     panel.setAttribute("role", "tabpanel");
     panel.hidden = true;
@@ -3439,36 +3485,141 @@ function openNodeDrawer(device: string, viewMode?: TopologyViewMode): void {
   content.appendChild(tabStrip);
   content.appendChild(panelsContainer);
 
-  // Activate the Overview tab by default.
-  activateTab("overview");
+  // Raw (debugging) disclosure — Config DB / Projection / Intent
+  // Tree tucked away below the primary panels. Most operators never
+  // open it; the ones who need it know where to look.
+  renderRawSection(content, device);
+
+  // Pick the default tab based on the view-mode the drawer was
+  // opened from: Spec view → Spec; Lab/Physical → Summary (the
+  // operator's at-a-glance triage view). Legacy callers without a
+  // view-mode also default to Summary.
+  const defaultTab: NodeTabId = viewMode === "spec" ? "spec" : "summary";
+  activateTab(defaultTab);
+}
+
+// renderDrawerHeader — populates the badges + subtitle + actions row
+// asynchronously from /info + /drift + lab state. Each source
+// failure degrades silently; the header always renders the name +
+// device label even if every fetch fails.
+async function renderDrawerHeader(
+  badges: HTMLElement,
+  subtitle: HTMLElement,
+  actions: HTMLElement,
+  device: string,
+  viewMode: TopologyViewMode | undefined,
+): Promise<void> {
+  const network = activeNetwork();
+
+  // /info — identity chips (zone · platform · mgmt IP) for the subtitle.
+  void fetchNodeInfo(device).then((data) => {
+    const d = (data ?? {}) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof d.zone === "string" && d.zone) parts.push(`zone: ${d.zone}`);
+    if (typeof d.platform === "string" && d.platform) parts.push(`platform: ${d.platform}`);
+    if (typeof d.mgmt_ip === "string" && d.mgmt_ip) parts.push(`mgmt: ${d.mgmt_ip}`);
+    subtitle.textContent = parts.join(" · ");
+  }).catch(() => { /* subtitle stays empty; operator still sees the name */ });
+
+  // /drift — drift badge in the top-right of the title row.
+  void fetchNodeDrift(device).then((data) => {
+    const items = Array.isArray(data) ? data : [];
+    if (items.length === 0) return;
+    const badge = el("span", { className: "node-drawer-badge node-drawer-badge--drift" },
+      `⚠ ${items.length} drift item${items.length === 1 ? "" : "s"}`);
+    badges.appendChild(badge);
+  }).catch(() => { /* drift unavailable — no badge */ });
+
+  // Substrate badge — physical view emits online/offline directly
+  // from /info probe; lab view defers to renderLifecycleSection's
+  // own pill below. Keeping this here lets the operator see state
+  // at the top regardless of which tab they're on.
+  void fetchNodeInfo(device).then(() => {
+    // /info succeeded → device reachable.
+    if (viewMode === "spec-physical") {
+      badges.appendChild(el("span", { className: "node-drawer-badge node-drawer-badge--running" }, "● online"));
+    }
+  }).catch(() => {
+    if (viewMode === "spec-physical") {
+      badges.appendChild(el("span", { className: "node-drawer-badge node-drawer-badge--down" }, "● offline"));
+    }
+  });
+
+  // Quick-action row — minimal v1: a Reconcile-drift button when
+  // there's drift (jumps to the Drift tab). Per-substrate actions
+  // (Start/Stop/SSH/Console) stay in the existing lifecycle section
+  // below until the next slice absorbs them here.
+  void fetchNodeDrift(device).then((data) => {
+    const items = Array.isArray(data) ? data : [];
+    if (items.length === 0) return;
+    const reconcileBtn = el("button", {
+      type: "button",
+      className: "node-drawer-action-btn node-drawer-action-btn--primary",
+    }, "Review drift");
+    reconcileBtn.addEventListener("click", () => {
+      const driftBtn = document.querySelector(
+        '.node-tab[aria-controls="node-panel-drift"]',
+      ) as HTMLButtonElement | null;
+      driftBtn?.click();
+    });
+    actions.appendChild(reconcileBtn);
+  }).catch(() => { /* drift unavailable — no action */ });
+
+  void network; // network reserved for the History slice (per-device audit filter)
 }
 
 // loadNodeTab fetches data for one node-inspector tab and renders it.
+// Each tab is operator-priority-ordered (Summary first; History last)
+// and uses a per-domain renderer rather than the generic recursive
+// tree.
 function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): void {
   renderLoadingInto(container);
 
   switch (id) {
-    case "overview":
-      fetchNodeInfo(device)
-        .then((data) => renderValueInto(container, data))
+    case "summary":
+      void renderSummaryTab(container, device);
+      break;
+
+    case "interfaces":
+      fetchNodeInterfaces(device)
+        .then((data) => renderInterfaceTab(container, device, data))
         .catch((err) => renderErrorInto(container, err));
       break;
 
-    case "profile":
-      // The profile spec is the device's static identity (mgmt_ip, loopback_ip,
-      // zone, platform, ssh_user). The unified-substrate convention (PR #148)
-      // creates profiles with the same name as the device — so a per-device
-      // fetch is just fetchSpecDetail("profiles", device). Older topologies
-      // may use a different naming convention; the 404 branch surfaces that
-      // honestly rather than rendering an opaque error.
-      //
-      // Render with the schema-aware layout (labeled rows) rather than the
-      // generic recursive tree — the profile schema is known to specForms.
+    case "state":
+      void renderStateTab(container, device);
+      break;
+
+    case "spec":
+      // The profile spec is the device's static identity (mgmt_ip,
+      // loopback_ip, zone, platform). Unified-substrate convention
+      // (PR #148) creates profiles with the same name as the device,
+      // so a per-device fetch is just fetchSpecDetail("profiles",
+      // device). Renders with the schema-driven labeled-row layout
+      // (PR #226+); falls back to specForms / generic tree.
       fetchSpecDetail("profiles", device)
-        .then((data) => {
-          const fields = displaySchemaFor("profiles");
-          if (fields) renderSpecDetailInto(container, fields, data);
-          else renderValueInto(container, data);
+        .then(async (data) => {
+          container.textContent = "";
+          container.appendChild(el("p", { className: "node-spec-intro" },
+            "Declared intent for this device. To inspect actuated reality, switch tabs."));
+          const schemaKindForDetail = await resolveSlugToKind("profiles").catch(() => null);
+          const schemaForDetail = schemaKindForDetail
+            ? await fetchSchema(schemaKindForDetail).catch(() => null)
+            : null;
+          const body = el("div", { className: "node-spec-body" });
+          if (schemaForDetail) {
+            renderSpecDetailInto(
+              body,
+              schemaForDetail.fields.map((f) => ({ name: f.name, label: f.label })),
+              data,
+              ["name"],
+            );
+          } else {
+            const fields = displaySchemaFor("profiles");
+            if (fields) renderSpecDetailInto(body, fields, data, ["name"]);
+            else renderValueInto(body, data);
+          }
+          container.appendChild(body);
         })
         .catch((err) => {
           if (err instanceof ApiError && err.status === 404) {
@@ -3479,85 +3630,227 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
         });
       break;
 
-    case "interfaces":
-      fetchNodeInterfaces(device)
-        .then((data) => renderInterfaceTab(container, device, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "vlans":
-      fetchNodeVLANs(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "vrfs":
-      fetchNodeVRFs(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "acls":
-      fetchNodeACLs(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "bgp":
-      fetchNodeBGPStatus(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "evpn":
-      fetchNodeEVPNStatus(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "lags":
-      fetchNodeLAGs(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "neighbors":
-      fetchNodeNeighbors(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "configdb":
-      fetchNodeConfigDB(device)
-        .then((data) => renderConfigDBTab(container, device, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
     case "drift":
       fetchNodeDrift(device)
         .then((data) => renderDriftTab(container, data, device))
         .catch((err) => renderErrorInto(container, err));
       break;
 
-    case "projection":
-      fetchNodeProjection(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
-      break;
-
-    case "intent-tree":
-      fetchNodeIntentTree(device)
-        .then((data) => renderValueInto(container, data))
-        .catch((err) => renderErrorInto(container, err));
+    case "history":
+      // Per-device audit timeline — full slice C work. Stub for now
+      // with a clear "coming soon" plus a link to the global Audit
+      // tab so the operator isn't stranded.
+      container.textContent = "";
+      container.appendChild(el("p", { className: "node-history-stub" },
+        `Per-device audit timeline coming in a follow-up. For now, see the Audit tab and filter by device "${device}".`));
       break;
 
     default: {
-      // Exhaustiveness check — TypeScript will catch missing cases at compile time.
       const _never: never = id;
       container.textContent = "";
       container.appendChild(el("p", { className: "topology-empty" }, `Unknown tab: ${_never}`));
     }
   }
+}
+
+// renderSummaryTab — the new default tab. Aggregates the device's
+// most-asked-about facts (identity + status + interface counts +
+// drift summary) into a single at-a-glance view so the operator
+// rarely needs to leave Summary for triage.
+async function renderSummaryTab(container: HTMLElement, device: string): Promise<void> {
+  container.textContent = "";
+  const grid = el("div", { className: "node-summary-grid" });
+  container.appendChild(grid);
+
+  // Identity card — from /info.
+  const identityCard = el("section", { className: "node-summary-card" });
+  identityCard.appendChild(el("h3", { className: "node-summary-card-title" }, "Identity"));
+  const identityBody = el("div", { className: "node-summary-card-body" });
+  identityBody.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+  identityCard.appendChild(identityBody);
+  grid.appendChild(identityCard);
+
+  // Interfaces card — count by state, from /interfaces.
+  const ifaceCard = el("section", { className: "node-summary-card" });
+  ifaceCard.appendChild(el("h3", { className: "node-summary-card-title" }, "Interfaces"));
+  const ifaceBody = el("div", { className: "node-summary-card-body" });
+  ifaceBody.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+  ifaceCard.appendChild(ifaceBody);
+  grid.appendChild(ifaceCard);
+
+  // Drift card — top items + Reconcile shortcut, from /drift.
+  const driftCard = el("section", { className: "node-summary-card" });
+  driftCard.appendChild(el("h3", { className: "node-summary-card-title" }, "Drift"));
+  const driftBody = el("div", { className: "node-summary-card-body" });
+  driftBody.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+  driftCard.appendChild(driftBody);
+  grid.appendChild(driftCard);
+
+  // Three concurrent fetches; each card fills independently.
+  void fetchNodeInfo(device).then((data) => {
+    identityBody.textContent = "";
+    const d = (data ?? {}) as Record<string, unknown>;
+    const rows: Array<[string, unknown]> = [
+      ["Management IP", d.mgmt_ip],
+      ["Loopback IP", d.loopback_ip],
+      ["Router ID", d.router_id],
+      ["BGP ASN", d.bgp_as],
+      ["VTEP source IP", d.vtep_source_ip],
+      ["Zone", d.zone],
+      ["Platform", d.platform],
+    ];
+    const dl = el("dl", { className: "node-summary-dl" });
+    for (const [label, value] of rows) {
+      if (value === undefined || value === null || value === "") continue;
+      dl.appendChild(el("dt", { className: "node-summary-dt" }, label));
+      dl.appendChild(el("dd", { className: "node-summary-dd" }, String(value)));
+    }
+    identityBody.appendChild(dl);
+  }).catch((err) => renderErrorInto(identityBody, err));
+
+  void fetchNodeInterfaces(device).then((data) => {
+    ifaceBody.textContent = "";
+    const list = Array.isArray(data) ? data : [];
+    const total = list.length;
+    let up = 0, down = 0;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const oper = String((item as Record<string, unknown>).oper_state ?? "").toLowerCase();
+      if (oper === "up") up++;
+      else if (oper === "down") down++;
+    }
+    const summary = el("p", { className: "node-summary-stat-row" });
+    summary.appendChild(el("span", { className: "node-summary-stat-total" }, String(total)));
+    summary.appendChild(el("span", { className: "node-summary-stat-label" }, "interfaces"));
+    if (up > 0) summary.appendChild(el("span", { className: "node-summary-stat-pill node-summary-stat-pill--up" }, `${up} up`));
+    if (down > 0) summary.appendChild(el("span", { className: "node-summary-stat-pill node-summary-stat-pill--down" }, `${down} down`));
+    ifaceBody.appendChild(summary);
+    ifaceBody.appendChild(el("p", { className: "node-summary-stat-hint" },
+      "Switch to the Interfaces tab for the full list + per-port actions."));
+  }).catch((err) => renderErrorInto(ifaceBody, err));
+
+  void fetchNodeDrift(device).then((data) => {
+    driftBody.textContent = "";
+    const items = Array.isArray(data) ? data : [];
+    if (items.length === 0) {
+      driftBody.appendChild(el("p", { className: "node-summary-stat-clean" },
+        "No drift between spec and CONFIG_DB."));
+      return;
+    }
+    const pill = el("p", { className: "node-summary-stat-row" });
+    pill.appendChild(el("span", { className: "node-summary-stat-pill node-summary-stat-pill--drift" },
+      `${items.length} drift item${items.length === 1 ? "" : "s"}`));
+    driftBody.appendChild(pill);
+    driftBody.appendChild(el("p", { className: "node-summary-stat-hint" },
+      "Switch to the Drift tab for the full diff + Reconcile."));
+  }).catch((err) => renderErrorInto(driftBody, err));
+}
+
+// renderStateTab — collapses the 7 prior reality tabs into one tab
+// with disclosable sub-sections. Each sub-section fetches lazily on
+// first expansion. A device with no VRFs / ACLs / etc. shows "—"
+// inline so the operator doesn't have to expand to discover absence.
+async function renderStateTab(container: HTMLElement, device: string): Promise<void> {
+  container.textContent = "";
+  container.appendChild(el("p", { className: "node-state-intro" },
+    "Observed reality from this device. Sub-sections fetch on expand."));
+
+  for (const sub of STATE_SUBSECTIONS) {
+    const details = el("details", { className: "node-state-section" }) as HTMLDetailsElement;
+    const summary = el("summary", { className: "node-state-section-summary" });
+    const title = el("span", { className: "node-state-section-title" }, sub.label);
+    summary.appendChild(title);
+    const badge = el("span", { className: "node-state-section-badge" }, "");
+    summary.appendChild(badge);
+    details.appendChild(summary);
+
+    const body = el("div", { className: "node-state-section-body" });
+    body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+    details.appendChild(body);
+
+    let loaded = false;
+    details.addEventListener("toggle", () => {
+      if (loaded || !details.open) return;
+      loaded = true;
+      void fetchStateSubsection(sub.id, device).then((data) => {
+        body.textContent = "";
+        const count = countItems(data);
+        badge.textContent = count === 0 ? "—" : `${count}`;
+        if (count === 0) {
+          body.appendChild(el("p", { className: "node-summary-stat-clean" }, "(none)"));
+          return;
+        }
+        renderValueInto(body, data);
+      }).catch((err) => renderErrorInto(body, err));
+    });
+
+    container.appendChild(details);
+  }
+}
+
+function fetchStateSubsection(id: typeof STATE_SUBSECTIONS[number]["id"], device: string): Promise<unknown> {
+  switch (id) {
+    case "vlans":     return fetchNodeVLANs(device);
+    case "vrfs":      return fetchNodeVRFs(device);
+    case "acls":      return fetchNodeACLs(device);
+    case "bgp":       return fetchNodeBGPStatus(device);
+    case "evpn":      return fetchNodeEVPNStatus(device);
+    case "lags":      return fetchNodeLAGs(device);
+    case "neighbors": return fetchNodeNeighbors(device);
+  }
+}
+
+// Best-effort item count for a state sub-section's response. Arrays
+// use length directly; objects use key count; primitives count as 0.
+// Used for the badge next to each disclosure title.
+function countItems(data: unknown): number {
+  if (Array.isArray(data)) return data.length;
+  if (data && typeof data === "object") return Object.keys(data).length;
+  return 0;
+}
+
+// renderRawSection — collapsed disclosure rendering the three
+// power-user / debugging surfaces (Config DB · Projection · Intent
+// Tree). Hidden by default below the primary tab panels.
+function renderRawSection(host: HTMLElement, device: string): void {
+  const wrap = el("details", { className: "node-raw-wrap" }) as HTMLDetailsElement;
+  const sum = el("summary", { className: "node-raw-summary" }, "Raw (debugging)");
+  wrap.appendChild(sum);
+  const inner = el("div", { className: "node-raw-body" });
+  wrap.appendChild(inner);
+
+  for (const sec of RAW_SECTIONS) {
+    const d = el("details", { className: "node-raw-section" }) as HTMLDetailsElement;
+    d.appendChild(el("summary", { className: "node-raw-section-summary" }, sec.label));
+    const body = el("div", { className: "node-raw-section-body" });
+    body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+    d.appendChild(body);
+    let loaded = false;
+    d.addEventListener("toggle", () => {
+      if (loaded || !d.open) return;
+      loaded = true;
+      const fetcher: Promise<unknown> =
+        sec.id === "configdb" ? fetchNodeConfigDB(device).then((data) => {
+          body.textContent = "";
+          renderConfigDBTab(body, device, data);
+          return data;
+        }) :
+        sec.id === "projection" ? fetchNodeProjection(device).then((data) => {
+          body.textContent = "";
+          renderValueInto(body, data);
+          return data;
+        }) :
+        fetchNodeIntentTree(device).then((data) => {
+          body.textContent = "";
+          renderValueInto(body, data);
+          return data;
+        });
+      void fetcher.catch((err) => renderErrorInto(body, err));
+    });
+    inner.appendChild(d);
+  }
+
+  host.appendChild(wrap);
 }
 
 // ---- Topology write forms ---------------------------------------------------

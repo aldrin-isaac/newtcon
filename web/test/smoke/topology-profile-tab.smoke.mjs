@@ -68,28 +68,30 @@ try {
   await page.waitForSelector(".topo-menu-header--button", { timeout: 3000 });
   await page.click(".topo-menu-header--button");
 
-  // Drawer opens. Verify the Profile tab is present.
+  // Drawer opens. The Profile tab was renamed to "Spec" in the
+  // device-drawer redesign (6-tab consolidation); the spec content
+  // (DeviceProfile schema-driven labeled rows) lives there now.
   await page.waitForFunction(() => {
     const btns = Array.from(document.querySelectorAll(".node-tab"));
-    return btns.some((b) => (b.textContent || "").trim() === "Profile");
+    return btns.some((b) => (b.textContent || "").trim() === "Spec");
   }, { timeout: 5000 });
-  expect(true, "node drawer renders a Profile tab");
+  expect(true, "node drawer renders a Spec tab");
 
-  // Capture the device name (drawer-name header).
-  const deviceName = await page.$eval(".drawer-name", (el) => el.textContent?.trim());
+  // Capture the device name (drawer header h2).
+  const deviceName = await page.$eval(".node-drawer-name", (el) => el.textContent?.trim());
   expect(deviceName && deviceName.length > 0, `drawer shows device name: "${deviceName}"`);
 
-  // Click the Profile tab.
+  // Click the Spec tab (formerly Profile).
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll(".node-tab"))
-      .find((b) => (b.textContent || "").trim() === "Profile");
+      .find((b) => (b.textContent || "").trim() === "Spec");
     btn?.click();
   });
 
-  // Wait for the panel to either render the spec body (.drawer-detail) or
-  // the not-found message. Either outcome is acceptable.
+  // Wait for the panel to either render the spec body or the
+  // not-found message. Either outcome is acceptable.
   const outcome = await page.waitForFunction(() => {
-    const panel = document.getElementById("node-panel-profile");
+    const panel = document.getElementById("node-panel-spec");
     if (!panel || panel.hidden) return null;
     if (panel.querySelector(".drawer-detail")) return "rendered";
     if (panel.querySelector(".panel-error")) {
