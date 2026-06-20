@@ -1553,6 +1553,29 @@
 .topology-graph--panning { cursor: grabbing; }
 .topology-graph--panning .topo-node { pointer-events: none; }
 
+/* Navigation-affordance hint — discoverable surface in the bottom-
+ * left of the graph slot so the operator sees the drag-pan + wheel-
+ * zoom gestures without having to find them by accident. Subtle
+ * (muted text on translucent surface) so it doesn't compete with
+ * the diagram. */
+.topology-nav-hint {
+  position: absolute;
+  bottom: var(--space-sm);
+  left: var(--space-sm);
+  z-index: 10;
+  pointer-events: none;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  padding: 2px var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-system);
+  letter-spacing: 0.01em;
+  box-shadow: var(--shadow-xs);
+  opacity: 0.85;
+}
+
 /* Node drag cursor + visual lift when actively dragging. */
 .topo-node { cursor: move; }
 .topo-node--dragging { opacity: 0.85; }
