@@ -89,7 +89,7 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
     host.appendChild(item);
   }
 
-  // Divider + "+ New topology" action.
+  // Divider + "+ New network" action.
   const sep = document.createElement("div");
   sep.className = "network-switcher-sep";
   host.appendChild(sep);
@@ -97,7 +97,7 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "network-switcher-item network-switcher-item--action";
-  addBtn.innerHTML = `<span class="network-switcher-item-icon">${iconSVG("plus")}</span><span class="network-switcher-item-id">New topology…</span>`;
+  addBtn.innerHTML = `<span class="network-switcher-item-icon">${iconSVG("plus")}</span><span class="network-switcher-item-id">New network…</span>`;
   addBtn.addEventListener("click", () => {
     closeDropdown();
     openRegisterModal();
@@ -150,8 +150,8 @@ function openRegisterModal(): void {
   overlay.className = "network-modal-overlay";
   overlay.innerHTML = `
     <div class="network-modal">
-      <h2 class="network-modal-title">New topology</h2>
-      <p class="network-modal-hint">Creates an empty layout under newtron's configured networks base. Specs are populated through the UI or the newtron CLI.</p>
+      <h2 class="network-modal-title">New network</h2>
+      <p class="network-modal-hint">Creates an empty network under newtron's configured networks base. Topology and specs are populated through the UI or the newtron CLI.</p>
       <form class="network-modal-form">
         <label class="form-label">Network ID *</label>
         <input class="form-control" name="id" placeholder="e.g. demo-1"
@@ -187,8 +187,8 @@ function openRegisterModal(): void {
     }
     {
       const ok = await confirmInline({
-        title: `Create new topology "${id}"?`,
-        body: "Newtron will materialise an empty layout under its --networks-base.",
+        title: `Create new network "${id}"?`,
+        body: "Newtron will materialise an empty network under its --networks-base.",
         confirmLabel: "Create",
       });
       if (!ok) return;

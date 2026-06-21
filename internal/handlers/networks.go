@@ -71,7 +71,7 @@ func NewNetworksHandler(mux *http.ServeMux, c networksClient, correlationID func
 			return
 		}
 		// Propagate the 201-vs-200 distinction so the UI can branch
-		// (a "New topology" modal renders "name already taken" when
+		// (the "New network" modal renders "name already taken" when
 		// the operator picks an existing id).
 		status := http.StatusCreated
 		if existed {
