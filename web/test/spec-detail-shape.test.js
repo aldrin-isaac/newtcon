@@ -87,6 +87,43 @@ describe("buildSpecDetailShape() — extras (transparency)", () => {
   });
 });
 
+describe("buildSpecDetailShape() — ref cross-linking (#243)", () => {
+  const refFields = [
+    { name: "name", label: "Name" },
+    { name: "ipvpn", label: "IP-VPN", refKind: "IPVPNSpec" },
+    { name: "qos_policy", label: "QoS policy", refKind: "QoSPolicy" },
+    { name: "vlan", label: "VLAN" }, // non-ref
+  ];
+
+  test("carries refKind through to rows so the renderer can chip them", () => {
+    const shape = buildSpecDetailShape(refFields, {
+      ipvpn: "Vrf_IRB",
+      qos_policy: "gold",
+      vlan: 100,
+    }, ["name"]);
+    const byName = (n) => shape.rows.find((r) => r.rawName === n);
+    assert.equal(byName("ipvpn").refKind, "IPVPNSpec");
+    assert.equal(byName("qos_policy").refKind, "QoSPolicy");
+    assert.equal(byName("vlan").refKind, undefined, "non-ref fields carry no refKind");
+  });
+
+  test("empty ref values stay empty (renderer shows '—', not a chip)", () => {
+    const shape = buildSpecDetailShape(refFields, { ipvpn: "" }, ["name"]);
+    const ipvpn = shape.rows.find((r) => r.rawName === "ipvpn");
+    assert.equal(ipvpn.empty, true);
+    assert.equal(ipvpn.refKind, "IPVPNSpec", "refKind is still present even when empty");
+  });
+
+  test("extras never carry refKind (schema-unknown fields can't be refs)", () => {
+    const shape = buildSpecDetailShape(refFields, {
+      ipvpn: "Vrf_IRB",
+      surprise: "x",
+    }, ["name"]);
+    const surprise = shape.extras.find((r) => r.rawName === "surprise");
+    assert.equal(surprise.refKind, undefined);
+  });
+});
+
 describe("buildSpecDetailShape() — edge cases", () => {
   test("empty data: every schema row marked empty, no extras", () => {
     const shape = buildSpecDetailShape(profileFields, {}, ["name"]);

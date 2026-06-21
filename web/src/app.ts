@@ -80,7 +80,7 @@ import {
 } from "./api/newtcon/nodes.js";
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
-import { buildSpecDetailShape } from "./spec-detail-shape.js";
+import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
   type SubRuleColumn,
@@ -102,7 +102,7 @@ import {
 import { resolveDeviceStatus, type DeviceStatus } from "./device-status.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
-import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveSubRuleKind } from "./api/newtcon/schema.js";
+import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveKindToSlug, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
 import {
   type PaletteState,
@@ -1772,11 +1772,12 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
     if (schemaForDetail) {
       const body = el("div");
       // Adapter: SchemaField → SpecField shape. buildSpecDetailShape
-      // only needs name + label; everything else (type / required /
-      // immutable / etc.) is irrelevant for read-only display.
+      // needs name + label for the layout, plus ref_kind so ref fields
+      // render as clickable cross-link chips. Other field metadata
+      // (required / immutable / etc.) is irrelevant for read-only display.
       renderSpecDetailInto(
         body,
-        schemaForDetail.fields.map((f) => ({ name: f.name, label: f.label })),
+        schemaForDetail.fields.map(toSpecField),
         detail,
         extraExcludes,
       );
@@ -2547,7 +2548,16 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
 //
 // Falls back to renderValueInto when data is not an object (defensive
 // against newtron returning a primitive or null).
-function renderSpecDetailInto(container: HTMLElement, fields: Array<{name: string; label: string}>, data: unknown, extraExcludes: string[] = []): void {
+// toSpecField adapts a newtron SchemaField to the narrower SpecField the
+// detail renderer consumes. ref_kind is carried through only for type
+// "ref" fields, so the renderer knows which rows become cross-link chips.
+function toSpecField(f: import("./api/newtcon/schema.js").SchemaField): SpecField {
+  const out: SpecField = { name: f.name, label: f.label };
+  if (f.type === "ref" && f.ref_kind) out.refKind = f.ref_kind;
+  return out;
+}
+
+function renderSpecDetailInto(container: HTMLElement, fields: SpecField[], data: unknown, extraExcludes: string[] = []): void {
   container.textContent = "";
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     renderValueInto(container, data);
@@ -2571,9 +2581,7 @@ function renderSpecDetailInto(container: HTMLElement, fields: Array<{name: strin
   for (const row of shape.rows) {
     dl.appendChild(el("dt", { className: "spec-detail-label" }, row.label));
     const dd = el("dd", { className: "spec-detail-value" });
-    dd.appendChild(row.empty
-      ? el("span", { className: "spec-detail-empty" }, "—")
-      : renderValue(row.value));
+    dd.appendChild(renderSpecValue(row));
     dl.appendChild(dd);
   }
   container.appendChild(dl);
@@ -2586,14 +2594,55 @@ function renderSpecDetailInto(container: HTMLElement, fields: Array<{name: strin
     for (const row of shape.extras) {
       dlx.appendChild(el("dt", { className: "spec-detail-label spec-detail-label--extra" }, row.label));
       const dd = el("dd", { className: "spec-detail-value" });
-      dd.appendChild(row.empty
-        ? el("span", { className: "spec-detail-empty" }, "—")
-        : renderValue(row.value));
+      dd.appendChild(renderSpecValue(row));
       dlx.appendChild(dd);
     }
     det.appendChild(dlx);
     container.appendChild(det);
   }
+}
+
+// renderSpecValue renders one SpecRow's value cell. Empty values show
+// "—". Ref rows (refKind set) with a non-empty string value render as a
+// clickable chip that opens the referenced spec's drawer; everything
+// else falls through to the generic renderValue. Resolution of the
+// ref's kind → URL slug happens lazily on click (the schema cache is
+// already warm by the time a detail drawer is open, so it's instant).
+function renderSpecValue(row: import("./spec-detail-shape.js").SpecRow): Node {
+  if (row.empty) return el("span", { className: "spec-detail-empty" }, "—");
+  if (row.refKind && typeof row.value === "string" && row.value !== "") {
+    return renderRefChip(row.refKind, row.value);
+  }
+  return renderValue(row.value);
+}
+
+// renderRefChip builds a clickable chip for a cross-spec reference. The
+// click resolves refKind (a newtron kind name) to its URL slug and
+// opens that spec's detail drawer over the current one. A failed
+// resolution (embedded kind, schema not loaded) surfaces a toast rather
+// than a dead click.
+function renderRefChip(refKind: string, name: string): HTMLElement {
+  const chip = el("button", {
+    type: "button",
+    className: "spec-ref-chip",
+    title: `Open ${name}`,
+  }, name) as HTMLButtonElement;
+  chip.addEventListener("click", () => {
+    void (async () => {
+      const slug = await resolveKindToSlug(refKind).catch(() => null);
+      if (!slug) {
+        showToast({
+          kind: "error",
+          title: `Can't open "${name}"`,
+          body: "Its spec type isn't separately viewable.",
+        });
+        return;
+      }
+      const kind = slug as SpecKind;
+      await openDetail(kind, kindTitleFor(kind), name);
+    })();
+  });
+  return chip;
 }
 
 // openBindServiceDrawer opens a form drawer for binding a service to an interface.
@@ -3610,7 +3659,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
           if (schemaForDetail) {
             renderSpecDetailInto(
               body,
-              schemaForDetail.fields.map((f) => ({ name: f.name, label: f.label })),
+              schemaForDetail.fields.map(toSpecField),
               data,
               ["name"],
             );

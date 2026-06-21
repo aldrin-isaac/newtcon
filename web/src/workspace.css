@@ -321,6 +321,23 @@
 .spec-detail-extras[open] .spec-detail-extras-summary { color: var(--color-text-secondary); }
 .spec-detail-empty-state { font-size: var(--text-sm); color: var(--color-text-muted); font-style: italic; font-family: var(--font-system); margin: 0; }
 
+/* Cross-link chip for ref fields (zone, platform, ipvpn, filter, …).
+ * Renders inline in the value cell; clicking opens the referenced
+ * spec's drawer. Styled as an actionable token, not a plain link. */
+.spec-ref-chip {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: inherit;
+  color: var(--color-text-link);
+  background: var(--color-surface-sunken, var(--color-surface));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 8px; cursor: pointer;
+  transition: background var(--motion-fast, 120ms) ease, border-color var(--motion-fast, 120ms) ease;
+}
+.spec-ref-chip:hover { background: var(--color-surface-hover); border-color: var(--color-border); }
+.spec-ref-chip:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
+.spec-ref-chip::after { content: "→"; margin-left: 6px; opacity: 0.5; font-family: var(--font-system); }
+
 /* Drawer Edit-mode controls — small row above the spec body, plus the
  * Save / Cancel pair at the bottom of the form. Both reuse existing
  * button classes (form-submit-btn / form-cancel-btn) where available. */
