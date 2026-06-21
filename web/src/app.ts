@@ -803,7 +803,7 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   void (async () => {
     const schemaKind = await resolveSlugToKind(kind).catch(() => null);
     if (schemaKind !== null) {
-      void renderSchemaDrivenCreate(kind, schemaKind, content, drawer, onSuccess);
+      void renderSchemaDrivenCreate(kind, schemaKind, content, onSuccess);
       return;
     }
     // Fall through to the legacy hand-typed specForms path for any
@@ -884,7 +884,6 @@ async function renderSchemaDrivenCreate(
   kind: SpecKind,
   schemaKind: string,
   content: HTMLElement,
-  drawer: HTMLElement,
   onSuccess: () => void,
 ): Promise<void> {
   // Loading placeholder while the schema fetch is in flight — the
@@ -929,8 +928,20 @@ async function renderSchemaDrivenCreate(
   const errorOut = el("div", { className: "form-error-out" });
   content.appendChild(errorOut);
 
+  // Create + Cancel pair, mirroring the edit form's .form-button-row.
+  const buttons = el("div", { className: "form-button-row" });
   const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Create");
-  content.appendChild(submitBtn);
+  const cancelBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Cancel");
+  buttons.appendChild(submitBtn);
+  buttons.appendChild(cancelBtn);
+  content.appendChild(buttons);
+
+  // Cancel discards the unsubmitted form and closes the drawer. Unlike
+  // the edit form (which returns to the read view) there's no prior
+  // detail to fall back to, so just close.
+  cancelBtn.addEventListener("click", () => {
+    closeDetail();
+  });
 
   submitBtn.addEventListener("click", () => {
     if (!validate()) return;
@@ -947,12 +958,9 @@ async function renderSchemaDrivenCreate(
       const name = String(values[idField] ?? "(unnamed)");
       enqueueSpecCreate(kind as StagingSpecKind, name, values);
       const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
-      content.insertBefore(ok, submitBtn);
+      content.insertBefore(ok, buttons);
       onSuccess();
-      setTimeout(() => {
-        drawer.setAttribute("aria-hidden", "true");
-        drawer.classList.remove("open");
-      }, 800);
+      setTimeout(() => { closeDetail(); }, 800);
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Create";
@@ -5487,6 +5495,11 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
         );
         btn.appendChild(badge);
         btn.addEventListener("click", () => {
+          // Close any open detail/create drawer — switching facets
+          // changes the list behind it, so a Service detail (or an
+          // IP-VPN create form) left open over the MAC-VPN facet is
+          // stale. Mirrors the close-on-tab-switch behaviour.
+          closeDetail();
           activeFacet = kind;
           renderSubnav();
           renderActiveFacet();
