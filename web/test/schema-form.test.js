@@ -469,3 +469,42 @@ describe("renderSchemaForm() — applies_when (newtron #265)", () => {
     assert.equal(getValues().peer_as, "65001", "peer_as returns to payload under bgp");
   });
 });
+
+describe("renderSchemaForm() — read_only fields (newtron #269)", () => {
+  beforeEach(() => { setupDOM(); });
+  afterEach(() => { delete globalThis.document; });
+
+  const IPVPN_269 = {
+    kind: "IPVPNSpec", label: "IP-VPN", description: "",
+    fields: [
+      { name: "name", label: "Name", type: "string", required: true },
+      { name: "l3vni", label: "L3VNI", type: "int", required: true },
+      { name: "vrf_name", label: "VRF Name", type: "string", required: false, read_only: true },
+    ],
+  };
+
+  test("read_only field renders disabled and is never submitted", async () => {
+    const { form, getValues } = await renderSchemaForm({
+      schema: IPVPN_269,
+      prefill: { name: "IRB", l3vni: 5000, vrf_name: "Vrf_IRB" },
+    });
+    const inputs = findInputs(form);
+    const vrf = inputs.find((i) => i.className.includes("schema-form-input--readonly"));
+    assert.ok(vrf, "read_only field rendered");
+    assert.equal(vrf.disabled, true, "read_only input disabled");
+    assert.equal(vrf.value, "Vrf_IRB", "shows the derived value");
+    const v = getValues();
+    assert.equal("vrf_name" in v, false, "read_only field omitted from getValues");
+  });
+
+  test("editable fields still submit alongside a read_only field", async () => {
+    const { form, getValues } = await renderSchemaForm({ schema: IPVPN_269 });
+    const inputs = findInputs(form);
+    inputs.find((i) => i.name === "name").value = "IRB";
+    inputs.find((i) => i.name === "l3vni").value = "5000";
+    const v = getValues();
+    assert.equal(v.name, "IRB");
+    assert.equal(v.l3vni, 5000);
+    assert.equal("vrf_name" in v, false);
+  });
+});

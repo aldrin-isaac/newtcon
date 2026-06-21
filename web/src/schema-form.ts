@@ -136,6 +136,16 @@ export async function renderSchemaForm(
     if (skip.has(field.name)) continue;
     const override = overrides[field.name] ?? {};
     if (override.hidden) continue;
+
+    // read_only fields (newtron #269) are computed/derived — newtron
+    // returns them for display but rejects them on write. Render a
+    // static display row (label + value) and register NO value reader,
+    // so the field is never editable and never submitted.
+    if (field.read_only) {
+      form.appendChild(buildReadOnlyRow(field, prefill[field.name], override));
+      continue;
+    }
+
     const row = await buildFieldRow(field, prefill[field.name], override, !!opts.editMode);
     form.appendChild(row.row);
     valueReaders.set(field.name, row.read);
@@ -258,6 +268,43 @@ export async function renderSchemaForm(
 interface FieldRowResult {
   row: HTMLElement;
   read: () => unknown;
+}
+
+// buildReadOnlyRow renders a derived/computed field (read_only, newtron
+// #269) as a static label + value — a disabled input so it reads like
+// the rest of the form but can't be edited. No value reader is
+// registered for it, so it never reaches getValues / the wire. When the
+// prefill carries no value (e.g. a create form before the deriving field
+// is filled), shows an em-dash placeholder.
+function buildReadOnlyRow(
+  field: SchemaField,
+  prefill: unknown,
+  override: SchemaFieldOverride,
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "schema-form-row schema-form-row--readonly";
+
+  const labelEl = document.createElement("label");
+  labelEl.className = "schema-form-label";
+  labelEl.textContent = override.label ?? field.label;
+  row.appendChild(labelEl);
+
+  if (field.description && field.description !== "") {
+    const help = document.createElement("p");
+    help.className = "schema-form-help";
+    help.textContent = field.description;
+    row.appendChild(help);
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "schema-form-input schema-form-input--readonly";
+  input.disabled = true;
+  const val = prefill === undefined || prefill === null ? "" : String(prefill);
+  if (val !== "") input.value = val;
+  else input.placeholder = "— derived —";
+  row.appendChild(input);
+  return row;
 }
 
 async function buildFieldRow(
