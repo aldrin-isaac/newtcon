@@ -21,7 +21,8 @@ import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
-import { mountAuditTab } from "./audit.js";
+import { mountAuditTab, renderEventsTable, renderEventsError } from "./audit.js";
+import { fetchAuditEvents, type AuditEvent } from "./api/newtcon/audit.js";
 import { emptyStateFor, TOPOLOGY_EMPTY } from "./empty-states.js";
 import {
   SAMPLE_SEEDS,
@@ -3637,12 +3638,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       break;
 
     case "history":
-      // Per-device audit timeline — full slice C work. Stub for now
-      // with a clear "coming soon" plus a link to the global Audit
-      // tab so the operator isn't stranded.
-      container.textContent = "";
-      container.appendChild(el("p", { className: "node-history-stub" },
-        `Per-device audit timeline coming in a follow-up. For now, see the Audit tab and filter by device "${device}".`));
+      void renderHistoryTab(container, device);
       break;
 
     default: {
@@ -4038,6 +4034,62 @@ function renderRawSection(host: HTMLElement, device: string): void {
   }
 
   host.appendChild(wrap);
+}
+
+// renderHistoryTab — per-device audit timeline. Fetches newtron's
+// audit.events filtered to {device} and renders the same row layout
+// the global Audit tab uses (consistent operator vocabulary). The
+// per-device filter is server-side via the ?device= query param so
+// the response size stays bounded even on busy networks.
+//
+// Empty-state cases are first-class:
+//   - 404 from newtron → audit logging disabled on this deployment.
+//   - 403 → operator lacks audit.read for this network.
+//   - empty events array → no recorded activity for this device yet.
+async function renderHistoryTab(container: HTMLElement, device: string): Promise<void> {
+  container.textContent = "";
+
+  const header = el("div", { className: "node-history-header" });
+  header.appendChild(el("p", { className: "node-history-intro" },
+    `Recorded activity targeting ${device}. Source: newtron's audit log.`));
+  const refresh = el("button", { type: "button", className: "node-history-refresh" }, "Refresh");
+  header.appendChild(refresh);
+  container.appendChild(header);
+
+  const body = el("div", { className: "node-history-body" });
+  body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+  container.appendChild(body);
+
+  const load = async (): Promise<void> => {
+    body.textContent = "";
+    body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+    let page;
+    try {
+      page = await fetchAuditEvents({ device, limit: 100 });
+    } catch (err) {
+      body.textContent = "";
+      body.appendChild(el("p", { className: "panel-error" }, renderEventsError(err)));
+      return;
+    }
+    body.textContent = "";
+    const events: AuditEvent[] = page.events ?? [];
+    if (events.length === 0) {
+      body.appendChild(el("p", { className: "node-summary-stat-clean" },
+        `No recorded activity for ${device} yet. Operator writes that touch this device will appear here once audit logging captures them.`));
+      return;
+    }
+    const summary = el("p", { className: "node-history-summary" },
+      `${events.length} of ${page.total} event${page.total === 1 ? "" : "s"}.`);
+    body.appendChild(summary);
+    body.appendChild(renderEventsTable(events));
+    if (page.next_offset !== undefined) {
+      body.appendChild(el("p", { className: "node-history-paging-hint" },
+        "More events available. Use the Audit tab for full pagination + cross-device filters."));
+    }
+  };
+
+  refresh.addEventListener("click", () => { void load(); });
+  void load();
 }
 
 // ---- Topology write forms ---------------------------------------------------

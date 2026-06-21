@@ -1575,8 +1575,24 @@
 }
 .node-spec-body { background: var(--color-surface); border-radius: var(--radius-sm); padding: var(--space-sm); }
 
-/* Per-device history stub (slice C will replace) */
-.node-history-stub { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0; }
+/* Per-device History tab (audit timeline filtered to this device). */
+.node-history-header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+.node-history-intro { color: var(--color-text-secondary); font-size: var(--text-sm); margin: 0; }
+.node-history-refresh {
+  background: transparent; color: var(--color-text-link);
+  border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm);
+  padding: 2px 10px; font-size: var(--text-xs); cursor: pointer;
+}
+.node-history-refresh:hover { background: var(--color-surface-hover); }
+.node-history-body { display: block; }
+.node-history-summary { color: var(--color-text-secondary); font-size: var(--text-xs); margin: 0 0 var(--space-xs); }
+.node-history-paging-hint {
+  color: var(--color-text-secondary); font-size: var(--text-xs);
+  margin: var(--space-sm) 0 0; font-style: italic;
+}
 
 /* Raw (debugging) disclosure at the drawer bottom */
 .node-raw-wrap {
