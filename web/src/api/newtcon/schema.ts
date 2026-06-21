@@ -47,6 +47,11 @@ export interface SchemaField {
   max?: number;        // inclusive upper bound (type === "int")
   format?: string;     // semantic hint: "cidr" | "ipv4" | "ipv6" | "mac" | "asn"
   immutable?: boolean; // true → suppress edit input in update-mode forms
+  // Computed/derived field newtron returns for display but never accepts
+  // on write (newtron #269, e.g. IP-VPN's `vrf_name` = "Vrf_"+name).
+  // Unlike `immutable` (locked only in edit mode), a read_only field is
+  // never editable and never submitted, in create or edit.
+  read_only?: boolean;
   // Conditional required (newtron #243). When the static `required` is
   // false AND the condition below evaluates true against the current
   // form values, the field becomes required. Structured tree, not a
