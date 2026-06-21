@@ -165,7 +165,7 @@ function integrityErrorDetail(err: unknown): string {
   return formatErrorBrief(err);
 }
 
-function renderEventsError(err: unknown): string {
+export function renderEventsError(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
     return "Audit logging is disabled on this deployment. Start newtron-server with --audit-log to enable.";
   }
@@ -251,7 +251,7 @@ function makeFilterField(
   return wrap;
 }
 
-function renderEventsTable(events: AuditEvent[]): HTMLElement {
+export function renderEventsTable(events: AuditEvent[]): HTMLElement {
   const table = el("table", { className: "audit-table" });
   const head = el("thead");
   const headRow = el("tr");
