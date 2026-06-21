@@ -110,6 +110,22 @@ export async function renderSchemaForm(
   }
   const trackers: RequiredWhenTracker[] = [];
 
+  // Trackers for conditional-applicability fields (`applies_when`,
+  // newtron #265). When a field's condition evaluates false the whole
+  // row is hidden, its controls disabled (so HTML validation skips them
+  // and they drop from submit), and its name added to `notApplicable`
+  // so getValues omits it. Each tracker remembers each control's
+  // original disabled state so re-applying doesn't clobber an
+  // immutable/locked field.
+  interface AppliesWhenTracker {
+    field: SchemaField;
+    row: HTMLElement;
+    controls: Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>;
+    origDisabled: boolean[];
+  }
+  const appliesTrackers: AppliesWhenTracker[] = [];
+  const notApplicable = new Set<string>();
+
   const readAllValues = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [name, read] of valueReaders) out[name] = read();
@@ -123,6 +139,23 @@ export async function renderSchemaForm(
     const row = await buildFieldRow(field, prefill[field.name], override, !!opts.editMode);
     form.appendChild(row.row);
     valueReaders.set(field.name, row.read);
+
+    // Conditional-applicability hookup (`applies_when`). Register a
+    // tracker whenever the field declares the condition; the refresh
+    // pass below hides + disables the row when it evaluates false.
+    if (field.applies_when) {
+      const controls = Array.from(
+        row.row.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+          "input, select, textarea",
+        ),
+      );
+      appliesTrackers.push({
+        field,
+        row: row.row,
+        controls,
+        origDisabled: controls.map((c) => c.disabled),
+      });
+    }
 
     // Conditional-required hookup. Static required=true wins (no
     // toggling needed; the input is always required). Only register
@@ -164,13 +197,40 @@ export async function renderSchemaForm(
       t.labelEl.textContent = req ? base + " *" : base;
     }
   };
+
+  // Re-evaluate applicability. Hidden rows have their controls disabled
+  // (barred from HTML validation + dropped from submit) and their names
+  // collected in `notApplicable` so getValues omits them. The
+  // `applies_when` tree reuses the required_when evaluator — same
+  // grammar, same sibling-scoped semantics.
+  const refreshApplicability = (): void => {
+    if (appliesTrackers.length === 0) return;
+    const values = readAllValues();
+    for (const t of appliesTrackers) {
+      const applies = evaluateRequiredWhen(t.field.applies_when, values);
+      // `hidden` reflects to the content attribute; CSS rule
+      // `.schema-form-row[hidden]` forces display:none over the row's
+      // own display:flex.
+      t.row.hidden = !applies;
+      t.controls.forEach((c, i) => {
+        c.disabled = applies ? t.origDisabled[i]! : true;
+      });
+      if (applies) notApplicable.delete(t.field.name);
+      else notApplicable.add(t.field.name);
+    }
+  };
+
+  // Applicability first (it gates requiredness — a hidden field must not
+  // also carry a required mark), then required.
+  refreshApplicability();
   refreshConditionalRequired();
 
   // Single listener at the form level — input bubbles from every
   // input/select inside, so we don't need per-input wiring.
-  if (trackers.length > 0) {
-    form.addEventListener("input", refreshConditionalRequired);
-    form.addEventListener("change", refreshConditionalRequired);
+  if (trackers.length > 0 || appliesTrackers.length > 0) {
+    const onChange = (): void => { refreshApplicability(); refreshConditionalRequired(); };
+    form.addEventListener("input", onChange);
+    form.addEventListener("change", onChange);
   }
 
   return {
@@ -178,6 +238,10 @@ export async function renderSchemaForm(
     getValues() {
       const out: Record<string, unknown> = {};
       for (const [name, read] of valueReaders) {
+        // A field whose `applies_when` is currently false doesn't apply
+        // to the chosen shape — omit it so newtron isn't sent stale
+        // BGP fields for a static service, etc.
+        if (notApplicable.has(name)) continue;
         const v = read();
         if (v === "" || v === undefined) continue;
         if (typeof v === "object" && v !== null && Object.keys(v as object).length === 0) continue;
@@ -303,6 +367,13 @@ async function buildFieldRow(
         if (String(defaultValue) === opt) o.selected = true;
         select.appendChild(o);
       }
+      // Set select.value explicitly after options exist so the read
+      // closure returns the prefilled value immediately — needed for
+      // applies_when/required_when mount-time evaluation, where a
+      // sibling enum is the discriminator (a real browser links
+      // option.selected → select.value, but setting it directly is
+      // robust and shim-friendly).
+      if (defaultValue !== "") select.value = String(defaultValue);
       // <select> has no readOnly; disabled drops it from submit but
       // we capture the value via the read closure regardless.
       if (lockField) select.disabled = true;

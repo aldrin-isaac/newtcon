@@ -149,6 +149,10 @@
 .schema-create-wrapper { display: flex; flex-direction: column; gap: var(--space-sm); }
 .schema-form { display: flex; flex-direction: column; gap: var(--space-sm); }
 .schema-form-row { display: flex; flex-direction: column; gap: var(--space-2xs); }
+/* A row hidden by `applies_when` (newtron #265). The class selector on
+ * .schema-form-row would otherwise out-specify the [hidden] UA rule and
+ * keep it displayed, so force display:none at matching specificity. */
+.schema-form-row[hidden] { display: none; }
 .schema-form-label {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
