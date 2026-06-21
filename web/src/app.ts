@@ -164,6 +164,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
 interface Panel {
   kind: SpecKind;
   title: string;
+  /** True when newtron's schema advertises a create path for this kind
+   *  (drives the "+ Add" affordance). PlatformSpec — a read-only global
+   *  registry — has no create path, so it gets no Add button. */
+  canCreate: boolean;
+  /** True when newtron's schema advertises a delete path (drives the
+   *  per-row × affordance). */
+  canDelete: boolean;
 }
 
 // PANELS is discovered dynamically from newtron's /api/schema/all. One
@@ -185,7 +192,12 @@ async function loadPanels(): Promise<Panel[]> {
         if (!listPath) continue; // embedded / sub-rule — not a top-level panel
         const m = listPath.match(/\/([^/]+)$/);
         if (!m) continue;
-        out.push({ kind: m[1]! as SpecKind, title: meta.label });
+        out.push({
+          kind: m[1]! as SpecKind,
+          title: meta.label,
+          canCreate: !!meta.paths?.create,
+          canDelete: !!meta.paths?.delete,
+        });
       }
     } catch {
       // Schema endpoint unavailable — no panels. The Specs view will
@@ -973,8 +985,8 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
     const items = result.value;
     header.appendChild(el("span", { className: "panel-count" }, String(items.length)));
 
-    // "Add" button — only for spec types that have a form defined.
-    if (specForms[panel.kind]) {
+    // "Add" button — only for kinds newtron's schema says are creatable.
+    if (panel.canCreate) {
       const addBtn = el("button", {
         type: "button",
         className: "panel-add-btn",
@@ -999,7 +1011,7 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
     }
 
     if (allRows.length === 0) {
-      container.appendChild(renderPanelEmpty(panel.kind, !!specForms[panel.kind]));
+      container.appendChild(renderPanelEmpty(panel.kind, panel.canCreate));
     } else {
       const list = el("ul", { className: "panel-list" });
       for (const r of allRows) {
@@ -1021,7 +1033,7 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
         row.appendChild(item);
 
         // Delete affordance — × button shown on hover.
-        if (specForms[panel.kind] && !isPendingCreate) {
+        if (panel.canDelete && !isPendingCreate) {
           const delBtn = el("button", {
             type: "button",
             className: "panel-delete-btn",
