@@ -6,7 +6,7 @@
 //      (the path-substitution that replaced the ?net= fetch interceptor
 //      in PR #135), and the network-agnostic exclusions (/api/health) are
 //      not given the prefix
-//   4. The "+ New topology" modal can be opened (we don't actually
+//   4. The "+ New network" modal can be opened (we don't actually
 //      scaffold — that would write to disk on the operator's box)
 
 import puppeteer from "puppeteer-core";
@@ -44,7 +44,7 @@ try {
     Array.from(document.querySelectorAll(".network-switcher-dropdown .network-switcher-item-id"))
       .map((el) => el.textContent?.trim()));
   expect(dropdownItems.length >= 1, `dropdown shows network(s): ${JSON.stringify(dropdownItems)}`);
-  expect(dropdownItems.includes("New topology…"), `dropdown has "New topology…" action`);
+  expect(dropdownItems.includes("New network…"), `dropdown has "New network…" action`);
   await page.screenshot({ path: "/tmp/newtcon-smoke-n02-dropdown.png" });
 
   // Click outside → dropdown closes.
@@ -64,12 +64,12 @@ try {
   expect(agnostic.some((u) => u.includes("/api/health")),
     `/api/health observed without /networks/ prefix (correctly network-agnostic)`);
 
-  // Open the "New topology" modal — verify form fields present, then close.
+  // Open the "New network" modal — verify form fields present, then close.
   await page.click("#network-switcher-trigger");
   await new Promise((r) => setTimeout(r, 200));
   await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll(".network-switcher-item-id"));
-    items.find((el) => el.textContent.trim() === "New topology…")?.closest("button")?.click();
+    items.find((el) => el.textContent.trim() === "New network…")?.closest("button")?.click();
   });
   await new Promise((r) => setTimeout(r, 200));
   const modalFields = await page.evaluate(() =>
