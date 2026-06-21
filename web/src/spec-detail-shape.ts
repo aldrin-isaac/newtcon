@@ -22,6 +22,13 @@
 export interface SpecField {
   name: string;
   label: string;
+  /**
+   * For schema fields of type "ref", the newtron kind name the field
+   * points at (e.g. "ZoneSpec", "IPVPNSpec"). Absent for non-ref
+   * fields. The renderer turns rows carrying a refKind into clickable
+   * chips that open the referenced spec's drawer.
+   */
+  refKind?: string;
 }
 
 /** SpecRow is one rendered row in the labeled-row layout. */
@@ -30,6 +37,8 @@ export interface SpecRow {
   rawName: string;   // wire name (used as label for "extra" rows)
   value: unknown;    // the raw value from newtron, passed through to renderValue
   empty: boolean;    // true when value is undefined / null / ""
+  /** Carried through from the field's refKind (ref fields only). */
+  refKind?: string;
 }
 
 /** SpecDetailShape is what app.ts feeds into the DOM renderer. */
@@ -67,7 +76,9 @@ export function buildSpecDetailShape(
     if (exclude.has(f.name)) continue;
     knownNames.add(f.name);
     const v = data[f.name];
-    rows.push({ label: f.label, rawName: f.name, value: v, empty: isEmpty(v) });
+    const row: SpecRow = { label: f.label, rawName: f.name, value: v, empty: isEmpty(v) };
+    if (f.refKind) row.refKind = f.refKind;
+    rows.push(row);
   }
   const extras: SpecRow[] = [];
   for (const [k, v] of Object.entries(data)) {

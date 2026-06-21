@@ -382,3 +382,23 @@ export async function resolveSlugToKind(slug: string): Promise<string | null> {
   }
   return (await slugToKindCache).get(slug) ?? null;
 }
+
+/**
+ * resolveKindToSlug — inverse of resolveSlugToKind. For a newtron kind
+ * name (e.g. "ZoneSpec", "IPVPNSpec") return the URL slug (e.g. "zones",
+ * "ipvpns"). Returns null for embedded / sub-rule kinds with no
+ * addressable list path (they aren't reachable by a spec drawer).
+ *
+ * Used for ref-field cross-linking: a schema field with type "ref"
+ * carries `ref_kind` (a kind name); the drawer-open dispatch needs the
+ * slug. Shares the same slug↔kind cache resolveSlugToKind builds.
+ */
+export async function resolveKindToSlug(kind: string): Promise<string | null> {
+  // Force the cache to build (its values are the kind names).
+  await resolveSlugToKind("");
+  if (!slugToKindCache) return null;
+  for (const [slug, k] of await slugToKindCache) {
+    if (k === kind) return slug;
+  }
+  return null;
+}
