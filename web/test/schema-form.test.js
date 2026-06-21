@@ -342,7 +342,26 @@ describe("renderSchemaForm() — IPVPNSpec coverage", () => {
       `notice body should flag required-by-newtron risk; got: "${body.textContent}"`);
   });
 
-  test("string field with pattern wires input[pattern]", async () => {
+  test("string field with a browser-safe pattern wires input[pattern]", async () => {
+    const schema = {
+      kind: "X", label: "X", description: "",
+      fields: [
+        // SONiC VRF pattern — valid under the `v` flag.
+        { name: "name", label: "Name", type: "string", required: true,
+          pattern: "^Vrf[A-Za-z0-9_]*$" },
+      ],
+    };
+    const { form } = await renderSchemaForm({ schema });
+    const input = findInputs(form)[0];
+    assert.equal(input.pattern, "^Vrf[A-Za-z0-9_]*$");
+  });
+
+  test("a pattern the browser's `v` flag rejects is NOT wired (guarded)", async () => {
+    // `^[A-Za-z0-9_-]+$` is valid as RE2 / under `u`, but throws under
+    // the `v` flag the HTML pattern attribute uses (unescaped `-`).
+    // Setting it would make the browser log an error and silently ignore
+    // the constraint, so the renderer skips it. Server still validates.
+    assert.throws(() => new RegExp("^[A-Za-z0-9_-]+$", "v")); // precondition
     const schema = {
       kind: "X", label: "X", description: "",
       fields: [
@@ -352,9 +371,7 @@ describe("renderSchemaForm() — IPVPNSpec coverage", () => {
     };
     const { form } = await renderSchemaForm({ schema });
     const input = findInputs(form)[0];
-    // In the DOM shim, `pattern` is set via the property (the renderer
-    // assigns input.pattern = ...). Check the shim's recorded value.
-    assert.equal(input.pattern, "^[A-Za-z0-9_-]+$");
+    assert.equal(input.pattern, undefined, "unsafe pattern left unset");
   });
 
   test("int field wires min/max attrs from schema", async () => {
