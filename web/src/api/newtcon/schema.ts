@@ -53,6 +53,14 @@ export interface SchemaField {
   // DSL — see web/src/required-when.ts for the evaluator + tree
   // shapes. Unknown / malformed values evaluate to "not required."
   required_when?: import("../../required-when.js").RequiredWhen;
+  // Conditional applicability (newtron #265). Same structured tree as
+  // required_when. When present AND it evaluates FALSE against the
+  // current sibling values, the field does not apply to the chosen
+  // shape (e.g. BGP-only fields under protocol=static): a schema-driven
+  // form hides + disables it and omits it from the submitted payload.
+  // Absent → the field always applies. Applicability gates requiredness
+  // (a non-applicable field is never required).
+  applies_when?: import("../../required-when.js").RequiredWhen;
 }
 
 // SchemaPaths are URL templates with {netID} (always) and {name}

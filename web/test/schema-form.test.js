@@ -29,8 +29,25 @@ function setupDOM() {
       step: "",
       checked: false,
       placeholder: "",
+      hidden: false,
       // Form
       reportValidity: () => true,
+      // Minimal selector support: a comma-separated list where each part
+      // is a tag name ("input") or a class (".schema-form-label").
+      querySelectorAll(sel) {
+        const parts = sel.split(",").map((s) => s.trim());
+        const matches = (node) => parts.some((p) =>
+          p.startsWith(".")
+            ? (node.className || "").split(/\s+/).includes(p.slice(1))
+            : node.tagName === p.toUpperCase());
+        const out = [];
+        const walk = (node) => {
+          for (const c of node.children) { if (matches(c)) out.push(c); walk(c); }
+        };
+        walk(this);
+        return out;
+      },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; },
       appendChild(child) {
         this.children.push(child);
         child.parent = this;
@@ -351,5 +368,87 @@ describe("renderSchemaForm() — IPVPNSpec coverage", () => {
     const input = findInputs(form)[0];
     assert.equal(input.min, "1");
     assert.equal(input.max, "16777215");
+  });
+});
+
+describe("renderSchemaForm() — applies_when (newtron #265)", () => {
+  beforeEach(() => { setupDOM(); });
+  afterEach(() => { delete globalThis.document; });
+
+  // Mirrors RoutingSpec: a `protocol` discriminator plus BGP-only fields
+  // gated by applies_when {field: protocol, equals: bgp}.
+  const ROUTING_SCHEMA = {
+    kind: "RoutingSpec", label: "Service Routing", description: "",
+    fields: [
+      { name: "protocol", label: "Protocol", type: "enum", required: true, enum: ["bgp", "static"] },
+      { name: "peer_as", label: "Peer AS", type: "string", required: false,
+        applies_when: { field: "protocol", equals: "bgp" } },
+      { name: "import_prefix_list", label: "Import Prefix List", type: "ref", required: false,
+        ref_kind: "PrefixListSpec", applies_when: { field: "protocol", equals: "bgp" } },
+      { name: "redistribute", label: "Redistribute", type: "bool", required: false },
+    ],
+  };
+
+  test("protocol=bgp → BGP-only rows applicable (visible, enabled, submitted)", async () => {
+    const { form, getValues } = await renderSchemaForm({
+      schema: ROUTING_SCHEMA,
+      prefill: { protocol: "bgp", peer_as: "65001" },
+    });
+    const peerRow = findFirstByClass(form, "schema-form-row"); // first row is protocol; find peer_as row
+    const rows = findAllByClass(form, "schema-form-row");
+    const peerAsRow = rows.find((r) => findInputs(r).some((i) => i.name === "peer_as"));
+    assert.equal(peerAsRow.hidden, false, "peer_as row visible under bgp");
+    const v = getValues();
+    assert.equal(v.peer_as, "65001", "peer_as submitted under bgp");
+    void peerRow;
+  });
+
+  test("protocol=static → BGP-only fields hidden, disabled, omitted from getValues", async () => {
+    const { form, getValues } = await renderSchemaForm({
+      schema: ROUTING_SCHEMA,
+      prefill: { protocol: "static", peer_as: "65001" },
+    });
+    const rows = findAllByClass(form, "schema-form-row");
+    const peerAsRow = rows.find((r) => findInputs(r).some((i) => i.name === "peer_as"));
+    assert.equal(peerAsRow.hidden, true, "peer_as row hidden under static");
+    const peerInput = findInputs(form).find((i) => i.name === "peer_as");
+    assert.equal(peerInput.disabled, true, "peer_as input disabled under static (barred from validation + submit)");
+    const v = getValues();
+    assert.equal("peer_as" in v, false, "peer_as omitted from payload under static");
+    assert.equal("import_prefix_list" in v, false, "ref field also omitted under static");
+  });
+
+  test("redistribute (no applies_when) always applies", async () => {
+    const { form } = await renderSchemaForm({
+      schema: ROUTING_SCHEMA,
+      prefill: { protocol: "static" },
+    });
+    const rows = findAllByClass(form, "schema-form-row");
+    const redistRow = rows.find((r) => findInputs(r).some((i) => i.name === "redistribute"));
+    assert.equal(redistRow.hidden, false, "redistribute stays visible regardless of protocol");
+  });
+
+  test("toggling protocol re-evaluates applicability via the change listener", async () => {
+    const { form, getValues } = await renderSchemaForm({
+      schema: ROUTING_SCHEMA,
+      prefill: { protocol: "bgp", peer_as: "65001" },
+    });
+    const protocolInput = findInputs(form).find((i) => i.name === "protocol");
+    const rows = findAllByClass(form, "schema-form-row");
+    const peerAsRow = rows.find((r) => findInputs(r).some((i) => i.name === "peer_as"));
+    assert.equal(peerAsRow.hidden, false);
+
+    // Flip to static and fire the form's change listener (single
+    // delegated listener at the form level).
+    protocolInput.value = "static";
+    for (const fn of (form.listeners.get("change") || [])) fn();
+    assert.equal(peerAsRow.hidden, true, "peer_as hides after flipping to static");
+    assert.equal("peer_as" in getValues(), false, "peer_as drops from payload after flip");
+
+    // Flip back to bgp.
+    protocolInput.value = "bgp";
+    for (const fn of (form.listeners.get("change") || [])) fn();
+    assert.equal(peerAsRow.hidden, false, "peer_as reappears under bgp");
+    assert.equal(getValues().peer_as, "65001", "peer_as returns to payload under bgp");
   });
 });
