@@ -306,7 +306,7 @@ async function buildFieldRow(
       input.name = field.name;
       input.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       if (field.required) input.required = true;
-      if (field.pattern) input.pattern = field.pattern;
+      if (field.pattern && patternIsBrowserSafe(field.pattern)) input.pattern = field.pattern;
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
       if (defaultValue !== "") input.value = String(defaultValue);
       if (lockField) input.readOnly = true;
@@ -591,6 +591,30 @@ async function renderNested(
 }
 
 // ─── shared helpers ────────────────────────────────────────────────
+
+// The HTML `pattern` attribute compiles with the `v` (unicodeSets) flag
+// where the runtime supports it (current Chrome/Firefox/Safari), else
+// `u`. Probe once so patternIsBrowserSafe tests against the exact flag
+// the browser will use.
+const PATTERN_FLAG: "v" | "u" = (() => {
+  try { new RegExp("a", "v"); return "v"; } catch { return "u"; }
+})();
+
+// patternIsBrowserSafe — true when `p` compiles under the flag the HTML
+// `pattern` attribute uses. `v` is stricter than `u`: some regexes
+// newtron ships — valid as RE2 / under `u` — throw under `v` (e.g. an
+// unescaped `-` in `[A-Za-z0-9_-]`). Setting such a value makes the
+// browser log an error and silently ignore the constraint, so we skip
+// applying it. Server-side validation still enforces the real rule; we
+// just forgo the client-side hint for that one field.
+function patternIsBrowserSafe(p: string): boolean {
+  try {
+    new RegExp(p, PATTERN_FLAG);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function disabledPlaceholder(message: string): HTMLElement {
   const input = document.createElement("input");
