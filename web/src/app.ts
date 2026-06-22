@@ -4132,20 +4132,16 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
   const load = async (): Promise<void> => {
     body.textContent = "";
     body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
-    // newtron paginates audit events oldest-first; show newest-first by
-    // fetching the *last* page for this device (probe for total → aim at
-    // total-100), then reversing it.
+    // newtron returns audit events newest-first by default (newtron
+    // #274); offset 0 = the most recent for this device. Pass order=desc
+    // explicitly for clarity. Show the newest page (older history is on
+    // the Audit tab).
     let total = 0;
     let events: AuditEvent[] = [];
     try {
-      const probe = await fetchAuditEvents({ device, limit: 1 });
-      total = probe.total;
-      if (total > 0) {
-        const offset = Math.max(0, total - 100);
-        const page = await fetchAuditEvents({ device, limit: 100, offset });
-        total = page.total;
-        events = [...(page.events ?? [])].reverse();
-      }
+      const page = await fetchAuditEvents({ device, order: "desc", limit: 100 });
+      total = page.total;
+      events = page.events ?? [];
     } catch (err) {
       body.textContent = "";
       body.appendChild(el("p", { className: "panel-error" }, renderEventsError(err)));

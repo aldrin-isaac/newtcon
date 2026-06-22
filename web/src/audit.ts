@@ -43,17 +43,14 @@ export async function mountAuditTab(root: HTMLElement): Promise<void> {
   const tableHost = el("div", { className: "audit-table-host" });
   root.appendChild(tableHost);
 
-  // newtron's /audit/events paginates OLDEST-first by offset (the
-  // hash-chain order) and exposes no order/desc param. Operators want
-  // newest-first, so we page from the high end downward: fetch the last
-  // page first, reverse each page in place, and decrement the offset on
-  // "Load more". Concatenating reverse-sorted descending-offset pages
-  // yields a globally newest-first list — correct for any log size, not
-  // just what fits in one page.
+  // newtron's /audit/events defaults to newest-first (newtron #274:
+  // offset 0 = most recent, paging walks back into history). We pass
+  // order=desc explicitly so intent is clear and we're robust to any
+  // future default change. Plain forward paging: append each page (it's
+  // already newest-first), follow next_offset for "Load older".
   const collected: AuditEvent[] = [];
   let total = 0;
-  let nextOffset: number | null = null; // offset of the next page to fetch (descending); null = uninitialised
-  let hasMore = false;
+  let cursor: number | undefined = undefined;
 
   const renderTable = (loading: boolean, errorMsg?: string): void => {
     tableHost.textContent = "";
@@ -72,7 +69,7 @@ export async function mountAuditTab(root: HTMLElement): Promise<void> {
     const footer = el("div", { className: "audit-table-footer" });
     footer.appendChild(el("span", { className: "audit-table-footer-count" },
       `Showing ${collected.length} of ${total}`));
-    if (hasMore) {
+    if (cursor !== undefined) {
       const more = el("button", { type: "button", className: "audit-load-more" },
         loading ? "Loading…" : "Load older");
       if (loading) more.setAttribute("disabled", "");
@@ -85,30 +82,20 @@ export async function mountAuditTab(root: HTMLElement): Promise<void> {
   const reloadEvents = async (): Promise<void> => {
     collected.length = 0;
     total = 0;
-    nextOffset = null;
-    hasMore = false;
+    cursor = undefined;
     renderTable(true);
     await loadNext();
   };
 
   const loadNext = async (): Promise<void> => {
+    const q: EventFilters = { ...filters, order: "desc", limit: PAGE_LIMIT };
+    if (cursor !== undefined) q.offset = cursor;
     renderTable(true);
     try {
-      // First call (or after a filter change): probe for the total so we
-      // can aim at the newest page. Cheap (limit=1) and honours filters.
-      if (nextOffset === null) {
-        const probe = await fetchAuditEvents({ ...filters, limit: 1, offset: 0 });
-        total = probe.total;
-        if (total === 0) { hasMore = false; renderTable(false); return; }
-        nextOffset = Math.floor((total - 1) / PAGE_LIMIT) * PAGE_LIMIT;
-      }
-      const offset = nextOffset;
-      const page: AuditEventPage = await fetchAuditEvents({ ...filters, limit: PAGE_LIMIT, offset });
+      const page: AuditEventPage = await fetchAuditEvents(q);
+      collected.push(...page.events);
       total = page.total;
-      // newtron returns this page oldest-first; reverse to newest-first.
-      collected.push(...[...page.events].reverse());
-      nextOffset = offset - PAGE_LIMIT;
-      hasMore = nextOffset >= 0;
+      cursor = page.next_offset;
       renderTable(false);
     } catch (err) {
       renderTable(false, renderEventsError(err));

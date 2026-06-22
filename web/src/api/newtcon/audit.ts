@@ -58,6 +58,9 @@ export interface EventFilters {
   success?: boolean;
   limit?: number;
   offset?: number;
+  /** Sort order (newtron #274). Server default is "desc" (newest first);
+   *  pass "asc" for chronological. */
+  order?: "asc" | "desc";
 }
 
 function pathFor(suffix: string, network?: string): string {
