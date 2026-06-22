@@ -4880,10 +4880,17 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     // Teaching empty state (slice #169.B). When the topology has zero
     // committed devices AND no pending add-device in the queue, skip
-    // the graph + filter + panel and render an explanatory block. The
-    // toolbar above already carries the action buttons (Create node /
-    // Bring up as lab) so the operator's CTAs stay visible.
+    // the graph + filter + panel and render an explanatory block.
+    //
+    // The toolbar carries the action buttons (Create node / Add link),
+    // but it's only appended further down in the non-empty path — so on
+    // an empty network we must append it HERE too, or the operator has
+    // no way to add the first device (the empty-state copy tells them to
+    // "Create node" but there'd be no button). viewMode defaults to
+    // "spec" for a no-lab/no-device network, so renderToolbar() above
+    // has already populated it with the spec-authoring buttons.
     if (deviceNames.length === 0 && pendingTopologyDeviceAdds().length === 0) {
+      root.appendChild(toolbar);
       root.appendChild(renderTopologyEmptyState());
       return;
     }
