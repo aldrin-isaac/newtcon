@@ -83,6 +83,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
+import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
   type SubRuleColumn,
@@ -1826,9 +1827,13 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
 
     // Services: show where the service is actually applied (its interface
     // bindings), derived from the topology's per-device steps — one
-    // GET /topology, no device round-trips.
+    // GET /topology, no device round-trips. Other kinds: show which
+    // services reference this resource (the reverse of the cross-link
+    // chips), derived from the service specs' ref fields.
     if (kind === "services") {
       renderServiceBindings(content, name);
+    } else {
+      renderServiceUsage(content, kind, name);
     }
   } catch (err) {
     content.removeChild(loading);
@@ -1891,6 +1896,87 @@ function renderServiceBindings(container: HTMLElement, serviceName: string): voi
       body.appendChild(table);
     })
     .catch((err) => { body.textContent = ""; renderErrorInto(body, err); });
+}
+
+// buildServiceRefFields derives, from the schema, which ServiceSpec
+// fields (incl. one level of nested object — the routing block) are refs
+// to `targetKind`. Schema-driven so no service field names are hardcoded.
+async function buildServiceRefFields(serviceKind: string, targetKind: string): Promise<RefFieldDescriptor[]> {
+  const out: RefFieldDescriptor[] = [];
+  const svc = await fetchSchema(serviceKind).catch(() => null);
+  if (!svc || !Array.isArray(svc.fields)) return out;
+  for (const f of svc.fields) {
+    if (f.type === "ref" && f.ref_kind === targetKind) {
+      out.push({ path: [f.name], label: f.label });
+    } else if (f.type === "object" && f.item_kind) {
+      const inner = await fetchSchema(f.item_kind).catch(() => null);
+      if (inner && Array.isArray(inner.fields)) {
+        for (const inf of inner.fields) {
+          if (inf.type === "ref" && inf.ref_kind === targetKind) {
+            out.push({ path: [f.name, inf.name], label: inf.label });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// renderServiceUsage appends a "Used by services" section to a resource
+// (IP-VPN / MAC-VPN / filter / QoS or route policy / prefix list) detail
+// drawer — the reverse of the forward cross-link chips. Renders nothing
+// when the kind isn't referenced by any service field (e.g. zones,
+// platforms). Scans the service specs (cheap spec-file reads) for refs
+// to this resource.
+function renderServiceUsage(container: HTMLElement, slug: SpecKind, name: string): void {
+  if (slug === "services") return;
+  void (async () => {
+    const targetKind = await resolveSlugToKind(slug).catch(() => null);
+    const serviceKind = await resolveSlugToKind("services").catch(() => null);
+    if (!targetKind || !serviceKind) return;
+    const refFields = await buildServiceRefFields(serviceKind, targetKind);
+    if (refFields.length === 0) return; // not a service-referenceable kind
+
+    const section = el("section", { className: "svc-usage" });
+    section.appendChild(el("h3", { className: "svc-usage-title" }, "Used by services"));
+    const body = el("div", { className: "svc-usage-body" });
+    body.appendChild(el("p", { className: "status-loading" }, "Loading…"));
+    section.appendChild(body);
+    container.appendChild(section);
+
+    try {
+      const names = await fetchSpecList("services");
+      const details = await Promise.all(
+        names.map((n) =>
+          fetchSpecDetail("services", n)
+            .then((detail) => ({ name: n, detail }))
+            .catch(() => ({ name: n, detail: {} as unknown })),
+        ),
+      );
+      const refs = deriveServiceReferences(details, refFields, name);
+      body.textContent = "";
+      if (refs.length === 0) {
+        body.appendChild(el("p", { className: "svc-usage-empty" },
+          "Not referenced by any service yet."));
+        return;
+      }
+      body.appendChild(el("p", { className: "svc-usage-count" },
+        `Referenced by ${refs.length} service${refs.length === 1 ? "" : "s"}.`));
+      const ul = el("ul", { className: "svc-usage-list" });
+      for (const r of refs) {
+        const li = el("li", { className: "svc-usage-item" });
+        const btn = el("button", { type: "button", className: "svc-usage-link" }, r.service);
+        btn.addEventListener("click", () => { void openDetail("services", kindTitleFor("services"), r.service); });
+        li.appendChild(btn);
+        li.appendChild(el("span", { className: "svc-usage-via" }, r.via.join(", ")));
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    } catch (err) {
+      body.textContent = "";
+      renderErrorInto(body, err);
+    }
+  })();
 }
 
 function closeDetail(): void {
