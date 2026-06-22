@@ -9,8 +9,10 @@
 
 import {
   fetchAuditEvents,
+  fetchAuditEvent,
   fetchAuditIntegrity,
   type AuditEvent,
+  type AuditChange,
   type AuditEventPage,
   type AuditIntegrityResult,
   type EventFilters,
@@ -275,7 +277,7 @@ export function renderEventsTable(events: AuditEvent[]): HTMLElement {
 }
 
 function renderEventRow(e: AuditEvent): HTMLElement {
-  const row = el("tr", { className: "audit-row" });
+  const row = el("tr", { className: "audit-row audit-row--expandable" });
   row.appendChild(el("td", { className: "audit-td audit-td-time" }, formatTimestamp(e.timestamp)));
   row.appendChild(el("td", { className: "audit-td" }, e.user || "—"));
   row.appendChild(el("td", { className: "audit-td" }, e.device || "—"));
@@ -289,7 +291,92 @@ function renderEventRow(e: AuditEvent): HTMLElement {
     title: statusTooltip(e),
   }, status));
   row.appendChild(td);
+
+  // Click → expand a detail row beneath with the request body + the
+  // CONFIG_DB change-set (newtron #276), fetched lazily on first open.
+  let detailRow: HTMLElement | null = null;
+  let loaded = false;
+  row.addEventListener("click", () => {
+    if (detailRow) {
+      detailRow.remove();
+      detailRow = null;
+      row.classList.remove("audit-row--open");
+      return;
+    }
+    detailRow = el("tr", { className: "audit-detail-row" });
+    const cell = el("td", { className: "audit-detail-cell" });
+    cell.colSpan = 5;
+    cell.appendChild(el("p", { className: "audit-detail-loading" }, "Loading…"));
+    detailRow.appendChild(cell);
+    row.after(detailRow);
+    row.classList.add("audit-row--open");
+    if (loaded) return;
+    loaded = true;
+    void fetchAuditEvent(e.id)
+      .then((full) => { cell.textContent = ""; renderEventDetail(cell, full); })
+      .catch((err) => {
+        cell.textContent = "";
+        cell.appendChild(el("p", { className: "audit-detail-error" }, renderEventsError(err)));
+      });
+  });
   return row;
+}
+
+// renderEventDetail fills the expanded row with the request body the
+// caller submitted (redacted server-side) and the resulting CONFIG_DB
+// change-set. Spec-authoring ops legitimately have an empty change-set —
+// their content is the request body.
+function renderEventDetail(host: HTMLElement, e: AuditEvent): void {
+  const wrap = el("div", { className: "audit-detail" });
+
+  const body = e.request_body;
+  const bodyEmpty = body === undefined || body === null
+    || (typeof body === "object" && Object.keys(body as object).length === 0);
+  if (!bodyEmpty) {
+    wrap.appendChild(el("p", { className: "audit-detail-label" }, "Request body"));
+    if (typeof body === "object") {
+      const dl = el("dl", { className: "audit-detail-body" });
+      for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+        dl.appendChild(el("dt", { className: "audit-detail-key" }, k));
+        dl.appendChild(el("dd", { className: "audit-detail-val" }, formatDetailValue(v)));
+      }
+      wrap.appendChild(dl);
+    } else {
+      wrap.appendChild(el("pre", { className: "audit-detail-raw" }, String(body)));
+    }
+  }
+
+  const changes: AuditChange[] = Array.isArray(e.changes) ? e.changes : [];
+  if (changes.length > 0) {
+    wrap.appendChild(el("p", { className: "audit-detail-label" }, `Device changes (${changes.length})`));
+    const table = el("table", { className: "audit-changes-table" });
+    const head = el("tr");
+    for (const h of ["Table", "Key", "Type", "Fields"]) head.appendChild(el("th", { className: "audit-changes-th" }, h));
+    table.appendChild(head);
+    for (const c of changes) {
+      const tr = el("tr");
+      tr.appendChild(el("td", { className: "audit-changes-td" }, c.table || "—"));
+      tr.appendChild(el("td", { className: "audit-changes-td" }, c.key || "—"));
+      tr.appendChild(el("td", { className: "audit-changes-td audit-changes-type--" + c.type }, c.type || "—"));
+      tr.appendChild(el("td", { className: "audit-changes-td" }, c.fields ? formatDetailValue(c.fields) : "—"));
+      table.appendChild(tr);
+    }
+    wrap.appendChild(table);
+  }
+
+  if (wrap.children.length === 0) {
+    wrap.appendChild(el("p", { className: "audit-detail-empty" },
+      "No recorded request body or device changes for this operation."));
+  }
+  host.appendChild(wrap);
+}
+
+function formatDetailValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+  return String(v);
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(

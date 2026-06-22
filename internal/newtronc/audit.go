@@ -30,6 +30,14 @@ func (c *Client) AuditEvents(ctx context.Context, network, rawQuery string) (jso
 	return c.auditGet(ctx, fmt.Sprintf("/networks/%s/audit/events", network), rawQuery)
 }
 
+// AuditEvent calls GET /networks/{netID}/audit/events/{eventID} (newtron
+// #276). Returns the single full AuditEvent payload — including
+// request_body + changes, the heavy fields omitted from the paged list.
+// 404 when the id matches no event (or --audit-log unset).
+func (c *Client) AuditEvent(ctx context.Context, network, eventID string) (json.RawMessage, error) {
+	return c.auditGet(ctx, fmt.Sprintf("/networks/%s/audit/events/%s", network, eventID), "")
+}
+
 // AuditIntegrity calls GET /networks/{netID}/audit/integrity. Returns
 // the raw AuditIntegrityResult payload.
 func (c *Client) AuditIntegrity(ctx context.Context, network string) (json.RawMessage, error) {
