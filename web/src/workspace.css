@@ -397,6 +397,7 @@
 /* Expanded per-event detail (newtron #276): request body + change-set. */
 .audit-detail-row > .audit-detail-cell { padding: 0; background: var(--color-surface-sunken, var(--color-surface)); }
 .audit-detail { padding: var(--space-sm) var(--space-md); }
+.audit-detail-operation { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-text-primary); margin: 0 0 var(--space-2xs); word-break: break-all; }
 .audit-detail-loading { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-xs); }
 .audit-detail-error { color: var(--color-danger); font-size: var(--text-xs); margin: var(--space-xs); }
 .audit-detail-empty { color: var(--color-text-muted); font-style: italic; font-size: var(--text-xs); margin: var(--space-xs); }
