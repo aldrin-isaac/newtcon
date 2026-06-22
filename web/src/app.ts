@@ -82,6 +82,7 @@ import {
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
+import { deriveServiceBindings } from "./service-bindings.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
   type SubRuleColumn,
@@ -1822,6 +1823,13 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
     if (subRuleConf) {
       renderSubRuleTable(kind, name, detail, content, subRuleConf);
     }
+
+    // Services: show where the service is actually applied (its interface
+    // bindings), derived from the topology's per-device steps — one
+    // GET /topology, no device round-trips.
+    if (kind === "services") {
+      renderServiceBindings(content, name);
+    }
   } catch (err) {
     content.removeChild(loading);
     if (err instanceof ApiError && err.status === 404) {
@@ -1833,6 +1841,56 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
       content.appendChild(el("p", { className: "panel-error-detail" }, String(err)));
     }
   }
+}
+
+// renderServiceBindings appends a "Bindings" section to the service
+// detail drawer: every interface this service is applied to, read from
+// the topology's per-device steps (deriveServiceBindings). Each row
+// drills into that device's inspector. Empty → a teaching line.
+function renderServiceBindings(container: HTMLElement, serviceName: string): void {
+  const section = el("section", { className: "svc-bindings" });
+  section.appendChild(el("h3", { className: "svc-bindings-title" }, "Bindings"));
+  const body = el("div", { className: "svc-bindings-body" });
+  body.appendChild(el("p", { className: "status-loading" }, "Loading…"));
+  section.appendChild(body);
+  container.appendChild(section);
+
+  void fetchTopology()
+    .then((topo) => {
+      body.textContent = "";
+      const bindings = deriveServiceBindings(topo, serviceName);
+      if (bindings.length === 0) {
+        body.appendChild(el("p", { className: "svc-bindings-empty" },
+          "Not applied to any interface yet. Bind it from the Topology view (a port's Bind service action)."));
+        return;
+      }
+      body.appendChild(el("p", { className: "svc-bindings-count" },
+        `Applied to ${bindings.length} interface${bindings.length === 1 ? "" : "s"}.`));
+      const table = el("table", { className: "svc-bindings-table" });
+      const head = el("tr");
+      for (const h of ["Device", "Interface", "Details"]) {
+        head.appendChild(el("th", { className: "svc-bindings-th" }, h));
+      }
+      table.appendChild(head);
+      for (const b of bindings) {
+        const tr = el("tr", { className: "svc-bindings-row" });
+        // Device drills into the inspector (shares #detail-drawer).
+        const devCell = el("td", { className: "svc-bindings-td" });
+        const devBtn = el("button", { type: "button", className: "svc-bindings-device" }, b.device);
+        devBtn.addEventListener("click", () => openNodeDrawer(b.device));
+        devCell.appendChild(devBtn);
+        tr.appendChild(devCell);
+        tr.appendChild(el("td", { className: "svc-bindings-td svc-bindings-iface" }, b.iface));
+        const detailParts: string[] = [];
+        if (b.ipAddress) detailParts.push(b.ipAddress);
+        if (b.peerAs) detailParts.push(`peer-as ${b.peerAs}`);
+        if (b.vlan) detailParts.push(`vlan ${b.vlan}`);
+        tr.appendChild(el("td", { className: "svc-bindings-td" }, detailParts.join(" · ") || "—"));
+        table.appendChild(tr);
+      }
+      body.appendChild(table);
+    })
+    .catch((err) => { body.textContent = ""; renderErrorInto(body, err); });
 }
 
 function closeDetail(): void {
