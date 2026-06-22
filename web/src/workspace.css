@@ -394,7 +394,9 @@
 .audit-td { padding: var(--space-2xs) var(--space-xs); color: var(--color-text-primary); vertical-align: top; }
 .audit-td-time { color: var(--color-text-secondary); white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-xs); }
 .audit-td-op { color: var(--color-text-secondary); }
-.audit-status { display: inline-block; padding: 1px var(--space-xs); border-radius: 3px; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-family: var(--font-system); font-weight: var(--weight-medium); }
+/* Informational status badge — `cursor: help` signals it's a label with
+ * a tooltip, not a clickable action (operators read "PREVIEW" as a button). */
+.audit-status { display: inline-block; padding: 1px var(--space-xs); border-radius: 3px; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-family: var(--font-system); font-weight: var(--weight-medium); cursor: help; }
 .audit-status--applied { background: var(--color-success-bg); color: var(--color-success); border: 1px solid var(--color-success-border); }
 .audit-status--dry-run, .audit-status--preview { background: var(--color-info-bg); color: var(--color-info); border: 1px solid var(--color-info-border); }
 .audit-status--failed { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid var(--color-danger-border); }

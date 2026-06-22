@@ -44,6 +44,31 @@ export function eventStatusLabel(e: {
 }
 
 /**
+ * statusTooltip returns the hover text for an event's status badge. The
+ * badge is informational (not a button) — the tooltip says what the
+ * status *means* so "PREVIEW" isn't misread as a clickable preview
+ * action. For a failed event it surfaces the error message instead.
+ */
+export function statusTooltip(e: {
+  success: boolean;
+  dry_run?: boolean;
+  execute_mode?: boolean;
+  error?: string;
+}): string {
+  const status = eventStatusLabel(e);
+  switch (status) {
+    case "applied":
+      return "Applied — pushed to the live device.";
+    case "preview":
+      return "Preview — newtron applied this in-memory (intent) only; not pushed to a device.";
+    case "dry-run":
+      return "Dry run — simulated; no changes applied.";
+    case "failed":
+      return e.error && e.error !== "" ? `Failed: ${e.error}` : "Failed.";
+  }
+}
+
+/**
  * activeFilterCount returns the number of filters with a non-empty
  * value. Used for the "Filters (N)" badge so the operator sees at a
  * glance whether anything is narrowing the table.

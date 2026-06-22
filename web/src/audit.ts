@@ -20,6 +20,7 @@ import { formatErrorBrief } from "./render-error.js";
 import {
   activeFilterCount,
   eventStatusLabel,
+  statusTooltip,
   formatTimestamp,
   shortHash,
 } from "./audit-format.js";
@@ -296,7 +297,9 @@ function renderEventRow(e: AuditEvent): HTMLElement {
   const td = el("td", { className: "audit-td" });
   td.appendChild(el("span", {
     className: "audit-status audit-status--" + status,
-    title: e.error ?? "",
+    // Informational badge, not a button — the tooltip explains the
+    // status so "PREVIEW" isn't misread as a clickable preview action.
+    title: statusTooltip(e),
   }, status));
   row.appendChild(td);
   return row;
