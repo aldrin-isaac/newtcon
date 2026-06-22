@@ -34,7 +34,7 @@ export function mountHistoryTab(root: HTMLElement): void {
   const network = activeNetwork();
   const entries = loadHistory(network);
 
-  root.appendChild(el("h2", { className: "view-heading" }, "Change History"));
+  root.appendChild(el("h2", { className: "view-heading" }, "Changes"));
   root.appendChild(el("p", { className: "view-intro" },
     "Recent Apply All runs in this network, recorded by this browser. " +
     "Up to 50 entries; older fall off. Not a substitute for newtron's audit log."));
