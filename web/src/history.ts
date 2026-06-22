@@ -165,6 +165,18 @@ function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
   return bar;
 }
 
+// formatBodyValue renders one body field value for the detail panel.
+// Primitives print as-is; objects/arrays collapse to compact JSON so a
+// nested value (e.g. route_targets) stays on one line rather than
+// blowing out the row.
+function formatBodyValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+  return String(v);
+}
+
 function renderItem(item: HistoryItem): HTMLElement {
   const row = el("li", {
     className: "history-item history-item--" + item.effect
@@ -189,6 +201,25 @@ function renderItem(item: HistoryItem): HTMLElement {
   if (item.error) {
     row.appendChild(el("p", { className: "history-item-error" }, item.error));
   }
+
+  // Body detail — what the change actually submitted (creates/actions:
+  // the request body) or, for deletes, the captured pre-state. Expand on
+  // demand so the list stays scannable. Answers "what did this change?"
+  // without leaving the History tab.
+  const detail = item.body ?? item.preBody;
+  if (detail && Object.keys(detail).length > 0) {
+    const det = el("details", { className: "history-item-details" });
+    det.appendChild(el("summary", { className: "history-item-details-summary" },
+      item.effect === "delete" ? "Deleted values" : "Details"));
+    const dl = el("dl", { className: "history-item-body" });
+    for (const [k, v] of Object.entries(detail)) {
+      dl.appendChild(el("dt", { className: "history-item-body-key" }, k));
+      dl.appendChild(el("dd", { className: "history-item-body-val" }, formatBodyValue(v)));
+    }
+    det.appendChild(dl);
+    row.appendChild(det);
+  }
+
   // Per-item undoable annotation (slice #175.C.1) — honest about
   // device/interface actions, missing pre-bodies, and the data-layer
   // scope.
