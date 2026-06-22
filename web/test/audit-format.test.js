@@ -8,6 +8,7 @@ import {
   shortHash,
   formatTimestamp,
   eventStatusLabel,
+  statusTooltip,
   activeFilterCount,
 } from "../dist/audit-format.js";
 
@@ -88,5 +89,23 @@ describe("activeFilterCount()", () => {
 
   test("zero is a valid filter value (limit=0) — counted", () => {
     assert.equal(activeFilterCount({ limit: 0 }), 1);
+  });
+});
+
+describe("statusTooltip()", () => {
+  test("preview explains in-memory/intent (not a clickable preview)", () => {
+    const t = statusTooltip({ success: true, execute_mode: false });
+    assert.match(t, /^Preview —/);
+    assert.match(t, /in-memory|intent/i);
+  });
+  test("applied explains live-device push", () => {
+    assert.match(statusTooltip({ success: true, execute_mode: true }), /^Applied —/);
+  });
+  test("dry-run explains simulated", () => {
+    assert.match(statusTooltip({ success: true, dry_run: true, execute_mode: true }), /^Dry run —/);
+  });
+  test("failed surfaces the error message", () => {
+    assert.equal(statusTooltip({ success: false, error: "boom" }), "Failed: boom");
+    assert.equal(statusTooltip({ success: false }), "Failed.");
   });
 });
