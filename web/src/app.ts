@@ -4247,7 +4247,77 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   content.textContent = "";
 
   content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
-  content.appendChild(el("h2", { className: "drawer-name" }, "Create node"));
+  content.appendChild(el("h2", { className: "drawer-name" }, "Add node"));
+
+  // ── Path 1: add an existing Device Profile to the topology ───────────
+  // A profile can exist without a topology entry (authored in Specs, or a
+  // prior add that didn't land). Let the operator drop one onto the
+  // topology by name — no need to re-author the profile (which would
+  // collide). Stages only the topology entry.
+  const existing = el("section", { className: "create-node-section" });
+  existing.appendChild(el("h3", { className: "create-node-section-title" }, "Add an existing profile"));
+  existing.appendChild(el("p", { className: "drawer-hint" },
+    "Device profiles that exist but aren't placed in the topology yet."));
+  const existingRow = el("div", { className: "create-node-existing-row" });
+  const profileSelect = el("select", { className: "form-control" }) as HTMLSelectElement;
+  profileSelect.appendChild(new Option("Loading…", ""));
+  profileSelect.disabled = true;
+  const addExistingBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add to topology");
+  addExistingBtn.disabled = true;
+  existingRow.appendChild(profileSelect);
+  existingRow.appendChild(addExistingBtn);
+  existing.appendChild(existingRow);
+  const existingError = el("div", { className: "form-error-out" });
+  existing.appendChild(existingError);
+  content.appendChild(existing);
+
+  profileSelect.addEventListener("change", () => {
+    addExistingBtn.disabled = profileSelect.value === "";
+  });
+  addExistingBtn.addEventListener("click", () => {
+    const name = profileSelect.value;
+    if (!name) return;
+    existingError.textContent = "";
+    enqueueTopologyAddDevice(name, { steps: [], ports: {} });
+    addExistingBtn.disabled = true;
+    existing.appendChild(el("p", { className: "form-success" },
+      `Node "${name}" staged (topology entry). Click Save in the header to apply.`));
+    onSuccess();
+    setTimeout(() => { closeDetail(); }, 1000);
+  });
+
+  // Populate with profiles that have no topology entry (and aren't already
+  // queued for one). Best-effort: failure leaves the picker disabled and
+  // the operator can still create a new node below.
+  void (async () => {
+    try {
+      const [profiles, topo] = await Promise.all([fetchSpecList("profiles"), fetchTopology()]);
+      const placed = new Set<string>();
+      const nodes = adaptTopology(topo).nodes;
+      for (const n of Array.isArray(nodes) ? nodes : []) {
+        if (typeof n.name === "string") placed.add(n.name);
+      }
+      for (const a of pendingTopologyDeviceAdds()) placed.add(a.name);
+      const unplaced = profiles.filter((p) => !placed.has(p));
+      profileSelect.textContent = "";
+      if (unplaced.length === 0) {
+        profileSelect.appendChild(new Option("(every profile is already in the topology)", ""));
+        profileSelect.disabled = true;
+        addExistingBtn.disabled = true;
+      } else {
+        profileSelect.appendChild(new Option("Select a profile…", ""));
+        for (const p of unplaced) profileSelect.appendChild(new Option(p, p));
+        profileSelect.disabled = false;
+      }
+    } catch {
+      profileSelect.textContent = "";
+      profileSelect.appendChild(new Option("(couldn't load profiles)", ""));
+      profileSelect.disabled = true;
+    }
+  })();
+
+  content.appendChild(el("p", { className: "create-node-divider" }, "or create a new node"));
+
   content.appendChild(el("p", { className: "drawer-hint" },
     "Stages two writes: a profile (identity) and a topology entry (steps + ports). " +
     "Both land on Save. Disconnected nodes are fine — links are added separately."));

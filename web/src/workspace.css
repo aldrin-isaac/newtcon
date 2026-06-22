@@ -890,6 +890,24 @@
 .form-submit-btn:disabled { opacity: 0.5; cursor: default; }
 .form-error-out { color: var(--color-danger); font-size: var(--text-sm); margin-top: var(--space-sm); }
 
+/* Create-node drawer: the "add an existing profile" path above the
+ * create-new form. */
+.create-node-section { margin-bottom: var(--space-sm); }
+.create-node-section-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--space-2xs); }
+.create-node-existing-row { display: flex; gap: var(--space-sm); align-items: center; }
+.create-node-existing-row .form-control { flex: 1 1 auto; min-width: 0; }
+.create-node-existing-row .form-submit-btn { flex: none; }
+/* "or create a new node" divider — centred muted label with rules. */
+.create-node-divider {
+  display: flex; align-items: center; gap: var(--space-sm);
+  color: var(--color-text-muted); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  margin: var(--space-md) 0 var(--space-sm);
+}
+.create-node-divider::before, .create-node-divider::after {
+  content: ""; flex: 1 1 auto; height: 1px; background: var(--color-border-subtle);
+}
+
 /* Sub-rule sections */
 .subrule-section {
   margin-top: var(--space-md);
