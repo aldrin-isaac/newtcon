@@ -329,6 +329,18 @@ function renderEventRow(e: AuditEvent): HTMLElement {
 function renderEventDetail(host: HTMLElement, e: AuditEvent): void {
   const wrap = el("div", { className: "audit-detail" });
 
+  // Envelope — always present, so the panel is never empty. For events
+  // recorded before newtron #276 (no request_body / changes) this is the
+  // meaningful detail; the operation is shown in full (untruncated).
+  wrap.appendChild(el("p", { className: "audit-detail-operation" }, e.operation || "—"));
+  const envDl = el("dl", { className: "audit-detail-body" });
+  for (const [k, v] of [["User", e.user], ["Client IP", e.client_ip], ["Duration", e.duration]] as Array<[string, unknown]>) {
+    if (v === undefined || v === null || v === "") continue;
+    envDl.appendChild(el("dt", { className: "audit-detail-key" }, k));
+    envDl.appendChild(el("dd", { className: "audit-detail-val" }, String(v)));
+  }
+  if (envDl.children.length > 0) wrap.appendChild(envDl);
+
   const body = e.request_body;
   const bodyEmpty = body === undefined || body === null
     || (typeof body === "object" && Object.keys(body as object).length === 0);
@@ -364,9 +376,13 @@ function renderEventDetail(host: HTMLElement, e: AuditEvent): void {
     wrap.appendChild(table);
   }
 
-  if (wrap.children.length === 0) {
+  // No body and no device changes — note it (e.g. a read op, a
+  // spec-authoring op with an empty change-set, or an event recorded
+  // before newtron #276 captured content). The operation above still
+  // tells the operator what happened.
+  if (bodyEmpty && changes.length === 0) {
     wrap.appendChild(el("p", { className: "audit-detail-empty" },
-      "No recorded request body or device changes for this operation."));
+      "No request body or device changes recorded for this event."));
   }
   host.appendChild(wrap);
 }
