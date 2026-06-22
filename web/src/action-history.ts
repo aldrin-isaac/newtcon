@@ -128,12 +128,14 @@ export function buildEntry(args: {
     if (p.actionId !== undefined) it.actionId = p.actionId;
     if (p.device !== undefined) it.device = p.device;
     if (p.iface !== undefined) it.iface = p.iface;
-    // body comes through for action items so the undo planner can
-    // inspect it (e.g. configure-interface's `tagged` discriminator).
-    if (p.kind === "device action" || p.kind === "interface action") {
-      if (p.body && typeof p.body === "object") {
-        it.body = p.body as Record<string, unknown>;
-      }
+    // Capture the request body for every item that carries one (spec /
+    // device creates + device / interface actions). The undo planner
+    // reads it for action items (e.g. configure-interface's `tagged`
+    // discriminator); the History renderer shows it as expandable detail
+    // so the operator can see *what* a change submitted, not just that it
+    // happened.
+    if (p.body && typeof p.body === "object" && Object.keys(p.body).length > 0) {
+      it.body = p.body as Record<string, unknown>;
     }
     return it;
   });
