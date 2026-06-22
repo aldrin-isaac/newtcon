@@ -5506,9 +5506,13 @@ function setupTabs(): void {
 // list. Any panel kind not named here lands in the "Other" fallback
 // group so a new kind newtron registers still appears in the UI.
 const SPEC_GROUPS: { id: string; label: string; kinds: SpecKind[] }[] = [
-  { id: "services",  label: "Services",  kinds: ["services", "ipvpns", "macvpns"] },
-  { id: "policies",  label: "Policies",  kinds: ["qos-policies", "filters", "route-policies", "prefix-lists"] },
-  { id: "inventory", label: "Inventory", kinds: ["profiles", "platforms", "zones"] },
+  { id: "services",  label: "Services",         kinds: ["services"] },
+  // IP-VPN (L3VPN / VRF) + MAC-VPN (L2VPN) are the overlay virtual
+  // networks a service rides on — their own group, not lumped under
+  // Services.
+  { id: "vpns",      label: "Virtual Networks", kinds: ["ipvpns", "macvpns"] },
+  { id: "policies",  label: "Policies",         kinds: ["qos-policies", "filters", "route-policies", "prefix-lists"] },
+  { id: "inventory", label: "Inventory",        kinds: ["profiles", "platforms", "zones"] },
 ];
 
 // resolveGroupings returns the SPEC_GROUPS list extended with an
