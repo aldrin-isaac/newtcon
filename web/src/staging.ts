@@ -137,7 +137,7 @@ export async function applyDevice(device: string): Promise<ApplyResult> {
       // The actions landed (on device + in-memory) but the topology.json save
       // failed. Surface as a synthetic failed entry so the operator sees it.
       result.failed.push({
-        pending: { id: "intent-save", group: "device", op: "action", device, actionId: "intent/save", label: "persist to topology.json", body: {} } as Pending,
+        pending: { id: "intent-save", group: "device", op: "action", device, actionId: "intent/save", label: "save device intent to the network", body: {} } as Pending,
         error: formatError(err),
       });
     }

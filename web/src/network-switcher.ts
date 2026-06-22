@@ -79,7 +79,10 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
       if (isActive) { closeDropdown(); return; }
       const ok = await confirmInline({
         title: `Switch to "${info.id}"?`,
-        body: `Topology: ${info.topology || info.dir}\n\nThe page will reload.`,
+        // Show the topology facet only when the network actually names one;
+        // never fall back to the on-disk dir (an internal path, and not a
+        // topology).
+        body: `${info.topology ? `Topology: ${info.topology}\n\n` : ""}The page will reload.`,
         confirmLabel: "Switch",
       });
       if (!ok) return;
