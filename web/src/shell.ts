@@ -106,7 +106,7 @@ function setupBreadcrumb(): void {
     "tab-specs": "Specs",
     "tab-topology": "Topology",
     "tab-permissions": "Permissions",
-    "tab-history": "History",
+    "tab-history": "Change History",
     "tab-audit": "Audit",
   };
   const crumb = document.getElementById("crumb-view");

@@ -4132,28 +4132,38 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
   const load = async (): Promise<void> => {
     body.textContent = "";
     body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
-    let page;
+    // newtron paginates audit events oldest-first; show newest-first by
+    // fetching the *last* page for this device (probe for total → aim at
+    // total-100), then reversing it.
+    let total = 0;
+    let events: AuditEvent[] = [];
     try {
-      page = await fetchAuditEvents({ device, limit: 100 });
+      const probe = await fetchAuditEvents({ device, limit: 1 });
+      total = probe.total;
+      if (total > 0) {
+        const offset = Math.max(0, total - 100);
+        const page = await fetchAuditEvents({ device, limit: 100, offset });
+        total = page.total;
+        events = [...(page.events ?? [])].reverse();
+      }
     } catch (err) {
       body.textContent = "";
       body.appendChild(el("p", { className: "panel-error" }, renderEventsError(err)));
       return;
     }
     body.textContent = "";
-    const events: AuditEvent[] = page.events ?? [];
     if (events.length === 0) {
       body.appendChild(el("p", { className: "node-summary-stat-clean" },
         `No recorded activity for ${device} yet. Operator writes that touch this device will appear here once audit logging captures them.`));
       return;
     }
     const summary = el("p", { className: "node-history-summary" },
-      `${events.length} of ${page.total} event${page.total === 1 ? "" : "s"}.`);
+      `${events.length} of ${total} event${total === 1 ? "" : "s"} (most recent first).`);
     body.appendChild(summary);
     body.appendChild(renderEventsTable(events));
-    if (page.next_offset !== undefined) {
+    if (total > events.length) {
       body.appendChild(el("p", { className: "node-history-paging-hint" },
-        "More events available. Use the Audit tab for full pagination + cross-device filters."));
+        "Older events exist. Use the Audit tab for full pagination + cross-device filters."));
     }
   };
 
