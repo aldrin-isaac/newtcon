@@ -46,6 +46,25 @@ func RegisterAuditRoutes(mux *http.ServeMux, deps AuditDeps) {
 		_, _ = w.Write(payload)
 	}))
 
+	// Per-event detail (newtron #276): the heavy fields (request_body +
+	// changes) for one event, fetched on row click. Must be registered
+	// alongside the list route; ServeMux distinguishes them by the
+	// trailing {eventID} segment.
+	mux.Handle("GET /api/networks/{netID}/audit/events/{eventID}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		eventID := r.PathValue("eventID")
+		payload, err := deps.Client.AuditEvent(ctx, netID, eventID)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err,
+				"GET /api/networks/"+netID+"/audit/events/"+eventID, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+
 	mux.Handle("GET /api/networks/{netID}/audit/integrity", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		netID := r.PathValue("netID")

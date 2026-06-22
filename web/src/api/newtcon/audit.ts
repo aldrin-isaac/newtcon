@@ -8,7 +8,18 @@
 import { apiFetch } from "./_transport.js";
 import { apiPath } from "../../api-path.js";
 
-/** Per-event payload from GET /audit/events. Mirrors newtron's AuditEvent. */
+/** One CONFIG_DB / intent row an operation produced (newtron #276).
+ *  `fields` is present for add/modify, absent for delete. */
+export interface AuditChange {
+  table: string;
+  key: string;
+  type: "add" | "modify" | "delete";
+  fields?: Record<string, unknown>;
+}
+
+/** Per-event payload from GET /audit/events. Mirrors newtron's AuditEvent.
+ *  `changes` rides the list + detail; `request_body` is detail-only
+ *  (GET /audit/events/{id}) — bodies are unbounded, kept off the list. */
 export interface AuditEvent {
   id: string;
   timestamp: string;
@@ -17,7 +28,9 @@ export interface AuditEvent {
   operation: string;
   service?: string;
   interface?: string;
-  changes?: unknown[] | null;
+  changes?: AuditChange[] | null;
+  /** Redacted JSON the caller submitted. Detail endpoint only. */
+  request_body?: unknown;
   success: boolean;
   error?: string;
   execute_mode: boolean;
@@ -86,6 +99,20 @@ export async function fetchAuditEvents(
 ): Promise<AuditEventPage> {
   const url = pathFor("audit/events", network) + buildQuery(filters);
   return (await apiFetch(url, { cache: "no-store" })) as AuditEventPage;
+}
+
+/**
+ * fetchAuditEvent fetches one event's full detail
+ * (/api/networks/{netID}/audit/events/{id}, newtron #276) — including
+ * request_body + changes. 404s when the id is unknown or audit logging
+ * is disabled.
+ */
+export async function fetchAuditEvent(
+  id: string,
+  network?: string,
+): Promise<AuditEvent> {
+  const url = pathFor(`audit/events/${encodeURIComponent(id)}`, network);
+  return (await apiFetch(url, { cache: "no-store" })) as AuditEvent;
 }
 
 /**
