@@ -21,12 +21,13 @@ export interface ServiceBinding {
 }
 
 /**
- * canonicalizeServiceName matches the spec name (e.g. "OVERLAY_IRB_A")
- * to the canonicalized form newtron records in committed steps (e.g.
- * "overlay-irb-a"): lowercase, underscores → hyphens. This mirrors
- * newtron's committed-name canonicalization (#268); if that rule ever
- * diverges, matching degrades to "no bindings found" rather than wrong
- * bindings.
+ * canonicalizeServiceName bridges newtron's two name surfaces: the
+ * services list/detail echo the *authored* name ("OVERLAY_IRB_A"), but
+ * the topology step `spec_name` (and intent) use the *canonical* form
+ * ("overlay-irb-a"): lowercase, underscores → hyphens. newtron exposes
+ * no authored↔canonical mapping, so we normalize both sides here. If
+ * newtron's rule ever diverges, matching degrades to "no bindings",
+ * never wrong ones.
  */
 export function canonicalizeServiceName(name: string): string {
   return name.toLowerCase().replace(/_/g, "-");
@@ -36,11 +37,17 @@ export function canonicalizeServiceName(name: string): string {
  * deriveServiceBindings returns every interface this service is applied
  * to, read from the topology's per-device `steps`. `topology` is the raw
  * GET /topology payload ({ devices: { <name>: { steps: [...] } } }).
- * Tolerant of missing/odd shapes — returns [] rather than throwing.
+ *
+ * Matches on newtron's server-derived `spec_kind`/`spec_name` (newtron
+ * #282) — the authoritative provenance, rather than decoding the step
+ * params ourselves. `spec_name` is canonical while `serviceName` (from
+ * the list/detail) is authored, so both are canonicalized for the
+ * compare. The interface comes from the step URL. Tolerant of
+ * missing/odd shapes — returns [] rather than throwing.
  */
 export function deriveServiceBindings(topology: unknown, serviceName: string): ServiceBinding[] {
-  const target = canonicalizeServiceName(serviceName);
   const out: ServiceBinding[] = [];
+  const target = canonicalizeServiceName(serviceName);
 
   const devices = (topology && typeof topology === "object")
     ? (topology as { devices?: unknown }).devices
@@ -55,20 +62,23 @@ export function deriveServiceBindings(topology: unknown, serviceName: string): S
 
     for (const step of steps) {
       if (!step || typeof step !== "object") continue;
-      const url = (step as { url?: unknown }).url;
+      const s = step as Record<string, unknown>;
+      if (s.spec_kind !== "service" || typeof s.spec_name !== "string"
+        || canonicalizeServiceName(s.spec_name) !== target) continue;
+
+      // The interface comes from the step URL; a `service` step that
+      // isn't an interface application (e.g. a node-level deploy-service)
+      // has no interface, so skip it for the bindings view.
+      const url = s.url;
       if (typeof url !== "string") continue;
       const m = url.match(/^\/interfaces\/(.+)\/apply-service$/);
       if (!m) continue;
 
-      const params = (step as { params?: unknown }).params;
-      const p = (params && typeof params === "object") ? params as Record<string, unknown> : {};
-      const svc = p.service;
-      if (typeof svc !== "string" || canonicalizeServiceName(svc) !== target) continue;
-
+      const params = (s.params && typeof s.params === "object") ? s.params as Record<string, unknown> : {};
       const b: ServiceBinding = { device, iface: m[1]! };
-      if (p.ip_address != null && p.ip_address !== "") b.ipAddress = String(p.ip_address);
-      if (p.peer_as != null && p.peer_as !== "") b.peerAs = String(p.peer_as);
-      if (p.vlan != null && p.vlan !== "") b.vlan = String(p.vlan);
+      if (params.ip_address != null && params.ip_address !== "") b.ipAddress = String(params.ip_address);
+      if (params.peer_as != null && params.peer_as !== "") b.peerAs = String(params.peer_as);
+      if (params.vlan != null && params.vlan !== "") b.vlan = String(params.vlan);
       out.push(b);
     }
   }
