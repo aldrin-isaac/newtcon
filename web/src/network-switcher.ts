@@ -76,7 +76,11 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
       <span class="network-switcher-item-id">${escapeHtml(info.id)}</span>
       <span class="network-switcher-item-topology">${escapeHtml(info.topology || "—")}</span>`;
     item.addEventListener("click", async () => {
-      if (isActive) { closeDropdown(); return; }
+      // Selecting any item dismisses the menu first — otherwise it
+      // lingers behind the switch-confirm modal (and stays open if the
+      // operator cancels). The active item is a no-op beyond closing.
+      closeDropdown();
+      if (isActive) return;
       const ok = await confirmInline({
         title: `Switch to "${info.id}"?`,
         // Show the topology facet only when the network actually names one;
