@@ -21,33 +21,20 @@ export interface ServiceBinding {
 }
 
 /**
- * canonicalizeServiceName bridges newtron's two name surfaces: the
- * services list/detail echo the *authored* name ("OVERLAY_IRB_A"), but
- * the topology step `spec_name` (and intent) use the *canonical* form
- * ("overlay-irb-a"): lowercase, underscores → hyphens. newtron exposes
- * no authored↔canonical mapping, so we normalize both sides here. If
- * newtron's rule ever diverges, matching degrades to "no bindings",
- * never wrong ones.
- */
-export function canonicalizeServiceName(name: string): string {
-  return name.toLowerCase().replace(/_/g, "-");
-}
-
-/**
  * deriveServiceBindings returns every interface this service is applied
  * to, read from the topology's per-device `steps`. `topology` is the raw
  * GET /topology payload ({ devices: { <name>: { steps: [...] } } }).
  *
  * Matches on newtron's server-derived `spec_kind`/`spec_name` (newtron
  * #282) — the authoritative provenance, rather than decoding the step
- * params ourselves. `spec_name` is canonical while `serviceName` (from
- * the list/detail) is authored, so both are canonicalized for the
- * compare. The interface comes from the step URL. Tolerant of
- * missing/odd shapes — returns [] rather than throwing.
+ * params ourselves. Since newtron #283, `spec_name` is the canonical
+ * spec identity, equal to the `/services` list key — so `serviceName`
+ * (the list name the drawer opened with) matches it exactly; no
+ * client-side canonicalization. The interface comes from the step URL.
+ * Tolerant of missing/odd shapes — returns [] rather than throwing.
  */
 export function deriveServiceBindings(topology: unknown, serviceName: string): ServiceBinding[] {
   const out: ServiceBinding[] = [];
-  const target = canonicalizeServiceName(serviceName);
 
   const devices = (topology && typeof topology === "object")
     ? (topology as { devices?: unknown }).devices
@@ -63,8 +50,7 @@ export function deriveServiceBindings(topology: unknown, serviceName: string): S
     for (const step of steps) {
       if (!step || typeof step !== "object") continue;
       const s = step as Record<string, unknown>;
-      if (s.spec_kind !== "service" || typeof s.spec_name !== "string"
-        || canonicalizeServiceName(s.spec_name) !== target) continue;
+      if (s.spec_kind !== "service" || s.spec_name !== serviceName) continue;
 
       // The interface comes from the step URL; a `service` step that
       // isn't an interface application (e.g. a node-level deploy-service)
