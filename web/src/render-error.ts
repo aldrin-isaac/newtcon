@@ -79,8 +79,36 @@ export function formatErrorBrief(err: unknown): string {
       const structured = formatAuthorizationDetails(err.details);
       if (structured) return `${kindLabel}: ${structured}`;
     }
-    return `${kindLabel}: ${err.message}`;
+    // Prefer newtron's specific reason (in details.underlying_error_message)
+    // over the generic envelope message ("<verb> <path>: <kind phrase>").
+    // This is what surfaces referential-integrity detail — the referrers on
+    // a 409 delete ("X has 2 references: …") and the missing ref on a 400
+    // create ("unresolved references: …") — instead of a bare "conflict" /
+    // "validation failed".
+    const underlying = extractUnderlyingMessage(err.details);
+    return `${kindLabel}: ${underlying ?? err.message}`;
   }
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * extractUnderlyingMessage pulls the operator-meaningful reason out of an
+ * error envelope's `details.underlying_error_message`. newtron records its
+ * raw response body there, usually wrapped as `{"error":"…"}` — this
+ * unwraps to the inner string. Returns null when absent/empty so callers
+ * fall back to the envelope message.
+ */
+export function extractUnderlyingMessage(details: Record<string, unknown>): string | null {
+  const raw = details?.["underlying_error_message"];
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: unknown };
+    if (parsed && typeof parsed.error === "string" && parsed.error.trim() !== "") {
+      return parsed.error.trim();
+    }
+  } catch { /* not JSON — surface the raw string */ }
+  return trimmed;
 }

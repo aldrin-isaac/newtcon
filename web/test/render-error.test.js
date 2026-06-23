@@ -101,6 +101,41 @@ describe("formatErrorBrief()", () => {
     assert.equal(formatErrorBrief(err), "not signed in: session expired");
   });
 
+  test("surfaces underlying_error_message (referential 409) over the generic envelope", () => {
+    // newtron #285 referenced-spec delete → 409 with the referrers in the
+    // underlying message (JSON-wrapped). We unwrap + show them.
+    const err = new ApiError(409, {
+      error: {
+        kind: "drift_refusal",
+        message: "DELETE /api/networks/n/ipvpns/IRB: conflict",
+        details: { underlying_error_message: '{"error":"IPVPNSpec \'IRB\' has 2 references: ServiceSpec \'OVERLAY_IRB_A\' (ipvpn), ServiceSpec \'OVERLAY_IRB_B\' (ipvpn)"}\n' },
+      },
+    });
+    assert.equal(formatErrorBrief(err),
+      "drift detected — refused to apply: IPVPNSpec 'IRB' has 2 references: ServiceSpec 'OVERLAY_IRB_A' (ipvpn), ServiceSpec 'OVERLAY_IRB_B' (ipvpn)");
+  });
+
+  test("surfaces underlying unresolved-references (forward 400) over the generic envelope", () => {
+    const err = new ApiError(400, {
+      error: {
+        kind: "validation_failure",
+        message: "POST /api/networks/n/services: validation failed",
+        details: { underlying_error_message: '{"error":"unresolved references: ipvpn references IPVPNSpec \'GHOST\' which does not exist"}\n' },
+      },
+    });
+    assert.equal(formatErrorBrief(err),
+      "validation failed: unresolved references: ipvpn references IPVPNSpec 'GHOST' which does not exist");
+  });
+
+  test("falls back to envelope message when no underlying (or non-JSON underlying surfaced raw)", () => {
+    // no underlying → envelope message (unchanged behavior)
+    const a = new ApiError(400, { error: { kind: "validation_failure", message: "spec name required", details: {} } });
+    assert.equal(formatErrorBrief(a), "validation failed: spec name required");
+    // non-JSON underlying → surfaced raw
+    const b = new ApiError(503, { error: { kind: "newtron_unavailable", message: "x", details: { underlying_error_message: "dial tcp: connection refused" } } });
+    assert.equal(formatErrorBrief(b), "newtron is unreachable: dial tcp: connection refused");
+  });
+
   test("plain Error returns its message", () => {
     assert.equal(formatErrorBrief(new Error("boom")), "boom");
   });
