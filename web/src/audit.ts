@@ -333,6 +333,19 @@ function renderEventDetail(host: HTMLElement, e: AuditEvent): void {
   // recorded before newtron #276 (no request_body / changes) this is the
   // meaningful detail; the operation is shown in full (untruncated).
   wrap.appendChild(el("p", { className: "audit-detail-operation" }, e.operation || "—"));
+
+  // Failure callout — for a failed event the *why* is the headline. Pin
+  // the error above the body/changes so the operator sees it first. The
+  // error string is whatever newtron recorded (today often just the HTTP
+  // status text — see the audit-error-detail gap); show it verbatim, with
+  // an honest fallback when none was captured.
+  if (e.success === false) {
+    const fail = el("div", { className: "audit-detail-failure" });
+    fail.appendChild(el("span", { className: "audit-detail-failure-label" }, "Failed"));
+    const msg = e.error && e.error.trim() !== "" ? e.error : "No error message recorded.";
+    fail.appendChild(el("p", { className: "audit-detail-failure-msg" }, msg));
+    wrap.appendChild(fail);
+  }
   const envDl = el("dl", { className: "audit-detail-body" });
   for (const [k, v] of [["User", e.user], ["Client IP", e.client_ip], ["Duration", e.duration]] as Array<[string, unknown]>) {
     if (v === undefined || v === null || v === "") continue;

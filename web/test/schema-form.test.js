@@ -48,6 +48,20 @@ function setupDOM() {
         return out;
       },
       querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; },
+      // closest walks up the parent chain (tag or .class match) — used by
+      // the scope_instance dependent dropdown to read its sibling `scope`.
+      closest(sel) {
+        const parts = sel.split(",").map((s) => s.trim());
+        const matches = (node) => parts.some((p) =>
+          p.startsWith(".")
+            ? (node.className || "").split(/\s+/).includes(p.slice(1))
+            : node.tagName === p.toUpperCase());
+        let node = this;
+        while (node) { if (matches(node)) return node; node = node.parent; }
+        return null;
+      },
+      // <select>.options — children that are <option>.
+      get options() { return this.children.filter((c) => c.tagName === "OPTION"); },
       appendChild(child) {
         this.children.push(child);
         child.parent = this;
@@ -506,5 +520,85 @@ describe("renderSchemaForm() — read_only fields (newtron #269)", () => {
     assert.equal(v.name, "IRB");
     assert.equal(v.l3vni, 5000);
     assert.equal("vrf_name" in v, false);
+  });
+});
+
+describe("renderSchemaForm() — scope controls (newtron #295)", () => {
+  beforeEach(() => { setupDOM(); });
+  afterEach(() => { delete globalThis.document; });
+
+  // Mirrors a scoped kind: scope/scope_instance are appended LAST by
+  // newtron, exactly as on the wire. The renderer hoists them to the top,
+  // defaults scope to "network", and renders scope_instance as a dependent
+  // dropdown gated by applies_when/required_when.
+  const SCOPED_SCHEMA = {
+    kind: "IPVPNSpec", label: "IP-VPN", description: "",
+    fields: [
+      { name: "name", label: "Name", type: "string", required: true, immutable: true },
+      { name: "l3vni", label: "L3VNI", type: "int", required: true },
+      { name: "scope", label: "Scope", type: "enum", required: false,
+        enum: ["network", "zone", "node"] },
+      { name: "scope_instance", label: "Scope Instance", type: "string", required: false,
+        applies_when: { field: "scope", not_equals: "network" },
+        required_when: { field: "scope", not_equals: "network" } },
+    ],
+  };
+
+  test("scope + scope_instance are hoisted to the front of the form", async () => {
+    const { form } = await renderSchemaForm({ schema: SCOPED_SCHEMA });
+    const order = findInputs(form).map((i) => i.name);
+    assert.deepEqual(order.slice(0, 2), ["scope", "scope_instance"],
+      "scope then scope_instance lead, ahead of name/l3vni");
+  });
+
+  test("scope defaults to network with no blank option", async () => {
+    const { form, getValues } = await renderSchemaForm({ schema: SCOPED_SCHEMA });
+    const scope = findInputs(form).find((i) => i.name === "scope");
+    assert.equal(scope.tagName, "SELECT");
+    assert.equal(scope.value, "network", "scope preselects network");
+    assert.deepEqual(scope.options.map((o) => o.value), ["network", "zone", "node"],
+      "no blank '' option on scope");
+    assert.equal(getValues().scope, "network", "network scope rides the create body");
+  });
+
+  test("scope_instance is a SELECT (dropdown), hidden at scope=network", async () => {
+    const { form } = await renderSchemaForm({ schema: SCOPED_SCHEMA });
+    const si = findInputs(form).find((i) => i.name === "scope_instance");
+    assert.equal(si.tagName, "SELECT", "scope_instance is a dropdown, not a text input");
+    const rows = findAllByClass(form, "schema-form-row");
+    const siRow = rows.find((r) => findInputs(r).some((i) => i.name === "scope_instance"));
+    assert.equal(siRow.hidden, true, "scope_instance hidden while scope=network");
+  });
+
+  test("flipping scope to zone reveals + requires scope_instance", async () => {
+    const { form } = await renderSchemaForm({ schema: SCOPED_SCHEMA });
+    const scope = findInputs(form).find((i) => i.name === "scope");
+    const rows = findAllByClass(form, "schema-form-row");
+    const siRow = rows.find((r) => findInputs(r).some((i) => i.name === "scope_instance"));
+    const si = findInputs(form).find((i) => i.name === "scope_instance");
+
+    scope.value = "zone";
+    for (const fn of (form.listeners.get("change") || [])) fn();
+    assert.equal(siRow.hidden, false, "scope_instance shows under zone scope");
+    assert.equal(si.required, true, "scope_instance required under zone scope");
+
+    scope.value = "network";
+    for (const fn of (form.listeners.get("change") || [])) fn();
+    assert.equal(siRow.hidden, true, "scope_instance hides again under network");
+    assert.equal(si.required, false, "scope_instance not required under network");
+  });
+
+  test("network create omits scope_instance from the body", async () => {
+    const { getValues } = await renderSchemaForm({ schema: SCOPED_SCHEMA });
+    const v = getValues();
+    assert.equal(v.scope, "network");
+    assert.equal("scope_instance" in v, false, "no scope_instance on a network-scoped create");
+  });
+
+  test("edit mode drops the scope controls entirely", async () => {
+    const { form } = await renderSchemaForm({ schema: SCOPED_SCHEMA, editMode: true });
+    const names = findInputs(form).map((i) => i.name);
+    assert.equal(names.includes("scope"), false, "no scope field in edit mode");
+    assert.equal(names.includes("scope_instance"), false, "no scope_instance field in edit mode");
   });
 });

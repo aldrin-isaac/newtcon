@@ -31,6 +31,7 @@ import {
 } from "./api/newtcon/schema.js";
 import { apiFetch } from "./api/newtcon/_transport.js";
 import { activeNetwork } from "./network-switcher.js";
+import { apiPath } from "./api-path.js";
 import {
   evaluateRequiredWhen,
   formatRequiredWhen,
@@ -126,14 +127,25 @@ export async function renderSchemaForm(
   const appliesTrackers: AppliesWhenTracker[] = [];
   const notApplicable = new Set<string>();
 
+  // Fields whose options depend on a sibling's value (today: the scope
+  // dependent dropdown — scope_instance's choices are the network's zones
+  // or nodes depending on `scope`). Re-run on every form change so the
+  // dropdown tracks the chosen scope. See buildScopeInstanceRow.
+  const siblingRefreshers: Array<() => void> = [];
+
   const readAllValues = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [name, read] of valueReaders) out[name] = read();
     return out;
   };
 
-  for (const field of opts.schema.fields) {
+  for (const field of orderScopeFirst(opts.schema.fields)) {
     if (skip.has(field.name)) continue;
+    // Scope is write-location metadata (newtron #295), not editable spec
+    // content: an existing spec's scope is fixed for an update (moving an
+    // override is a delete+create). So the scope controls render only on
+    // the create form, never in edit mode.
+    if (opts.editMode && SCOPE_FIELDS.has(field.name)) continue;
     const override = overrides[field.name] ?? {};
     if (override.hidden) continue;
 
@@ -149,6 +161,7 @@ export async function renderSchemaForm(
     const row = await buildFieldRow(field, prefill[field.name], override, !!opts.editMode);
     form.appendChild(row.row);
     valueReaders.set(field.name, row.read);
+    if (row.onSiblingChange) siblingRefreshers.push(row.onSiblingChange);
 
     // Conditional-applicability hookup (`applies_when`). Register a
     // tracker whenever the field declares the condition; the refresh
@@ -230,15 +243,21 @@ export async function renderSchemaForm(
     }
   };
 
+  const refreshSiblings = (): void => {
+    for (const r of siblingRefreshers) r();
+  };
+
   // Applicability first (it gates requiredness — a hidden field must not
-  // also carry a required mark), then required.
+  // also carry a required mark), then required, then sibling-dependent
+  // option lists (e.g. scope_instance follows scope).
   refreshApplicability();
   refreshConditionalRequired();
+  refreshSiblings();
 
   // Single listener at the form level — input bubbles from every
   // input/select inside, so we don't need per-input wiring.
-  if (trackers.length > 0 || appliesTrackers.length > 0) {
-    const onChange = (): void => { refreshApplicability(); refreshConditionalRequired(); };
+  if (trackers.length > 0 || appliesTrackers.length > 0 || siblingRefreshers.length > 0) {
+    const onChange = (): void => { refreshApplicability(); refreshConditionalRequired(); refreshSiblings(); };
     form.addEventListener("input", onChange);
     form.addEventListener("change", onChange);
   }
@@ -268,6 +287,28 @@ export async function renderSchemaForm(
 interface FieldRowResult {
   row: HTMLElement;
   read: () => unknown;
+  /** Set when this field's control depends on a sibling's value and must
+   *  be re-evaluated on form change (scope_instance follows scope). */
+  onSiblingChange?: () => void;
+}
+
+// The scope controls (newtron #295). `scope` selects where the spec lives
+// (network base vs a zone/node override); `scope_instance` names the zone
+// or node. They're a cross-cutting concept newtcon owns end-to-end (the
+// Specs list scope columns, /spec-instances), so the form renderer treats
+// them specially: pinned to the top, scope defaults to "network", and
+// scope_instance is a dependent dropdown rather than free text.
+const SCOPE_FIELDS: ReadonlySet<string> = new Set(["scope", "scope_instance"]);
+
+// orderScopeFirst returns the fields with scope + scope_instance hoisted to
+// the front (in that order), the rest following in their schema order.
+// newtron appends scope/scope_instance at the end of every scoped kind;
+// the operator decides *where* a spec lives before naming/shaping it.
+function orderScopeFirst(fields: SchemaField[]): SchemaField[] {
+  const scope = fields.filter((f) => f.name === "scope");
+  const inst = fields.filter((f) => f.name === "scope_instance");
+  const rest = fields.filter((f) => !SCOPE_FIELDS.has(f.name));
+  return [...scope, ...inst, ...rest];
 }
 
 // buildReadOnlyRow renders a derived/computed field (read_only, newtron
@@ -338,6 +379,22 @@ async function buildFieldRow(
     } catch { /* swallow — operator can fill it in */ }
   }
 
+  // scope defaults to the network base unless prefilled otherwise. Without
+  // this, scope renders blank and applies_when({scope != "network"}) on
+  // scope_instance reads "" ≠ "network" → true, wrongly revealing (and,
+  // via required_when, requiring) scope_instance on a normal create.
+  if (field.name === "scope" && defaultValue === "") defaultValue = "network";
+
+  // scope_instance is a dependent dropdown: its options are the network's
+  // zones (scope=zone) or nodes (scope=node). The schema can't express a
+  // ref whose target kind depends on a sibling field, so newtcon resolves
+  // it. (applies_when/required_when on the field still gate visibility +
+  // requiredness through the generic trackers — the row carries a <select>
+  // like any other control.)
+  if (field.name === "scope_instance") {
+    return buildScopeInstanceRow(field, row, String(defaultValue));
+  }
+
   // editMode + field.immutable → render as read-only. Newtron rejects
   // identifier changes (and any other immutable field) via the update
   // verb, so locking the input prevents the operator from submitting
@@ -401,7 +458,9 @@ async function buildFieldRow(
       select.name = field.name;
       select.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       if (field.required) select.required = true;
-      if (!field.required) {
+      // scope always carries a value (defaults to "network"), so it gets no
+      // blank "—" option — unlike other optional enums.
+      if (!field.required && field.name !== "scope") {
         const blank = document.createElement("option");
         blank.value = "";
         blank.textContent = "—";
@@ -516,6 +575,80 @@ async function buildFieldRow(
   }
 
   return { row, read };
+}
+
+// ─── scope_instance dependent dropdown ─────────────────────────────
+
+// buildScopeInstanceRow renders scope_instance as a <select> whose options
+// track the sibling `scope` field: the network's zones when scope=zone, its
+// nodes when scope=node (empty for network — the row is hidden then anyway
+// via applies_when). The label/help are already on `row`; this appends the
+// control and returns an onSiblingChange that repopulates on scope change.
+function buildScopeInstanceRow(
+  field: SchemaField,
+  row: HTMLElement,
+  defaultValue: string,
+): FieldRowResult {
+  const select = document.createElement("select");
+  select.name = field.name;
+  select.className = "schema-form-input";
+  row.appendChild(select);
+
+  let zones: string[] = [];
+  let nodes: string[] = [];
+  let loaded = false;
+
+  const populate = (): void => {
+    const scopeEl = select.closest("form")?.querySelector('[name="scope"]') as
+      HTMLSelectElement | null;
+    const scope = scopeEl?.value || "network";
+    const list = scope === "node" ? nodes : scope === "zone" ? zones : [];
+    const prev = select.value || defaultValue;
+    select.textContent = "";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = !loaded ? "loading…"
+      : list.length === 0 ? `(no ${scope}s defined)`
+        : "— select —";
+    select.appendChild(blank);
+    for (const name of list) {
+      const o = document.createElement("option");
+      o.value = name;
+      o.textContent = name;
+      select.appendChild(o);
+    }
+    if (prev && list.includes(prev)) select.value = prev;
+  };
+
+  populate();
+  void loadScopeChoices()
+    .then((c) => { zones = c.zones; nodes = c.nodes; loaded = true; populate(); })
+    .catch(() => { loaded = true; populate(); });
+
+  return { row, read: () => select.value, onSiblingChange: populate };
+}
+
+// loadScopeChoices fetches the active network's zones and nodes — the two
+// candidate sets for a scope override. Zones come from the zones list;
+// nodes are the topology's device keys (what newtron accepts as a
+// node-scoped scope_instance). Both are best-effort: a failure yields an
+// empty list and an honest "(no zones/nodes defined)" placeholder.
+async function loadScopeChoices(): Promise<{ zones: string[]; nodes: string[] }> {
+  const net = activeNetwork();
+  const [zoneRes, topoRes] = await Promise.allSettled([
+    apiFetch(apiPath.network(net, "zones"), { cache: "no-store" }),
+    apiFetch(apiPath.network(net, "topology"), { cache: "no-store" }),
+  ]);
+  const zones = zoneRes.status === "fulfilled"
+    && Array.isArray((zoneRes.value as { names?: unknown } | null)?.names)
+    ? (zoneRes.value as { names: string[] }).names
+    : [];
+  let nodes: string[] = [];
+  if (topoRes.status === "fulfilled") {
+    const devices = (topoRes.value as { devices?: unknown } | null)?.devices;
+    if (devices && typeof devices === "object") nodes = Object.keys(devices as object);
+  }
+  return { zones, nodes };
 }
 
 // ─── ref dropdown ──────────────────────────────────────────────────
