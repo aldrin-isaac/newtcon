@@ -778,6 +778,27 @@
   outline-offset: -2px;
 }
 
+/* Scoped spec lists (newtron P2 overrides): Name · Scope · Scope instance
+ * columns. The name column grows; scope/instance are fixed. */
+.panel-list-row--scoped { display: grid; grid-template-columns: 1fr 6rem 9rem auto; align-items: center; }
+.panel-list-head {
+  display: grid; grid-template-columns: 1fr 6rem 9rem auto; align-items: center;
+  padding: var(--space-2xs) var(--space-md);
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted); font-family: var(--font-system);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.panel-list-col { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-list-col--instance { font-family: var(--font-mono); color: var(--color-text-secondary); }
+.panel-scope-badge {
+  justify-self: start; font-family: var(--font-system); font-size: var(--text-2xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  padding: 1px var(--space-xs); border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken); color: var(--color-text-muted);
+}
+.panel-scope-badge--zone { background: var(--color-accent-bg); color: var(--color-accent); }
+.panel-scope-badge--node { background: var(--color-info-bg); color: var(--color-info); }
+
 /* Pedagogical empty state for spec facets (slice #169.A) — replaces
  * the old "none defined" italic line with a teaching block.  Centred
  * column so each line breathes; ~360px max-width keeps the prose

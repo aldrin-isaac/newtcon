@@ -113,6 +113,41 @@ func (c *Client) ListPlatforms(ctx context.Context, network string) ([]string, e
 	return c.listNames(ctx, network, "platforms")
 }
 
+// SpecInstances proxies GET /networks/{netID}/spec-instances (newtron #287):
+// the flat cross-scope inventory — [{kind, name, scope, scope_instance}, ...],
+// one entry per definition (a name appears once per scope it's defined at).
+// Returns the raw "data" payload for the frontend to render directly.
+func (c *Client) SpecInstances(ctx context.Context, network string) (json.RawMessage, error) {
+	url := fmt.Sprintf("%s/networks/%s/spec-instances", c.newtronBase(), network)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
+	}
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &UnavailableError{Cause: apiResp.Error}
+	}
+	return apiResp.Data, nil
+}
+
 // ============================================================================
 // Write helpers
 // ============================================================================

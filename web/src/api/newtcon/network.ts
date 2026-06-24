@@ -31,6 +31,26 @@ function pathFor(suffix: string, network?: string): string {
   return network ? apiPath.network(network, suffix) : apiPath(suffix);
 }
 
+/** One spec definition in the cross-scope inventory (newtron #287). A name
+ *  appears once per scope it's defined at (network base + each override). */
+export interface SpecInstance {
+  kind: string;            // newtron kind, e.g. "IPVPNSpec"
+  name: string;
+  scope: string;           // "network" | "zone" | "node"
+  scope_instance: string;  // zone or node/profile name; "" for network
+}
+
+/**
+ * fetchSpecInstances returns the flat cross-scope inventory
+ * (/api/networks/{netID}/spec-instances). One entry per definition, tagged
+ * with scope + scope_instance — the source for the Specs list's scope
+ * columns (overrides show as additional rows for the same name).
+ */
+export async function fetchSpecInstances(network?: string): Promise<SpecInstance[]> {
+  const body = await apiFetch(pathFor("spec-instances", network), { cache: "no-store" });
+  return Array.isArray(body) ? body as SpecInstance[] : [];
+}
+
 export async function fetchSpecDetail(kind: SpecKind, name: string, network?: string): Promise<unknown> {
   return apiFetch(pathFor(`${kind}/${encodeURIComponent(name)}`, network), { cache: "no-store" });
 }
