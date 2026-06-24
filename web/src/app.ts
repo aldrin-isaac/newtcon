@@ -5,6 +5,7 @@
 
 import {
   fetchSpecList,
+  fetchSpecInstances,
   fetchSpecDetail,
   addSubRule,
   updateSpec,
@@ -971,11 +972,52 @@ async function renderSchemaDrivenCreate(
   });
 }
 
+// One row in a spec panel: a spec definition at a given scope. The same
+// name appears once per scope it's defined at (network base + each
+// override) — that duplication is the override signal (newtron #285/#287).
+interface SpecRowData { name: string; scope: string; scope_instance: string; }
+
+// Kinds that support scope overrides (newtron P2). For these the panel
+// rows come from /spec-instances (real scope + scope_instance); the
+// container kinds (profiles/zones/platforms) aren't overridable and aren't
+// in that inventory, so they keep the network-only list.
+const SCOPED_KINDS: ReadonlySet<SpecKind> = new Set<SpecKind>([
+  "services", "ipvpns", "macvpns", "prefix-lists", "filters", "qos-policies", "route-policies",
+]);
+
+function scopeRank(scope: string): number {
+  return scope === "network" ? 0 : scope === "zone" ? 1 : scope === "node" ? 2 : 3;
+}
+
+// loadFacetRows returns the rows for a facet: scope-tagged from
+// /spec-instances for overridable kinds, network-only (from the plain
+// list) for the rest. Sorted by name, then network-before-overrides.
+async function loadFacetRows(kind: SpecKind): Promise<SpecRowData[]> {
+  if (SCOPED_KINDS.has(kind)) {
+    const [instances, newtronKind] = await Promise.all([
+      fetchSpecInstances(),
+      resolveSlugToKind(kind).catch(() => null),
+    ]);
+    if (newtronKind) {
+      return instances
+        .filter((i) => i.kind === newtronKind)
+        .map((i) => ({ name: i.name, scope: i.scope, scope_instance: i.scope_instance }))
+        .sort((a, b) =>
+          a.name.localeCompare(b.name)
+          || scopeRank(a.scope) - scopeRank(b.scope)
+          || a.scope_instance.localeCompare(b.scope_instance));
+    }
+    // newtronKind unresolved → fall through to the plain list.
+  }
+  const names = await fetchSpecList(kind);
+  return names.map((n) => ({ name: n, scope: "network", scope_instance: "" }));
+}
+
 // refreshPanel re-fetches the spec list for a panel and replaces its DOM node.
 function refreshPanel(panel: Panel, container: HTMLElement): void {
-  fetchSpecList(panel.kind)
-    .then((names) => {
-      const fresh = buildPanel(panel, { status: "fulfilled", value: names });
+  loadFacetRows(panel.kind)
+    .then((rows) => {
+      const fresh = buildPanel(panel, { status: "fulfilled", value: rows });
       container.replaceWith(fresh);
     })
     .catch((err) => {
@@ -986,10 +1028,11 @@ function refreshPanel(panel: Panel, container: HTMLElement): void {
 
 // buildPanel constructs the panel DOM for a spec type.
 // Separated from renderPanel so refreshPanel can rebuild after mutations.
-function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
+function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): HTMLElement {
   const container = el("section", { className: "panel" });
   const header = el("div", { className: "panel-header" });
   header.appendChild(el("h2", { className: "panel-title" }, panel.title));
+  const scoped = SCOPED_KINDS.has(panel.kind);
 
   if (result.status === "fulfilled") {
     const items = result.value;
@@ -1011,24 +1054,34 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
 
     container.appendChild(header);
 
-    // Combine server-side items with pending creates (overlay so the operator
-    // sees both committed and queued items in one list, with color).
+    // Combine server-side definitions with pending creates (overlay so the
+    // operator sees both committed and queued items in one list, with color).
+    // Queued creates are always network-scope (no scoped-create UI yet).
     const queuedAdds = pendingSpecCreates(panel.kind as StagingSpecKind);
-    type SpecRow = { name: string; pending: "none" | "create" };
-    const allRows: SpecRow[] = items.map((n) => ({ name: n, pending: "none" as const }));
+    type Row = SpecRowData & { pending: "none" | "create" };
+    const allRows: Row[] = items.map((i) => ({ ...i, pending: "none" as const }));
+    const haveNetwork = new Set(items.filter((i) => i.scope === "network").map((i) => i.name));
     for (const n of queuedAdds) {
-      if (!items.includes(n)) allRows.push({ name: n, pending: "create" });
+      if (!haveNetwork.has(n)) allRows.push({ name: n, scope: "network", scope_instance: "", pending: "create" });
     }
 
     if (allRows.length === 0) {
       container.appendChild(renderPanelEmpty(panel.kind, panel.canCreate));
     } else {
-      const list = el("ul", { className: "panel-list" });
+      const list = el("ul", { className: "panel-list" + (scoped ? " panel-list--scoped" : "") });
+      if (scoped) {
+        const head = el("li", { className: "panel-list-head" });
+        head.appendChild(el("span", { className: "panel-list-col panel-list-col--name" }, "Name"));
+        head.appendChild(el("span", { className: "panel-list-col panel-list-col--scope" }, "Scope"));
+        head.appendChild(el("span", { className: "panel-list-col panel-list-col--instance" }, "Scope instance"));
+        list.appendChild(head);
+      }
       for (const r of allRows) {
         const isPendingCreate = r.pending === "create";
-        const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
+        const isNetwork = r.scope === "network";
+        const isPendingDelete = isNetwork && isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
         const row = el("li", {
-          className: "panel-list-row"
+          className: "panel-list-row" + (scoped ? " panel-list-row--scoped" : "")
             + (isPendingCreate ? " panel-list-row--pending-add" : "")
             + (isPendingDelete ? " panel-list-row--pending-del" : ""),
         });
@@ -1042,8 +1095,18 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
         });
         row.appendChild(item);
 
-        // Delete affordance — × button shown on hover.
-        if (panel.canDelete && !isPendingCreate) {
+        if (scoped) {
+          row.appendChild(el("span", {
+            className: "panel-list-col panel-list-col--scope panel-scope-badge panel-scope-badge--" + r.scope,
+          }, r.scope));
+          row.appendChild(el("span", { className: "panel-list-col panel-list-col--instance" },
+            r.scope_instance || "—"));
+        }
+
+        // Delete affordance — × button shown on hover. Only on network-scope
+        // rows for now: deleting a scoped override needs scope on the wire
+        // (not yet wired); a network base × already maps to delete-<kind>.
+        if (panel.canDelete && !isPendingCreate && isNetwork) {
           const delBtn = el("button", {
             type: "button",
             className: "panel-delete-btn",
@@ -1082,7 +1145,7 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLE
   return container;
 }
 
-function renderPanel(panel: Panel, result: PromiseSettledResult<string[]>): HTMLElement {
+function renderPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): HTMLElement {
   return buildPanel(panel, result);
 }
 
@@ -5748,16 +5811,16 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
     main.textContent = "";
     main.appendChild(el("p", { className: "status-loading" }, "Loading…"));
     try {
-      const items = await fetchSpecList(panel.kind);
-      counts.set(panel.kind, items.length);
+      const rows = await loadFacetRows(panel.kind);
+      counts.set(panel.kind, rows.length);
       renderSubnav();
       main.textContent = "";
-      main.appendChild(renderPanel(panel, { status: "fulfilled", value: items } as PromiseSettledResult<string[]>));
+      main.appendChild(renderPanel(panel, { status: "fulfilled", value: rows } as PromiseSettledResult<SpecRowData[]>));
     } catch (err) {
       counts.set(panel.kind, "error");
       renderSubnav();
       main.textContent = "";
-      main.appendChild(renderPanel(panel, { status: "rejected", reason: err } as PromiseSettledResult<string[]>));
+      main.appendChild(renderPanel(panel, { status: "rejected", reason: err } as PromiseSettledResult<SpecRowData[]>));
     }
   }
 

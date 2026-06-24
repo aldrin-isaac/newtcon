@@ -72,6 +72,22 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 	register("zones", c.ListZones)
 	register("platforms", c.ListPlatforms)
 
+	// Cross-scope spec inventory (newtron #287): the flat list of every spec
+	// definition tagged with scope + scope_instance — backs the Specs list's
+	// scope columns. Raw payload forwarded ([{kind,name,scope,scope_instance}]).
+	mux.Handle("GET /api/networks/{netID}/spec-instances", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		payload, err := c.SpecInstances(ctx, netID)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err, "/api/networks/"+netID+"/spec-instances", nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+
 	// Per-spec detail endpoints. URL pattern: /api/networks/{netID}/{kind}/{name}.
 	// {kind} is the same plural form used in the list endpoints; {name} is the
 	// spec instance name. Returns the full newtron payload verbatim.
