@@ -108,6 +108,13 @@ type fileServerWithJSONNotFound struct {
 }
 
 func (h *fileServerWithJSONNotFound) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The frontend bundle is not content-hashed (ADR-0002: tsc → flat ESM),
+	// so a long-lived operator tab could serve a stale app.js after a rebuild
+	// and silently run old behavior. "no-cache" makes the browser revalidate
+	// every load; http.FileServer answers conditional GETs with a cheap 304
+	// when the file is unchanged, or fresh 200 bytes when it changed. (This is
+	// "revalidate", not "don't store" — far cheaper than no-store.)
+	w.Header().Set("Cache-Control", "no-cache")
 	sw := &staticNotFoundWriter{ResponseWriter: w, path: r.URL.Path}
 	h.fs.ServeHTTP(sw, r)
 
