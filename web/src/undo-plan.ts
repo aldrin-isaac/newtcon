@@ -97,11 +97,11 @@ function inverseFor(item: HistoryItem, id: string): Pending | null {
     if (!specKind) return null;
     if (item.effect === "create") {
       // Created → inverse is delete by name (operator's title is the name).
-      return { id, group: "spec", kind: specKind, op: "delete", name: item.title };
+      return { id, group: "mutation", method: "DELETE", path: `${specKind}/${encodeURIComponent(item.title)}`, effect: "delete", kind: specKind, name: item.title, title: item.title };
     }
     if (item.effect === "delete") {
       if (!item.preBody) return null;
-      return { id, group: "spec", kind: specKind, op: "create", name: item.title, body: item.preBody };
+      return { id, group: "mutation", method: "POST", path: specKind, effect: "create", kind: specKind, name: item.title, title: item.title, body: item.preBody };
     }
   }
   if (item.kind === "device") {

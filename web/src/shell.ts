@@ -300,6 +300,17 @@ function escapeHtml(s: string): string {
 
 // ---- Pending-bar (workspace-level staging) -------------------------------
 
+// pendingItemClass colors a queue row: flat mutations by their effect
+// (create/update/delete); topology/device entries by their op as before.
+function pendingItemClass(p: Pending): string {
+  if (p.group === "mutation") {
+    return p.effect === "create" ? "pending-bar-item--add"
+      : p.effect === "delete" ? "pending-bar-item--del"
+        : "pending-bar-item--mod";
+  }
+  return p.op.startsWith("add") ? "pending-bar-item--add" : "pending-bar-item--del";
+}
+
 function setupPendingBar(): void {
   const bar = document.getElementById("pending-bar");
   const list = document.getElementById("pending-bar-list");
@@ -320,10 +331,7 @@ function setupPendingBar(): void {
     list.textContent = "";
     for (const p of getQueue()) {
       const row = document.createElement("div");
-      row.className = "pending-bar-item " +
-        (p.op === "update" ? "pending-bar-item--mod"
-          : p.op.startsWith("add") || p.op === "create" ? "pending-bar-item--add"
-            : "pending-bar-item--del");
+      row.className = "pending-bar-item " + pendingItemClass(p);
       const label = document.createElement("span");
       label.className = "pending-bar-item-label";
       label.textContent = describePending(p);
@@ -436,12 +444,12 @@ function setupPendingBar(): void {
 async function capturePreApplyBodies(queue: readonly Pending[]): Promise<Map<string, Record<string, unknown>>> {
   const out = new Map<string, Record<string, unknown>>();
   // Spec-delete bodies.
-  const specTargets = queue.filter((p) => p.group === "spec" && p.op === "delete");
+  const specTargets = queue.filter((p) => p.group === "mutation" && !p.sub && p.effect === "delete");
   const topologyTargets = queue.filter((p) =>
     p.group === "topology" && (p.op === "remove-device" || p.op === "remove-link"));
   await Promise.all([
     ...specTargets.map(async (p) => {
-      if (p.group !== "spec" || p.op !== "delete") return;
+      if (p.group !== "mutation" || p.sub || p.effect !== "delete") return;
       try {
         const detail = await fetchSpecDetail(p.kind, p.name);
         if (detail && typeof detail === "object" && !Array.isArray(detail)) {

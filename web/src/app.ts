@@ -7,14 +7,6 @@ import {
   fetchSpecList,
   fetchSpecInstances,
   fetchSpecDetail,
-  addSubRule,
-  removeQoSQueue,
-  removeFilterRule,
-  removePrefixListEntry,
-  removeRoutePolicyRule,
-  updateQoSQueue,
-  updateFilterRule,
-  updateRoutePolicyRule,
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
@@ -93,6 +85,8 @@ import {
   extractRowCells,
   getSubRuleItems,
   itemKey,
+  overlaySubRuleItems,
+  type SubDisplayRow,
 } from "./subrule-table.js";
 import {
   type DeviceMetadata,
@@ -138,9 +132,14 @@ import {
   enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
   enqueueSpecUpdate,
+  enqueueSubCreate,
+  enqueueSubUpdate,
+  enqueueSubDelete,
   pendingSpecCreateItems,
+  pendingSubMutations,
   isSpecPendingDelete,
   isSpecPendingUpdate,
+  removeFromQueue,
   pendingTopologyDeviceAdds,
   isDevicePendingRemove,
   pendingTopologyLinkAdds,
@@ -1474,22 +1473,25 @@ function renderSubRuleTable(
   thead.appendChild(headRow);
   table.appendChild(thead);
 
+  // Overlay queued sub-rule ops on the committed rows so staged adds (green),
+  // edits (amber), and removes (struck) show before Apply.
+  const pendingOps = pendingSubMutations(kind as StagingSpecKind, specName, conf.endpoint);
+  const rows = overlaySubRuleItems(items, pendingOps, conf.itemType, conf.keyField);
+
   const tbody = el("tbody");
-  if (items.length === 0) {
+  if (rows.length === 0) {
     const emptyRow = el("tr", { className: "subrule-row-empty" });
     const cell = el("td", { className: "subrule-td subrule-td--empty" }, "(none)") as HTMLTableCellElement;
     cell.colSpan = conf.columns.length + 1;
     emptyRow.appendChild(cell);
     tbody.appendChild(emptyRow);
   } else {
-    // For reorderable kinds (slice #173.C), compute the sorted seq list
-    // once and pass to each row so its ↑/↓ buttons know what value to
-    // request as new_seq.
+    // Reorder targets the committed rows only, so compute seqs from `items`.
     const sortedSeqs = conf.reorderable && conf.keyField
       ? collectSortedSeqs(items, conf.keyField)
       : null;
-    for (const item of items) {
-      tbody.appendChild(renderSubRuleRow(kind, specName, item, conf, sortedSeqs));
+    for (const dr of rows) {
+      tbody.appendChild(renderSubRuleRow(kind, specName, dr, conf, sortedSeqs));
     }
   }
   table.appendChild(tbody);
@@ -1504,11 +1506,14 @@ function renderSubRuleTable(
 function renderSubRuleRow(
   kind: SpecKind,
   specName: string,
-  item: unknown,
+  dr: SubDisplayRow,
   conf: SubRuleTable,
   sortedSeqs: readonly number[] | null,
 ): HTMLElement {
-  const row = el("tr", { className: "subrule-row" });
+  const item = dr.item;
+  const row = el("tr", {
+    className: "subrule-row" + (dr.pending !== "none" ? ` subrule-row--pending-${dr.pending}` : ""),
+  });
   const cells = extractRowCells(item, conf.columns, conf.itemType);
   for (const v of cells) {
     const td = el("td", { className: "subrule-td" });
@@ -1520,6 +1525,28 @@ function renderSubRuleRow(
     row.appendChild(td);
   }
   const actionsCell = el("td", { className: "subrule-td subrule-td--actions" });
+
+  // Pending rows (staged add/edit/remove) carry no edit/delete/reorder — just
+  // an undo that drops the queued op. The committed row stands until Apply.
+  if (dr.pending !== "none") {
+    const undoBtn = el("button", {
+      type: "button",
+      className: "subrule-undo-btn",
+      title: dr.pending === "add" ? "Drop this queued addition"
+        : dr.pending === "remove" ? "Keep this — undo the queued removal"
+          : "Undo this queued edit",
+    }, "↺");
+    if (dr.opId) {
+      undoBtn.addEventListener("click", () => {
+        removeFromQueue(dr.opId!);
+        openDetail(kind, kindTitleFor(kind), specName);
+      });
+    }
+    actionsCell.appendChild(undoBtn);
+    row.appendChild(actionsCell);
+    return row;
+  }
+
   const key = itemKey(item, conf.itemType, conf.keyField);
   if (key !== null) {
     // Reorder buttons (slice #173.C) — only for reorderable kinds with
@@ -1552,25 +1579,11 @@ function renderSubRuleRow(
       className: "subrule-delete-btn",
       title: `Remove ${conf.itemLabel} ${key}`,
     }, "×");
-    delBtn.addEventListener("click", async () => {
-      const ok = await confirmInline({
-        title: `Remove ${conf.itemLabel} ${key}?`,
-        body: `From ${specName}.`,
-        danger: true,
-        confirmLabel: "Remove",
-      });
-      if (!ok) return;
-      delBtn.disabled = true;
-      try {
-        await deleteSubRuleItem(kind, specName, key);
-        openDetail(kind, kindTitleFor(kind), specName);
-      } catch (err) {
-        delBtn.disabled = false;
-        const msg = err instanceof ApiError
-          ? translateErrorKind(err.kind) + ": " + err.message
-          : String(err);
-        showToast({ kind: "error", title: "Remove failed", body: msg });
-      }
+    delBtn.addEventListener("click", () => {
+      // Queue the removal; the row re-renders struck-through (pending) and is
+      // confirmed at Apply, like every other staged change.
+      enqueueSubDelete(kind as StagingSpecKind, specName, conf.endpoint, key, String(key));
+      openDetail(kind, kindTitleFor(kind), specName);
     });
     actionsCell.appendChild(delBtn);
   }
@@ -1633,19 +1646,8 @@ function renderSubRuleEdit(
       return;
     }
     const body = composeUpdateBody(values, conf.itemType, conf.keyField, originalKey);
-    try {
-      await updateSubRuleItem(kind, specName, originalKey, body, conf);
-      openDetail(kind, kindTitleFor(kind), specName);
-    } catch (err) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Save";
-      if (!attachServerValidationToForm(form, err)) {
-        errOut.appendChild(el("p", { className: "panel-error" },
-          err instanceof ApiError
-            ? translateErrorKind(err.kind) + ": " + err.message
-            : String(err)));
-      }
-    }
+    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, originalKey, body, String(originalKey));
+    openDetail(kind, kindTitleFor(kind), specName);
   });
   return editRow;
 }
@@ -1743,26 +1745,24 @@ async function mountSchemaSubRuleAddForm(
     errOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Saving…";
-    try {
-      const values = getValues();
-      if (schema.parent_ref) {
-        // Inject the parent's name into the body using newtron's
-        // declared wire field. No newtcon-side semantic mapping.
-        values[schema.parent_ref] = specName;
-      }
-      await addSubRule(kind, specName, conf.endpoint, values);
-      openDetail(kind, kindTitleFor(kind), specName);
-    } catch (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Add " + conf.itemLabel;
-      if (!attachServerValidationToForm(form, err)) {
-        errOut.appendChild(el("p", { className: "panel-error" },
-          err instanceof ApiError
-            ? translateErrorKind(err.kind) + ": " + err.message
-            : String(err)));
-      }
+    const values = getValues();
+    if (schema.parent_ref) {
+      // Inject the parent's name into the body using newtron's declared wire
+      // field. No newtcon-side semantic mapping.
+      values[schema.parent_ref] = specName;
     }
+    // Queue the add (same staging thread as everything else); re-render so the
+    // table shows it as a green pending row.
+    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, values, subTitle(values, conf));
+    openDetail(kind, kindTitleFor(kind), specName);
   });
+}
+
+// subTitle — a short label for a queued sub-rule op (the key value when there
+// is one, else the item label). Used in the pending bar + apply-preview.
+function subTitle(body: Record<string, unknown>, conf: SubRuleTable): string {
+  if (conf.keyField && body[conf.keyField] != null) return String(body[conf.keyField]);
+  return conf.itemLabel;
 }
 
 /**
@@ -1805,56 +1805,16 @@ function mountLegacySubRuleAddForm(
     errOut.textContent = "";
     submitBtn.disabled = true;
     submitBtn.textContent = "Saving…";
-    try {
-      const values = getValues();
-      const bodyWithParent = injectParentName(kind, specName, values);
-      await addSubRule(kind, specName, conf.endpoint, bodyWithParent);
-      openDetail(kind, kindTitleFor(kind), specName);
-    } catch (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Add " + conf.itemLabel;
-      if (!attachServerValidationToForm(form, err)) {
-        errOut.appendChild(el("p", { className: "panel-error" },
-          err instanceof ApiError
-            ? translateErrorKind(err.kind) + ": " + err.message
-            : String(err)));
-      }
-    }
+    const values = getValues();
+    const bodyWithParent = injectParentName(kind, specName, values);
+    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, bodyWithParent, subTitle(bodyWithParent, conf));
+    openDetail(kind, kindTitleFor(kind), specName);
   });
 }
 
-// deleteSubRuleItem dispatches to the per-kind delete function.
-function deleteSubRuleItem(kind: SpecKind, specName: string, key: string | number): Promise<unknown> {
-  switch (kind) {
-    case "qos-policies":   return removeQoSQueue(specName, Number(key));
-    case "filters":        return removeFilterRule(specName, Number(key));
-    case "prefix-lists":   return removePrefixListEntry(specName, String(key));
-    case "route-policies": return removeRoutePolicyRule(specName, Number(key));
-    default: return Promise.reject(new Error("no delete for " + kind));
-  }
-}
-
-// updateSubRuleItem dispatches to the per-kind update function (slice
-// #173.B). The URL path already identifies the row by its existing
-// keyField; body carries the new field values plus optionally a
-// renumber field (new_seq / new_queue_id).
-//
-// Prefix-list entries have no editable field beyond the key, so newtron
-// #239 removed `update-prefix-list-entry`. They never reach this
-// dispatcher — the per-row Edit button is suppressed for itemType
-// "string" in renderSubRuleRow.
-function updateSubRuleItem(
-  kind: SpecKind, specName: string,
-  key: string | number, body: Record<string, unknown>,
-  _conf: SubRuleTable,
-): Promise<unknown> {
-  switch (kind) {
-    case "qos-policies":   return updateQoSQueue(specName, Number(key), body);
-    case "filters":        return updateFilterRule(specName, Number(key), body);
-    case "route-policies": return updateRoutePolicyRule(specName, Number(key), body);
-    default: return Promise.reject(new Error("no update for " + kind));
-  }
-}
+// Sub-rule add/update/remove now queue as flat mutations (enqueueSub*); the
+// apply layer replays them as POST/PUT/DELETE on {kind}/{spec}/{endpoint}[/key],
+// so the per-kind client dispatchers are gone.
 
 // composeUpdateBody is imported from ./subrule-table.js — pure helper
 // so it can be unit-tested independently of the DOM-bound renderer.
@@ -1901,23 +1861,13 @@ function makeReorderBtn(
     return btn;
   }
   btn.title = `Move ${direction} (new seq ${target})`;
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    try {
-      // The keyField is the rename target; the URL identifies the row
-      // by currentSeq. composeUpdateBody handles the new_<keyField>
-      // translation: we feed it values where keyField=target so it
-      // detects the change.
-      const body = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
-      await updateSubRuleItem(kind, specName, currentSeq, body, conf);
-      openDetail(kind, kindTitleFor(kind), specName);
-    } catch (err) {
-      btn.disabled = false;
-      const msg = err instanceof ApiError
-        ? translateErrorKind(err.kind) + ": " + err.message
-        : String(err);
-      showToast({ kind: "error", title: "Reorder failed", body: msg });
-    }
+  btn.addEventListener("click", () => {
+    // The keyField is the rename target; the URL identifies the row by
+    // currentSeq. composeUpdateBody handles the new_<keyField> translation.
+    // Queue it like any edit — re-render marks the row pending (amber).
+    const body = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
+    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, currentSeq, body, String(currentSeq));
+    openDetail(kind, kindTitleFor(kind), specName);
   });
   return btn;
 }

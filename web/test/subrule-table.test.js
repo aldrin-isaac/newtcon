@@ -10,7 +10,44 @@ import {
   extractRowCells,
   getSubRuleItems,
   itemKey,
+  overlaySubRuleItems,
 } from "../dist/subrule-table.js";
+
+describe("overlaySubRuleItems() — pending overlay", () => {
+  const items = [{ seq: 10, action: "permit" }, { seq: 20, action: "deny" }];
+
+  test("no pending ops → all rows pending:none", () => {
+    const rows = overlaySubRuleItems(items, [], "object", "seq");
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((r) => r.pending === "none"));
+  });
+
+  test("pending add → appended green row carrying the body", () => {
+    const rows = overlaySubRuleItems(items, [{ id: "a1", effect: "create", body: { seq: 30, action: "permit" } }], "object", "seq");
+    assert.equal(rows.length, 3);
+    assert.equal(rows[2].pending, "add");
+    assert.equal(rows[2].opId, "a1");
+    assert.deepEqual(rows[2].item, { seq: 30, action: "permit" });
+  });
+
+  test("pending remove → matching row marked remove", () => {
+    const rows = overlaySubRuleItems(items, [{ id: "d1", effect: "delete", key: 20 }], "object", "seq");
+    assert.equal(rows[1].pending, "remove");
+    assert.equal(rows[1].opId, "d1");
+  });
+
+  test("pending update → matching row merged + marked update", () => {
+    const rows = overlaySubRuleItems(items, [{ id: "u1", effect: "update", key: 10, body: { action: "deny" } }], "object", "seq");
+    assert.equal(rows[0].pending, "update");
+    assert.equal(rows[0].item.action, "deny", "body merged over committed");
+    assert.equal(rows[0].item.seq, 10, "untouched fields preserved");
+  });
+
+  test("string items (prefix entries) overlay by value", () => {
+    const rows = overlaySubRuleItems(["10.0.0.0/8"], [{ id: "d1", effect: "delete", key: "10.0.0.0/8" }], "string");
+    assert.equal(rows[0].pending, "remove");
+  });
+});
 
 const QOS_COLUMNS = [
   { field: "queue_id", label: "ID" },

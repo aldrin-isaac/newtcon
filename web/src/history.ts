@@ -127,10 +127,10 @@ function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
     for (const item of plan.items) {
       if (!item.planned || !item.inverse) continue;
       const inv = item.inverse;
-      if (inv.group === "spec" && inv.op === "create") {
-        enqueueSpecCreate(inv.kind, inv.name, inv.body);
+      if (inv.group === "mutation" && !inv.sub && inv.effect === "create") {
+        enqueueSpecCreate(inv.kind, inv.name, inv.body ?? {});
         queuedNames.push(`+ ${inv.kind} ${inv.name}`);
-      } else if (inv.group === "spec" && inv.op === "delete") {
+      } else if (inv.group === "mutation" && !inv.sub && inv.effect === "delete") {
         enqueueSpecDelete(inv.kind, inv.name);
         queuedNames.push(`− ${inv.kind} ${inv.name}`);
       } else if (inv.group === "topology" && inv.op === "add-device") {
