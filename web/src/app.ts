@@ -1068,20 +1068,22 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
     if (allRows.length === 0) {
       container.appendChild(renderPanelEmpty(panel.kind, panel.canCreate));
     } else {
-      const list = el("ul", { className: "panel-list" + (scoped ? " panel-list--scoped" : "") });
-      if (scoped) {
-        const head = el("li", { className: "panel-list-head" });
-        head.appendChild(el("span", { className: "panel-list-col panel-list-col--name" }, "Name"));
-        head.appendChild(el("span", { className: "panel-list-col panel-list-col--scope" }, "Scope"));
-        head.appendChild(el("span", { className: "panel-list-col panel-list-col--instance" }, "Scope instance"));
-        list.appendChild(head);
-      }
-      for (const r of allRows) {
+      const list = el("ul", {
+        className: "panel-list" + (scoped ? " panel-list--scoped panel-list--nested" : ""),
+      });
+
+      // buildNameRow renders a clickable name row. Used for unscoped rows and
+      // for the network-base parent row of a scoped kind. `deleteDisabled`,
+      // when set, renders the × disabled with that tooltip — the delete-floor
+      // made visible: a base with overrides can't be deleted until they go.
+      const buildNameRow = (
+        r: Row,
+        opts: { overrideCount?: number; deleteDisabled?: string } = {},
+      ): HTMLElement => {
         const isPendingCreate = r.pending === "create";
-        const isNetwork = r.scope === "network";
-        const isPendingDelete = isNetwork && isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
+        const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
         const row = el("li", {
-          className: "panel-list-row" + (scoped ? " panel-list-row--scoped" : "")
+          className: "panel-list-row"
             + (isPendingCreate ? " panel-list-row--pending-add" : "")
             + (isPendingDelete ? " panel-list-row--pending-del" : ""),
         });
@@ -1095,33 +1097,91 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
         });
         row.appendChild(item);
 
-        if (scoped) {
-          row.appendChild(el("span", {
-            className: "panel-list-col panel-list-col--scope panel-scope-badge panel-scope-badge--" + r.scope,
-          }, r.scope));
-          row.appendChild(el("span", { className: "panel-list-col panel-list-col--instance" },
-            r.scope_instance || "—"));
+        // Override count hint on the parent — signals there's more nested below.
+        if (opts.overrideCount && opts.overrideCount > 0) {
+          row.appendChild(el("span", { className: "panel-override-count" },
+            `${opts.overrideCount} override${opts.overrideCount === 1 ? "" : "s"}`));
         }
 
-        // Delete affordance — × button shown on hover. Only on network-scope
-        // rows for now: deleting a scoped override needs scope on the wire
-        // (not yet wired); a network base × already maps to delete-<kind>.
-        if (panel.canDelete && !isPendingCreate && isNetwork) {
+        // Delete affordance — × on hover. A network base with overrides shows
+        // the × disabled (the floor: delete-<kind> would 409 until the
+        // overrides are removed); otherwise it maps to delete-<kind>.
+        if (panel.canDelete && !isPendingCreate) {
+          const disabled = opts.deleteDisabled !== undefined;
           const delBtn = el("button", {
             type: "button",
             className: "panel-delete-btn",
-            title: isPendingDelete ? "Cancel delete" : "Delete " + r.name,
-            ariaLabel: isPendingDelete ? "Cancel delete of " + r.name : "Delete " + r.name,
+            title: disabled ? opts.deleteDisabled!
+              : (isPendingDelete ? "Cancel delete" : "Delete " + r.name),
+            ariaLabel: disabled ? opts.deleteDisabled!
+              : (isPendingDelete ? "Cancel delete of " + r.name : "Delete " + r.name),
           }, isPendingDelete ? "↺" : "×");
-          delBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
-            refreshPanel(panel, container);
-          });
+          if (disabled) {
+            delBtn.disabled = true;
+          } else {
+            delBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
+              refreshPanel(panel, container);
+            });
+          }
           row.appendChild(delBtn);
         }
+        return row;
+      };
 
-        list.appendChild(row);
+      // buildOverrideRow renders a zone/node override as an indented sub-line
+      // (scope · instance) beneath its network base. No × yet — scoped delete
+      // needs scope on the wire (not built); clicking opens detail (the base,
+      // until per-scope override detail lands).
+      const buildOverrideRow = (r: Row): HTMLElement => {
+        const row = el("li", { className: "panel-list-row panel-list-row--override" });
+        row.appendChild(el("span", { className: "panel-override-marker", ariaHidden: "true" }, "↳"));
+        row.appendChild(el("span", {
+          className: "panel-scope-badge panel-scope-badge--" + r.scope,
+        }, r.scope));
+        const item = el("span", { className: "panel-list-item panel-list-item--override", tabIndex: 0 },
+          r.scope_instance || "—");
+        item.addEventListener("click", () => openDetail(panel.kind, panel.title, r.name));
+        item.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openDetail(panel.kind, panel.title, r.name);
+          }
+        });
+        row.appendChild(item);
+        return row;
+      };
+
+      if (!scoped) {
+        for (const r of allRows) list.appendChild(buildNameRow(r));
+      } else {
+        // Group by name: the network base is the parent record; zone/node
+        // overrides nest beneath it as dependents (mirrors the floor: an
+        // override requires its base; deleting/pausing the base reckons with
+        // the children). allRows arrives name-sorted then scope-ranked.
+        const order: string[] = [];
+        const byName = new Map<string, { base?: Row; overrides: Row[] }>();
+        for (const r of allRows) {
+          let g = byName.get(r.name);
+          if (!g) { g = { overrides: [] }; byName.set(r.name, g); order.push(r.name); }
+          if (r.scope === "network") g.base = r; else g.overrides.push(r);
+        }
+        for (const name of order) {
+          const g = byName.get(name)!;
+          // Floor invariant guarantees a base; synthesize a label row if a
+          // stray override ever arrives without one rather than dropping it.
+          const base: Row = g.base ?? { name, scope: "network", scope_instance: "", pending: "none" };
+          const baseOpts: { overrideCount?: number; deleteDisabled?: string } = {
+            overrideCount: g.overrides.length,
+          };
+          if (g.overrides.length > 0) {
+            baseOpts.deleteDisabled =
+              `Remove ${g.overrides.length} override${g.overrides.length === 1 ? "" : "s"} first`;
+          }
+          list.appendChild(buildNameRow(base, baseOpts));
+          for (const ov of g.overrides) list.appendChild(buildOverrideRow(ov));
+        }
       }
       container.appendChild(list);
     }
