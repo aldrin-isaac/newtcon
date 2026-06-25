@@ -815,6 +815,53 @@ function openCreateDrawer(kind: SpecKind, kindTitle: string, onSuccess: () => vo
   })();
 }
 
+// openOverrideDrawer — "Add override" from a network-level record. Opens the
+// create drawer prefilled with the base spec's current values, so the operator
+// changes only the scope (and any field that should legitimately differ at the
+// zone/node) instead of re-keying the whole spec from a second window. The
+// identifier is locked to the base name; scope is seeded to "zone" so the form
+// lands on the override path (must pick a scope_instance) rather than the base.
+function openOverrideDrawer(
+  kind: SpecKind,
+  kindTitle: string,
+  baseName: string,
+  onSuccess: () => void,
+): void {
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+  content.appendChild(el("p", { className: "drawer-kind" }, kindTitle + " override"));
+  content.appendChild(el("h2", { className: "drawer-name" }, baseName));
+
+  void (async () => {
+    const schemaKind = await resolveSlugToKind(kind).catch(() => null);
+    if (schemaKind === null) {
+      content.appendChild(el("p", { className: "panel-error" },
+        "Overrides aren't available for this spec type."));
+      return;
+    }
+    // Pull the network base so the override starts as a faithful copy.
+    const loading = el("p", { className: "status-loading" }, "Loading base values…");
+    content.appendChild(loading);
+    let baseDetail: Record<string, unknown> = {};
+    try {
+      const d = await fetchSpecDetail(kind, baseName);
+      if (d && typeof d === "object") baseDetail = d as Record<string, unknown>;
+    } catch { /* fall through — operator can fill it in */ }
+    loading.remove();
+    // Seed scope=zone (+ empty instance) so the form opens on the override
+    // path; the operator can switch to node. scope/scope_instance aren't part
+    // of the spec detail, so we set them explicitly.
+    const prefill: Record<string, unknown> = { ...baseDetail, scope: "zone", scope_instance: "" };
+    await renderSchemaDrivenCreate(kind, schemaKind, content, onSuccess,
+      { prefill, lockIdentifier: true });
+  })();
+}
+
 // legacyCreateForm — fallback path for kinds newtron's schema endpoint
 // doesn't yet describe (e.g. prefix-lists today). Lifted out of
 // openCreateDrawer so the dynamic-dispatch flow can call it without
@@ -888,6 +935,7 @@ async function renderSchemaDrivenCreate(
   schemaKind: string,
   content: HTMLElement,
   onSuccess: () => void,
+  opts: { prefill?: Record<string, unknown>; lockIdentifier?: boolean } = {},
 ): Promise<void> {
   // Loading placeholder while the schema fetch is in flight — the
   // first open per session waits one HTTP round-trip; subsequent
@@ -910,22 +958,29 @@ async function renderSchemaDrivenCreate(
   // strategiesFor()/computePrefillForKind() machinery as the legacy
   // path so we share one bug surface.
   const overrides: Record<string, import("./schema-form.js").SchemaFieldOverride> = {};
-  if (strategiesFor(kind)) {
+  // Smart next-available defaults only apply to a blank create — when the
+  // override flow supplies a prefill, the base's values win, so skip them.
+  if (strategiesFor(kind) && !opts.prefill) {
     const defaults = await computePrefillForKind(kind);
     for (const [name, value] of Object.entries(defaults)) {
       const v: string | number = typeof value === "number" ? value : String(value);
       overrides[name] = { smartDefault: () => v };
     }
   }
+  // Override flow: lock the identifier to the base spec's name (prefilled),
+  // so the operator can't accidentally retarget the override to another spec.
+  if (opts.lockIdentifier) {
+    const idField = schema.identifier || "name";
+    overrides[idField] = { ...(overrides[idField] ?? {}), readOnly: true };
+  }
 
   // Newtron prepends the identifier field (e.g. `name`) to `fields` as
   // a synthetic field with `immutable: true`. The schema-form renderer
   // emits an input for it like any other field, so we render the form
   // directly with no manual identifier injection.
-  const { form, getValues, validate } = await renderSchemaForm({
-    schema,
-    overrides,
-  });
+  const formOpts: import("./schema-form.js").SchemaFormOpts = { schema, overrides };
+  if (opts.prefill) formOpts.prefill = opts.prefill;
+  const { form, getValues, validate } = await renderSchemaForm(formOpts);
   content.appendChild(form);
 
   const errorOut = el("div", { className: "form-error-out" });
@@ -1078,7 +1133,7 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
       // made visible: a base with overrides can't be deleted until they go.
       const buildNameRow = (
         r: Row,
-        opts: { overrideCount?: number; deleteDisabled?: string } = {},
+        opts: { overrideCount?: number; deleteDisabled?: string; onAddOverride?: () => void } = {},
       ): HTMLElement => {
         const isPendingCreate = r.pending === "create";
         const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
@@ -1101,6 +1156,22 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
         if (opts.overrideCount && opts.overrideCount > 0) {
           row.appendChild(el("span", { className: "panel-override-count" },
             `${opts.overrideCount} override${opts.overrideCount === 1 ? "" : "s"}`));
+        }
+
+        // "Add override" — opens the create drawer prefilled from this base so
+        // the operator only sets the scope (newtron P2). On hover, like ×.
+        if (opts.onAddOverride && !isPendingCreate) {
+          const ovBtn = el("button", {
+            type: "button",
+            className: "panel-override-add-btn",
+            title: "Add a zone/node override of " + r.name,
+            ariaLabel: "Add override of " + r.name,
+          }, "+ override");
+          ovBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            opts.onAddOverride!();
+          });
+          row.appendChild(ovBtn);
         }
 
         // Delete affordance — × on hover. A network base with overrides shows
@@ -1172,12 +1243,18 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
           // Floor invariant guarantees a base; synthesize a label row if a
           // stray override ever arrives without one rather than dropping it.
           const base: Row = g.base ?? { name, scope: "network", scope_instance: "", pending: "none" };
-          const baseOpts: { overrideCount?: number; deleteDisabled?: string } = {
+          const baseOpts: { overrideCount?: number; deleteDisabled?: string; onAddOverride?: () => void } = {
             overrideCount: g.overrides.length,
           };
           if (g.overrides.length > 0) {
             baseOpts.deleteDisabled =
               `Remove ${g.overrides.length} override${g.overrides.length === 1 ? "" : "s"} first`;
+          }
+          // Overrides are authored from the base so they autofill from it — only
+          // available when the kind is creatable (newtron exposes create-<kind>).
+          if (panel.canCreate) {
+            baseOpts.onAddOverride = () =>
+              openOverrideDrawer(panel.kind, panel.title, name, () => refreshPanel(panel, container));
           }
           list.appendChild(buildNameRow(base, baseOpts));
           for (const ov of g.overrides) list.appendChild(buildOverrideRow(ov));
