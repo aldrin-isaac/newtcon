@@ -138,7 +138,7 @@ import {
   enqueueTopologyAddDevice,
   enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
-  pendingSpecCreates,
+  pendingSpecCreateItems,
   isSpecPendingDelete,
   pendingTopologyDeviceAdds,
   isDevicePendingRemove,
@@ -1111,13 +1111,16 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
 
     // Combine server-side definitions with pending creates (overlay so the
     // operator sees both committed and queued items in one list, with color).
-    // Queued creates are always network-scope (no scoped-create UI yet).
-    const queuedAdds = pendingSpecCreates(panel.kind as StagingSpecKind);
+    // A pending create carries its scope/scope_instance, so an override queues
+    // as a green sub-line at its real scope — not collapsed onto the base.
     type Row = SpecRowData & { pending: "none" | "create" };
     const allRows: Row[] = items.map((i) => ({ ...i, pending: "none" as const }));
-    const haveNetwork = new Set(items.filter((i) => i.scope === "network").map((i) => i.name));
-    for (const n of queuedAdds) {
-      if (!haveNetwork.has(n)) allRows.push({ name: n, scope: "network", scope_instance: "", pending: "create" });
+    const committedKeys = new Set(items.map((i) => `${i.scope}::${i.scope_instance}::${i.name}`));
+    for (const q of pendingSpecCreateItems(panel.kind as StagingSpecKind)) {
+      const scope = typeof q.body.scope === "string" && q.body.scope !== "" ? q.body.scope : "network";
+      const scope_instance = typeof q.body.scope_instance === "string" ? q.body.scope_instance : "";
+      const key = `${scope}::${scope_instance}::${q.name}`;
+      if (!committedKeys.has(key)) allRows.push({ name: q.name, scope, scope_instance, pending: "create" });
     }
 
     if (allRows.length === 0) {
@@ -1206,7 +1209,10 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
       // needs scope on the wire (not built); clicking opens detail (the base,
       // until per-scope override detail lands).
       const buildOverrideRow = (r: Row): HTMLElement => {
-        const row = el("li", { className: "panel-list-row panel-list-row--override" });
+        const row = el("li", {
+          className: "panel-list-row panel-list-row--override"
+            + (r.pending === "create" ? " panel-list-row--pending-add" : ""),
+        });
         row.appendChild(el("span", { className: "panel-override-marker", ariaHidden: "true" }, "↳"));
         row.appendChild(el("span", {
           className: "panel-scope-badge panel-scope-badge--" + r.scope,
