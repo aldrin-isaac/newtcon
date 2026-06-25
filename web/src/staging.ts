@@ -189,6 +189,15 @@ export function pendingSpecCreates(kind: SpecKind): string[] {
   return queue.filter((p) => p.group === "spec" && p.kind === kind && p.op === "create").map((p) => (p as { name: string }).name);
 }
 
+// pendingSpecCreateItems returns queued creates with their body, so the Specs
+// list can place a pending override at its real scope (its name matches the
+// existing network base, so a name-only overlay would hide it under the base).
+export function pendingSpecCreateItems(kind: SpecKind): { name: string; body: Record<string, unknown> }[] {
+  return queue
+    .filter((p) => p.group === "spec" && p.kind === kind && p.op === "create")
+    .map((p) => ({ name: (p as { name: string }).name, body: (p as { body: Record<string, unknown> }).body }));
+}
+
 export function isSpecPendingDelete(kind: SpecKind, name: string): boolean {
   return queue.some((p) => p.group === "spec" && p.kind === kind && p.op === "delete" && p.name === name);
 }
