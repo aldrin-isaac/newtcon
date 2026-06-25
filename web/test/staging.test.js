@@ -71,14 +71,14 @@ describe("sub-rule ops queue as flat mutations", () => {
   beforeEach(() => discardAll());
 
   test("enqueueSubCreate → POST mutation under the parent path", () => {
-    enqueueSubCreate("filters", "ACL", "rules", { seq: 10, action: "permit" }, "10");
+    enqueueSubCreate("filters", "ACL", "rules", 10, { seq: 10, action: "permit" }, "10");
     const q = getQueue();
     assert.equal(q.length, 1);
     assert.equal(q[0].group, "mutation");
     assert.equal(q[0].method, "POST");
     assert.equal(q[0].path, "filters/ACL/rules");
     assert.equal(q[0].name, "ACL");
-    assert.deepEqual(q[0].sub, { endpoint: "rules" });
+    assert.deepEqual(q[0].sub, { endpoint: "rules", key: 10 });
   });
 
   test("enqueueSubUpdate/Delete target the keyed row path", () => {
@@ -108,8 +108,8 @@ describe("sub-rule ops queue as flat mutations", () => {
   });
 
   test("pendingSubMutations scopes to the right collection", () => {
-    enqueueSubCreate("filters", "ACL", "rules", { seq: 10 }, "10");
-    enqueueSubCreate("filters", "OTHER", "rules", { seq: 20 }, "20");
+    enqueueSubCreate("filters", "ACL", "rules", 10, { seq: 10 }, "10");
+    enqueueSubCreate("filters", "OTHER", "rules", 20, { seq: 20 }, "20");
     enqueueSubDelete("qos-policies", "Q", "queues", 1, "1");
     const acl = pendingSubMutations("filters", "ACL", "rules");
     assert.equal(acl.length, 1);

@@ -33,6 +33,14 @@ export interface HistoryItem {
    */
   preBody?: Record<string, unknown>;
   /**
+   * For flat-mutation items — the structured resource identity, so undo
+   * composes the inverse directly (no display-string parsing). `resourceName`
+   * is the parent spec; `sub` is set for sub-rule rows.
+   */
+  resourceKind?: string;
+  resourceName?: string;
+  sub?: { endpoint: string; key?: string | number };
+  /**
    * Whether this specific item can be undone via the data-layer or
    * device-action planner. Computed at buildEntry time. False for
    * action items whose actionId isn't in the supported-inverse list
@@ -123,8 +131,13 @@ export function buildEntry(args: {
     };
     const err = errorById.get(p.id);
     if (failed && err !== undefined) it.error = err;
-    const cached = preBodies.get(p.id);
+    // preBody: a fetched-at-apply capture (spec/topology deletes) wins, else
+    // the staged-from-UI preBody on the item (sub-rules, spec edits).
+    const cached = preBodies.get(p.id) ?? p.preBody;
     if (cached !== undefined) it.preBody = cached;
+    if (p.resourceKind !== undefined) it.resourceKind = p.resourceKind;
+    if (p.resourceName !== undefined) it.resourceName = p.resourceName;
+    if (p.sub !== undefined) it.sub = p.sub;
     if (p.actionId !== undefined) it.actionId = p.actionId;
     if (p.device !== undefined) it.device = p.device;
     if (p.iface !== undefined) it.iface = p.iface;
@@ -175,6 +188,7 @@ function isItemUndoable(
     id: string;
     actionId?: string;
     body?: Record<string, unknown> | null;
+    preBody?: Record<string, unknown>;
   },
   preBodies: ReadonlyMap<string, Record<string, unknown>>,
 ): boolean {
@@ -187,10 +201,11 @@ function isItemUndoable(
     if (!predicate) return false;
     return predicate(item.body ?? undefined);
   }
+  // Spec / sub-rule / topology mutations: a create inverts to a delete (no
+  // prior state needed); a delete/update inverts only when we captured the
+  // prior body (fetched at apply, or staged from the UI for sub-rules/edits).
   if (item.effect === "create") return true;
-  if (item.effect === "delete") return preBodies.has(item.id);
-  // Fallthrough.
-  return false;
+  return preBodies.has(item.id) || !!item.preBody;
 }
 
 /**

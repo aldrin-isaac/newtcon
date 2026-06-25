@@ -49,6 +49,17 @@ export interface PendingPreview {
    * compose the inverse RPC URL.
    */
   iface?: string;
+  /**
+   * For flat-mutation items — the structured resource identity, so undo
+   * composes the inverse from real fields (wire kind / parent / sub-row key)
+   * rather than parsing a display string. `resourceName` is the parent spec.
+   */
+  resourceKind?: string;
+  resourceName?: string;
+  sub?: { endpoint: string; key?: string | number };
+  /** Prior server state for a delete/update mutation — undo re-creates or
+   *  restores it. Captured when the op was staged from the UI. */
+  preBody?: Record<string, unknown>;
 }
 
 export interface ApplyPreview {
@@ -111,6 +122,10 @@ function toPreview(p: Pending): PendingPreview {
       scope: p.sub ? `${kindLabel(p.kind)} · ${p.sub.endpoint}` : kindLabel(p.kind),
       danger: p.effect === "delete",
       body: p.body ?? null,
+      resourceKind: p.kind,
+      resourceName: p.name,
+      ...(p.sub ? { sub: p.sub } : {}),
+      ...(p.preBody ? { preBody: p.preBody } : {}),
     };
   }
   if (p.group === "topology" && p.op === "add-device") {

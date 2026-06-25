@@ -86,23 +86,54 @@ function planItem(item: HistoryItem, id: string): UndoPlanItem {
  * inverse (e.g. a delete-style item with no preBody). The result is in
  * staging's Pending shape so it can be enqueued directly.
  */
-function inverseFor(item: HistoryItem, id: string): Pending | null {
-  // Spec kinds — the kind field on the preview is the operator label
-  // ("spec"); the actual SpecKind lives on the scope as a space-joined
-  // word ("services" / "qos policies" → "qos-policies"). The kind chip
-  // shown to the operator and the wire SpecKind are different — undo
-  // composes against the wire kind, which we derive from item.scope.
-  if (item.kind === "spec") {
-    const specKind = scopeToSpecKind(item.scope);
-    if (!specKind) return null;
+// inverseMutation composes the inverse of a flat mutation from its structured
+// identity (resourceKind / resourceName / sub) + captured prior state. The
+// inverse of a create is a delete of the same row; of a delete, a re-create
+// from preBody; of an update, a restore to preBody.
+function inverseMutation(item: HistoryItem, id: string): Pending | null {
+  const kind = item.resourceKind as SpecKind | undefined;
+  const name = item.resourceName;
+  if (!kind || !name) return null;
+  const e = encodeURIComponent;
+
+  if (item.sub) {
+    const { endpoint, key } = item.sub;
+    const base = `${kind}/${e(name)}/${endpoint}`;
     if (item.effect === "create") {
-      // Created → inverse is delete by name (operator's title is the name).
-      return { id, group: "mutation", method: "DELETE", path: `${specKind}/${encodeURIComponent(item.title)}`, effect: "delete", kind: specKind, name: item.title, title: item.title };
+      if (key === undefined) return null;
+      return { id, group: "mutation", method: "DELETE", path: `${base}/${e(String(key))}`, effect: "delete", kind, name, title: item.title, sub: { endpoint, key } };
     }
     if (item.effect === "delete") {
       if (!item.preBody) return null;
-      return { id, group: "mutation", method: "POST", path: specKind, effect: "create", kind: specKind, name: item.title, title: item.title, body: item.preBody };
+      return { id, group: "mutation", method: "POST", path: base, effect: "create", kind, name, title: item.title, sub: { endpoint, ...(key !== undefined ? { key } : {}) }, body: item.preBody };
     }
+    if (item.effect === "update") {
+      if (!item.preBody || key === undefined) return null;
+      return { id, group: "mutation", method: "PUT", path: `${base}/${e(String(key))}`, effect: "update", kind, name, title: item.title, sub: { endpoint, key }, body: item.preBody };
+    }
+    return null;
+  }
+
+  if (item.effect === "create") {
+    return { id, group: "mutation", method: "DELETE", path: `${kind}/${e(name)}`, effect: "delete", kind, name, title: name };
+  }
+  if (item.effect === "delete") {
+    if (!item.preBody) return null;
+    return { id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: item.preBody };
+  }
+  if (item.effect === "update") {
+    if (!item.preBody) return null;
+    return { id, group: "mutation", method: "PUT", path: `${kind}/${e(name)}`, effect: "update", kind, name, title: name, body: item.preBody };
+  }
+  return null;
+}
+
+function inverseFor(item: HistoryItem, id: string): Pending | null {
+  // Flat mutations (spec + sub-rule) carry their structured identity, so the
+  // inverse composes from real fields — no display-string parsing. The inverse
+  // of a mutation is itself a mutation: create↔delete, update↔update(preBody).
+  if (item.kind === "spec" || item.kind === "sub-rule") {
+    return inverseMutation(item, id);
   }
   if (item.kind === "device") {
     // topology add-device ↔ remove-device. Operator's title is the
@@ -276,30 +307,6 @@ function inverseConfigureInterface(item: HistoryItem, id: string): Pending | nul
  */
 function inverseDeviceAction(_item: HistoryItem, _id: string): Pending | null {
   return null;
-}
-
-/**
- * scopeToSpecKind turns a PendingPreview.scope (the operator label
- * like "services" or "qos policies" or "route policies") back into the
- * SpecKind wire string the staging queue uses ("services",
- * "qos-policies", "route-policies"). Dash-for-space.
- */
-function scopeToSpecKind(scope: string): SpecKind | null {
-  const wire = scope.trim().replace(/\s+/g, "-");
-  switch (wire) {
-    case "services":
-    case "ipvpns":
-    case "macvpns":
-    case "qos-policies":
-    case "filters":
-    case "route-policies":
-    case "prefix-lists":
-    case "profiles":
-    case "zones":
-      return wire;
-    default:
-      return null;
-  }
 }
 
 /**
