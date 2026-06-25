@@ -53,6 +53,11 @@ export interface SchemaFieldOverride {
   /** Hide the field. Useful when newtcon adds a synthetic identifier
    *  field (e.g. `name`) and the schema's `name` overlaps. */
   hidden?: boolean;
+  /** Render the field locked (read-only) while still submitting its value.
+   *  Used by the "add override" flow to pin the identifier to the base spec's
+   *  name in a create form, where `immutable` (which only locks in editMode)
+   *  doesn't apply. */
+  readOnly?: boolean;
 }
 
 export interface SchemaFormOpts {
@@ -400,7 +405,7 @@ async function buildFieldRow(
   // verb, so locking the input prevents the operator from submitting
   // a doomed request. Read still returns the value so the body keeps
   // it (newtron may require it; newtcon-server reconciles with URL).
-  const lockField = editMode && !!field.immutable;
+  const lockField = (editMode && !!field.immutable) || !!override.readOnly;
   let read: () => unknown;
 
   switch (field.type) {
