@@ -426,8 +426,10 @@ async function renderSchemaDrivenEdit(
     }
     // Queue the edit (PUT /update-<kind>) — it stages and applies through the
     // Save loop like create/delete, not instantly. The list shows the row as
-    // pending-modified; the committed values stand until Apply.
-    enqueueSpecUpdate(kind as StagingSpecKind, name, values);
+    // pending-modified; the committed values stand until Apply. preBody (the
+    // spec before the edit) lets undo restore it.
+    const preBody = detail && typeof detail === "object" ? detail as Record<string, unknown> : undefined;
+    enqueueSpecUpdate(kind as StagingSpecKind, name, values, preBody);
     saveBtn.disabled = true;
     saveBtn.textContent = "Queued";
     content.insertBefore(
@@ -475,7 +477,8 @@ function legacyEditForm(
     if (!validate()) return;
     errOut.textContent = "";
     // Queue the edit (same staging path as create/delete) rather than PUT now.
-    enqueueSpecUpdate(kind as StagingSpecKind, name, getValues());
+    const preBody = detail && typeof detail === "object" ? detail as Record<string, unknown> : undefined;
+    enqueueSpecUpdate(kind as StagingSpecKind, name, getValues(), preBody);
     saveBtn.disabled = true;
     saveBtn.textContent = "Queued";
     content.insertBefore(
@@ -1581,8 +1584,11 @@ function renderSubRuleRow(
     }, "×");
     delBtn.addEventListener("click", () => {
       // Queue the removal; the row re-renders struck-through (pending) and is
-      // confirmed at Apply, like every other staged change.
-      enqueueSubDelete(kind as StagingSpecKind, specName, conf.endpoint, key, String(key));
+      // confirmed at Apply, like every other staged change. preBody (the row +
+      // the parent-ref the re-create POST needs) lets undo re-create it.
+      const pre = conf.itemType === "object" && item && typeof item === "object"
+        ? injectParentName(kind, specName, item as Record<string, unknown>) : undefined;
+      enqueueSubDelete(kind as StagingSpecKind, specName, conf.endpoint, key, String(key), pre);
       openDetail(kind, kindTitleFor(kind), specName);
     });
     actionsCell.appendChild(delBtn);
@@ -1646,7 +1652,9 @@ function renderSubRuleEdit(
       return;
     }
     const body = composeUpdateBody(values, conf.itemType, conf.keyField, originalKey);
-    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, originalKey, body, String(originalKey));
+    // preBody (the row before the edit) lets undo restore it.
+    const pre = item && typeof item === "object" ? item as Record<string, unknown> : undefined;
+    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, originalKey, body, String(originalKey), pre);
     openDetail(kind, kindTitleFor(kind), specName);
   });
   return editRow;
@@ -1753,7 +1761,7 @@ async function mountSchemaSubRuleAddForm(
     }
     // Queue the add (same staging thread as everything else); re-render so the
     // table shows it as a green pending row.
-    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, values, subTitle(values, conf));
+    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, subKeyFromBody(values, conf), values, subTitle(values, conf));
     openDetail(kind, kindTitleFor(kind), specName);
   });
 }
@@ -1761,8 +1769,25 @@ async function mountSchemaSubRuleAddForm(
 // subTitle — a short label for a queued sub-rule op (the key value when there
 // is one, else the item label). Used in the pending bar + apply-preview.
 function subTitle(body: Record<string, unknown>, conf: SubRuleTable): string {
-  if (conf.keyField && body[conf.keyField] != null) return String(body[conf.keyField]);
-  return conf.itemLabel;
+  const k = subKeyFromBody(body, conf);
+  return k !== "" ? String(k) : conf.itemLabel;
+}
+
+// subKeyFromBody derives the row's identity from an add-form body so the queued
+// create carries the key undo needs to DELETE exactly that row. Object items
+// (rules/queues) key on conf.keyField; string items (prefix entries) key on
+// their lone value field (injected parent-ref fields are skipped).
+function subKeyFromBody(body: Record<string, unknown>, conf: SubRuleTable): string | number {
+  if (conf.keyField && body[conf.keyField] != null) {
+    const v = body[conf.keyField];
+    if (typeof v === "string" || typeof v === "number") return v;
+  }
+  if (conf.itemType === "string") {
+    for (const [k, v] of Object.entries(body)) {
+      if (typeof v === "string" && v !== "" && !/_list$|^policy$|^filter$/.test(k)) return v;
+    }
+  }
+  return "";
 }
 
 /**
@@ -1807,7 +1832,7 @@ function mountLegacySubRuleAddForm(
     submitBtn.textContent = "Saving…";
     const values = getValues();
     const bodyWithParent = injectParentName(kind, specName, values);
-    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, bodyWithParent, subTitle(bodyWithParent, conf));
+    enqueueSubCreate(kind as StagingSpecKind, specName, conf.endpoint, subKeyFromBody(bodyWithParent, conf), bodyWithParent, subTitle(bodyWithParent, conf));
     openDetail(kind, kindTitleFor(kind), specName);
   });
 }

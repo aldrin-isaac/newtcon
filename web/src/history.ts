@@ -23,6 +23,10 @@ import {
   enqueueInterfaceAction,
   enqueueSpecCreate,
   enqueueSpecDelete,
+  enqueueSpecUpdate,
+  enqueueSubCreate,
+  enqueueSubUpdate,
+  enqueueSubDelete,
   enqueueTopologyAddDevice,
   enqueueTopologyAddLink,
   enqueueTopologyRemoveDevice,
@@ -127,12 +131,26 @@ function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
     for (const item of plan.items) {
       if (!item.planned || !item.inverse) continue;
       const inv = item.inverse;
-      if (inv.group === "mutation" && !inv.sub && inv.effect === "create") {
+      if (inv.group === "mutation" && inv.sub) {
+        const { endpoint, key } = inv.sub;
+        const sign = inv.effect === "create" ? "+" : inv.effect === "delete" ? "−" : "~";
+        if (inv.effect === "create" && key !== undefined) {
+          enqueueSubCreate(inv.kind, inv.name, endpoint, key, inv.body ?? {}, inv.title);
+        } else if (inv.effect === "delete" && key !== undefined) {
+          enqueueSubDelete(inv.kind, inv.name, endpoint, key, inv.title);
+        } else if (inv.effect === "update" && key !== undefined) {
+          enqueueSubUpdate(inv.kind, inv.name, endpoint, key, inv.body ?? {}, inv.title);
+        }
+        queuedNames.push(`${sign} ${endpoint} ${inv.title} on ${inv.name}`);
+      } else if (inv.group === "mutation" && inv.effect === "create") {
         enqueueSpecCreate(inv.kind, inv.name, inv.body ?? {});
         queuedNames.push(`+ ${inv.kind} ${inv.name}`);
-      } else if (inv.group === "mutation" && !inv.sub && inv.effect === "delete") {
+      } else if (inv.group === "mutation" && inv.effect === "delete") {
         enqueueSpecDelete(inv.kind, inv.name);
         queuedNames.push(`− ${inv.kind} ${inv.name}`);
+      } else if (inv.group === "mutation" && inv.effect === "update") {
+        enqueueSpecUpdate(inv.kind, inv.name, inv.body ?? {});
+        queuedNames.push(`~ ${inv.kind} ${inv.name}`);
       } else if (inv.group === "topology" && inv.op === "add-device") {
         enqueueTopologyAddDevice(inv.name, inv.body);
         queuedNames.push(`+ device ${inv.name}`);

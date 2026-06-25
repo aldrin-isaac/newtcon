@@ -36,7 +36,11 @@ export type Pending =
   | { id: string; group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
       effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
       sub?: { endpoint: string; key?: string | number }; title: string;
-      body?: Record<string, unknown>; }
+      body?: Record<string, unknown>;
+      // Prior server state, captured when the op is staged from the UI (which
+      // has the committed row). Lets undo compute a faithful inverse — re-create
+      // a removed row, or restore an edited one — without a second fetch.
+      preBody?: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "remove-device"; name: string; }
   | { id: string; group: "topology";  op: "add-link";      a: string; z: string; }
@@ -106,7 +110,8 @@ export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<str
 
 // enqueueSpecUpdate queues an edit (PUT /{kind}/{name}) so it stages + applies
 // through the same Save loop as create/delete instead of firing instantly.
-export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
+// preBody (the spec before the edit) lets undo restore it.
+export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<string, unknown>, preBody?: Record<string, unknown>): Pending {
   const identity = `${kind}/${name}`;
   // Editing a spec still pending-create folds into the create (latest values),
   // preserving create-only fields (e.g. scope).
@@ -117,14 +122,14 @@ export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<str
     notify();
     return queue[ci]!;
   }
-  // Collapse repeated edits to the latest body.
+  // Collapse repeated edits to the latest body (keep the earliest preBody).
   const ui = findMutation(identity, "update");
   if (ui >= 0) {
     (queue[ui] as { body?: Record<string, unknown> }).body = body;
     notify();
     return queue[ui]!;
   }
-  return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body });
+  return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}) });
 }
 
 export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null {
@@ -141,14 +146,17 @@ export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null 
 // ---- Sub-rule add / update / remove (flat mutations) ---------------------
 // queues / rules / entries on a parent spec — same flat queue, deeper path.
 
+// `key` is the row's identity (seq / queue_id / prefix the operator chose) —
+// carried even on create so undo can DELETE exactly that row.
 export function enqueueSubCreate(
-  kind: SpecKind, spec: string, endpoint: string, body: Record<string, unknown>, title: string,
+  kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string,
 ): Pending {
-  return pushMutation({ group: "mutation", method: "POST", path: subBasePath(kind, spec, endpoint), effect: "create", kind, name: spec, sub: { endpoint }, title, body });
+  return pushMutation({ group: "mutation", method: "POST", path: subBasePath(kind, spec, endpoint), effect: "create", kind, name: spec, sub: { endpoint, key }, title, body });
 }
 
+// preBody (the row before the edit) lets undo restore it.
 export function enqueueSubUpdate(
-  kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string,
+  kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string, preBody?: Record<string, unknown>,
 ): Pending {
   const identity = `${kind}/${spec}/${endpoint}/${key}`;
   const ui = findMutation(identity, "update");
@@ -158,16 +166,21 @@ export function enqueueSubUpdate(
     notify();
     return queue[ui]!;
   }
-  return pushMutation({ group: "mutation", method: "PUT", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body });
+  return pushMutation({ group: "mutation", method: "PUT", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body, ...(preBody ? { preBody } : {}) });
 }
 
+// preBody (the removed row) lets undo re-create it.
 export function enqueueSubDelete(
-  kind: SpecKind, spec: string, endpoint: string, key: string | number, title: string,
-): Pending {
+  kind: SpecKind, spec: string, endpoint: string, key: string | number, title: string, preBody?: Record<string, unknown>,
+): Pending | null {
   const identity = `${kind}/${spec}/${endpoint}/${key}`;
+  // Removing a row that's only pending-create just cancels the create.
+  const ci = findMutation(identity, "create");
+  if (ci >= 0) { queue.splice(ci, 1); notify(); return null; }
+  // A pending edit of a row being removed is moot.
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
-  return pushMutation({ group: "mutation", method: "DELETE", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title });
+  return pushMutation({ group: "mutation", method: "DELETE", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title, ...(preBody ? { preBody } : {}) });
 }
 
 export function enqueueTopologyAddDevice(name: string, body: Record<string, unknown>): Pending {
