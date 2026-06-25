@@ -28,7 +28,7 @@ describe("previewQueue() — basics", () => {
     const p = previewQueue([]);
     assert.equal(p.total, 0);
     assert.deepEqual(p.items, []);
-    assert.deepEqual(p.counts, { create: 0, delete: 0, action: 0, danger: 0 });
+    assert.deepEqual(p.counts, { create: 0, update: 0, delete: 0, action: 0, danger: 0 });
     assert.equal(p.hasDangerous, false);
     assert.equal(p.hasDeletes, false);
   });
@@ -123,7 +123,7 @@ describe("previewQueue() — counts + flags", () => {
       specDelete("3", "c"), removeDevice("4", "r1"),
       deviceAction("5", "r2", "act"),
     ]);
-    assert.deepEqual(p.counts, { create: 2, delete: 2, action: 1, danger: 2 });
+    assert.deepEqual(p.counts, { create: 2, update: 0, delete: 2, action: 1, danger: 2 });
   });
 
   test("danger count counts only items flagged danger (incl. implicit deletes)", () => {

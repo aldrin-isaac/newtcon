@@ -16,7 +16,7 @@
 
 import type { Pending } from "./staging.js";
 
-export type PreviewEffect = "create" | "delete" | "action";
+export type PreviewEffect = "create" | "update" | "delete" | "action";
 
 export interface PendingPreview {
   id: string;
@@ -55,7 +55,7 @@ export interface ApplyPreview {
   total: number;
   /** Items in apply order (same order staging.applySubset uses). */
   items: PendingPreview[];
-  counts: { create: number; delete: number; action: number; danger: number };
+  counts: { create: number; update: number; delete: number; action: number; danger: number };
   hasDangerous: boolean;
   hasDeletes: boolean;
 }
@@ -64,6 +64,7 @@ export interface ApplyPreview {
 // order the apply loop will execute.
 const ORDER: Record<string, number> = {
   "spec.create": 1,
+  "spec.update": 1.5,
   "topology.add-device": 2,
   "topology.add-link": 3,
   "device.action": 4,
@@ -85,7 +86,7 @@ export function previewQueue(queue: readonly Pending[]): ApplyPreview {
   const items = queue.slice()
     .sort((a, b) => (ORDER[keyOf(a)] ?? 99) - (ORDER[keyOf(b)] ?? 99))
     .map(toPreview);
-  const counts = { create: 0, delete: 0, action: 0, danger: 0 };
+  const counts = { create: 0, update: 0, delete: 0, action: 0, danger: 0 };
   for (const it of items) {
     counts[it.effect] += 1;
     if (it.danger) counts.danger += 1;
@@ -103,6 +104,13 @@ function toPreview(p: Pending): PendingPreview {
   if (p.group === "spec" && p.op === "create") {
     return {
       id: p.id, effect: "create", kind: "spec",
+      title: p.name, scope: kindLabel(p.kind),
+      danger: false, body: p.body,
+    };
+  }
+  if (p.group === "spec" && p.op === "update") {
+    return {
+      id: p.id, effect: "update", kind: "spec",
       title: p.name, scope: kindLabel(p.kind),
       danger: false, body: p.body,
     };

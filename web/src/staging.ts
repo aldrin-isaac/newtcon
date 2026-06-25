@@ -26,6 +26,7 @@ export type SpecKind =
 
 export type Pending =
   | { id: string; group: "spec";      kind: SpecKind; op: "create"; name: string; body: Record<string, unknown>; }
+  | { id: string; group: "spec";      kind: SpecKind; op: "update"; name: string; body: Record<string, unknown>; }
   | { id: string; group: "spec";      kind: SpecKind; op: "delete"; name: string; }
   | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "remove-device"; name: string; }
@@ -62,10 +63,39 @@ export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<str
   return p;
 }
 
+// enqueueSpecUpdate queues an edit of an existing spec (PUT /update-<kind>),
+// so edits stage and apply through the same Save loop as create/delete instead
+// of firing instantly.
+export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
+  // Editing a spec that's still pending-create: fold the edit into the create
+  // (one create with the latest values), keeping create-only fields like scope.
+  const ci = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "create" && p.name === name);
+  if (ci >= 0) {
+    const c = queue[ci] as { body: Record<string, unknown> };
+    c.body = { ...c.body, ...body };
+    notify();
+    return queue[ci]!;
+  }
+  // Collapse repeated edits of the same spec to the latest body.
+  const ui = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+  if (ui >= 0) {
+    (queue[ui] as { body: Record<string, unknown> }).body = body;
+    notify();
+    return queue[ui]!;
+  }
+  const p: Pending = { id: String(nextID++), group: "spec", kind, op: "update", name, body };
+  queue.push(p);
+  notify();
+  return p;
+}
+
 export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null {
   // If a create is pending for this name, just cancel it (no API round trip).
   const i = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "create" && p.name === name);
   if (i >= 0) { queue.splice(i, 1); notify(); return null; }
+  // A pending edit of a spec being deleted is moot — drop it.
+  const ui = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+  if (ui >= 0) queue.splice(ui, 1);
   const p: Pending = { id: String(nextID++), group: "spec", kind, op: "delete", name };
   queue.push(p);
   notify();
@@ -202,6 +232,10 @@ export function isSpecPendingDelete(kind: SpecKind, name: string): boolean {
   return queue.some((p) => p.group === "spec" && p.kind === kind && p.op === "delete" && p.name === name);
 }
 
+export function isSpecPendingUpdate(kind: SpecKind, name: string): boolean {
+  return queue.some((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+}
+
 export function pendingTopologyDeviceAdds(): { name: string; body: Record<string, unknown> }[] {
   return queue.filter((p) => p.group === "topology" && p.op === "add-device")
     .map((p) => ({ name: (p as { name: string }).name, body: (p as { body: Record<string, unknown> }).body }));
@@ -277,6 +311,7 @@ async function applySubset(targets: readonly Pending[], mode: "default" | "topol
 
 function groupOrder(p: Pending): number {
   if (p.group === "spec" && p.op === "create") return 1;
+  if (p.group === "spec" && p.op === "update") return 1.5;
   if (p.group === "topology" && p.op === "add-device") return 2;
   if (p.group === "topology" && p.op === "add-link") return 3;
   if (p.group === "device") return 4;
@@ -291,6 +326,10 @@ async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void>
   const modeQS = mode === "topology" ? "?mode=topology" : "";
   if (p.group === "spec" && p.op === "create") {
     await postJSON(apiPath(p.kind), p.body);
+    return;
+  }
+  if (p.group === "spec" && p.op === "update") {
+    await put(apiPath(`${p.kind}/${encodeURIComponent(p.name)}`), p.body);
     return;
   }
   if (p.group === "spec" && p.op === "delete") {
@@ -329,6 +368,11 @@ async function postJSON(path: string, body: Record<string, unknown>): Promise<un
   return parseOrThrow(r);
 }
 
+async function put(path: string, body: Record<string, unknown>): Promise<unknown> {
+  const r = await fetch(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return parseOrThrow(r);
+}
+
 async function del(path: string): Promise<unknown> {
   const r = await fetch(path, { method: "DELETE" });
   return parseOrThrow(r);
@@ -357,6 +401,7 @@ async function parseOrThrow(r: Response): Promise<unknown> {
 
 export function describePending(p: Pending): string {
   if (p.group === "spec" && p.op === "create") return `+ ${p.kind} ${p.name}`;
+  if (p.group === "spec" && p.op === "update") return `~ ${p.kind} ${p.name}`;
   if (p.group === "spec" && p.op === "delete") return `− ${p.kind} ${p.name}`;
   if (p.group === "topology" && p.op === "add-device") return `+ device ${p.name}`;
   if (p.group === "topology" && p.op === "remove-device") return `− device ${p.name}`;

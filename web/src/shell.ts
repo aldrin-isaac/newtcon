@@ -321,7 +321,9 @@ function setupPendingBar(): void {
     for (const p of getQueue()) {
       const row = document.createElement("div");
       row.className = "pending-bar-item " +
-        (p.op.startsWith("add") || p.op === "create" ? "pending-bar-item--add" : "pending-bar-item--del");
+        (p.op === "update" ? "pending-bar-item--mod"
+          : p.op.startsWith("add") || p.op === "create" ? "pending-bar-item--add"
+            : "pending-bar-item--del");
       const label = document.createElement("span");
       label.className = "pending-bar-item-label";
       label.textContent = describePending(p);
@@ -574,7 +576,8 @@ function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
 
   const marker = document.createElement("span");
   marker.className = "apply-preview-marker";
-  marker.textContent = item.effect === "create" ? "+" : item.effect === "delete" ? "−" : "•";
+  marker.textContent = item.effect === "create" ? "+"
+    : item.effect === "delete" ? "−" : item.effect === "update" ? "~" : "•";
   marker.setAttribute("aria-hidden", "true");
   main.appendChild(marker);
 

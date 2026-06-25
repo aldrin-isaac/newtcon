@@ -8,7 +8,6 @@ import {
   fetchSpecInstances,
   fetchSpecDetail,
   addSubRule,
-  updateSpec,
   removeQoSQueue,
   removeFilterRule,
   removePrefixListEntry,
@@ -138,8 +137,10 @@ import {
   enqueueTopologyAddDevice,
   enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
+  enqueueSpecUpdate,
   pendingSpecCreateItems,
   isSpecPendingDelete,
+  isSpecPendingUpdate,
   pendingTopologyDeviceAdds,
   isDevicePendingRemove,
   pendingTopologyLinkAdds,
@@ -403,40 +404,38 @@ async function renderSchemaDrivenEdit(
     void openDetail(kind, kindTitle, name);
   });
 
-  saveBtn.addEventListener("click", async () => {
+  saveBtn.addEventListener("click", () => {
     if (!validate()) return;
     errOut.textContent = "";
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Saving…";
-    try {
-      const values = getValues();
-      // The PUT URL identifies the row; newtcon-server overwrites any
-      // identifier in the body with the URL value. Strip the
-      // identifier here too to keep the wire payload clean.
-      //
-      // Sub-collection fields (array/map of item_kind — e.g. rules,
-      // queues) flow into `values` as empty per renderSchemaForm's
-      // "not authorable" notice path. newtron preserves sub-collections
-      // on update-X per docs/newtron/api.md §5 (sub-rule verbs own the
-      // sub-collection lifecycle), so emitting an empty array doesn't
-      // wipe existing rules — but stripping here is belt-and-braces
-      // against any future contract change.
-      const idField = schema.identifier || "name";
-      delete values[idField];
-      for (const f of schema.fields) {
-        if ((f.type === "array" || f.type === "map") && f.item_kind) {
-          delete values[f.name];
-        }
-      }
-      await updateSpec(kind, name, values);
-      void openDetail(kind, kindTitle, name);
-    } catch (err) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Save";
-      if (!attachServerValidationToForm(form, err)) {
-        errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+    const values = getValues();
+    // The PUT URL identifies the row; newtcon-server overwrites any
+    // identifier in the body with the URL value. Strip the identifier
+    // here too to keep the wire payload clean.
+    //
+    // Sub-collection fields (array/map of item_kind — e.g. rules, queues)
+    // flow into `values` as empty per renderSchemaForm's "not authorable"
+    // notice path. newtron preserves sub-collections on update-X per
+    // docs/newtron/api.md §5 (sub-rule verbs own the sub-collection
+    // lifecycle), so emitting an empty array doesn't wipe existing rules —
+    // but stripping here is belt-and-braces against any future contract change.
+    const idField = schema.identifier || "name";
+    delete values[idField];
+    for (const f of schema.fields) {
+      if ((f.type === "array" || f.type === "map") && f.item_kind) {
+        delete values[f.name];
       }
     }
+    // Queue the edit (PUT /update-<kind>) — it stages and applies through the
+    // Save loop like create/delete, not instantly. The list shows the row as
+    // pending-modified; the committed values stand until Apply.
+    enqueueSpecUpdate(kind as StagingSpecKind, name, values);
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Queued";
+    content.insertBefore(
+      el("p", { className: "form-success" },
+        "Edit added to pending changes. Click Save in the header to apply."),
+      buttons);
+    setTimeout(() => { closeDetail(); }, 800);
   });
 }
 
@@ -472,23 +471,19 @@ function legacyEditForm(
     void openDetail(kind, kindTitle, name);
   });
 
-  saveBtn.addEventListener("click", async () => {
+  saveBtn.addEventListener("click", () => {
     clearFieldErrors(form);
     if (!validate()) return;
     errOut.textContent = "";
+    // Queue the edit (same staging path as create/delete) rather than PUT now.
+    enqueueSpecUpdate(kind as StagingSpecKind, name, getValues());
     saveBtn.disabled = true;
-    saveBtn.textContent = "Saving…";
-    try {
-      await updateSpec(kind, name, getValues());
-      void openDetail(kind, kindTitle, name);
-    } catch (err) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Save";
-      // validation_failure: attach to the field if newtron named one.
-      if (!attachServerValidationToForm(form, err)) {
-        errOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
-      }
-    }
+    saveBtn.textContent = "Queued";
+    content.insertBefore(
+      el("p", { className: "form-success" },
+        "Edit added to pending changes. Click Save in the header to apply."),
+      buttons);
+    setTimeout(() => { closeDetail(); }, 800);
   });
 }
 
@@ -1140,10 +1135,15 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
       ): HTMLElement => {
         const isPendingCreate = r.pending === "create";
         const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name);
+        // Pending edit (queued update) — only meaningful on a committed row,
+        // and superseded by a queued delete.
+        const isPendingUpdate = !isPendingCreate && !isPendingDelete
+          && isSpecPendingUpdate(panel.kind as StagingSpecKind, r.name);
         const row = el("li", {
           className: "panel-list-row"
             + (isPendingCreate ? " panel-list-row--pending-add" : "")
-            + (isPendingDelete ? " panel-list-row--pending-del" : ""),
+            + (isPendingDelete ? " panel-list-row--pending-del" : "")
+            + (isPendingUpdate ? " panel-list-row--pending-mod" : ""),
         });
         const item = el("span", { className: "panel-list-item", tabIndex: 0 }, r.name);
         item.addEventListener("click", () => openDetail(panel.kind, panel.title, r.name));
