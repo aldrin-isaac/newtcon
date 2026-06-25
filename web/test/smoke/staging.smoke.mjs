@@ -1,14 +1,38 @@
-// Smoke: stage edits in Specs + Topology, see them queued green/red,
-// click Save in the header, verify they land in newtron.
+// Smoke: stage edits in Specs, see them queued green/red, click Save in the
+// header, confirm the apply-preview modal, verify they land in newtron.
 
 import puppeteer from "puppeteer-core";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
+// The network to act in. newtcon needs an explicit active network (the
+// switcher persists it in localStorage); we set it below rather than relying
+// on a boot default.
+const NET = process.env.NEWTCON_NET || "default";
 
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok: " : "  FAIL: ") + m); }
+
+// Facet subnav labels are the singular kind name with the count appended
+// ("Zone0", "Platform5"). Strip the trailing count to compare the label.
+const facetLabel = (t) => (t ?? "").trim().replace(/\d+$/, "");
+
+// Save opens the apply-preview confirm modal (slice #171.A); applying requires
+// confirming it. Click Save, confirm the preview, settle.
+async function saveAndConfirm(page) {
+  await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
+  try {
+    await page.waitForSelector(".apply-preview-overlay .btn-primary", { timeout: 5000 });
+    await page.evaluate(() =>
+      document.querySelector(".apply-preview-overlay .btn-primary")?.click());
+  } catch { /* no modal — nothing to apply */ }
+  await new Promise((r) => setTimeout(r, 1800));
+}
+
+// newtron returns 500 (not 404) with {"error":"zone '..' not found"} for a
+// missing zone, so "absent" means not-ok rather than a specific status.
+const zoneUrl = (name) => `${NEWTRON}/newtron/v1/networks/${NET}/zones/${name}`;
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
@@ -20,65 +44,54 @@ const zoneName = "zone_t" + Math.floor(Math.random() * 9000 + 1000);
 
 try {
   const page = await browser.newPage();
-  // Inline confirm modal (workspace.css .confirm-overlay) auto-accept —
-  // replaces puppeteer's native-dialog handler. Observes the body for
-  // any newly mounted Confirm button and clicks it.
-  await page.evaluateOnNewDocument(() => {
-    const install = () => new MutationObserver(() => {
-      const btn = document.querySelector(".confirm-modal-btn--confirm");
-      if (btn instanceof HTMLElement) btn.click();
-    }).observe(document.body, { childList: true, subtree: true });
-    if (document.readyState === "loading") {
-      addEventListener("DOMContentLoaded", install);
-    } else {
-      install();
-    }
-  });
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  console.log(`→ open ${BASE}`);
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
+  console.log(`→ open ${BASE} (network ${NET})`);
+  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NET);
+  await page.reload({ waitUntil: "networkidle0", timeout: 15000 });
   await page.screenshot({ path: "/tmp/newtcon-smoke-s01-loaded.png" });
 
   // Bar should be hidden at boot.
   const barHiddenAtBoot = await page.$eval("#pending-bar", (el) => el.hidden);
   expect(barHiddenAtBoot === true, "pending bar hidden when queue is empty");
 
-  // ─── Stage an zone spec via the Specs view ───────────────────────
+  // ─── Stage a zone spec via the Specs view ────────────────────────
   console.log(`→ queue create zone "${zoneName}"`);
-  // Specs is the default view. Click the "zones" subnav.
-  await page.evaluate(() => {
-    const items = Array.from(document.querySelectorAll(".specs-subnav-item, .nav-item, .spec-row, button"));
-    const zones = items.find((b) => /Zones/i.test(b.textContent ?? ""));
-    if (zones) zones.click();
-  });
-  await new Promise((r) => setTimeout(r, 300));
-
-  // Click the "+ Add" button for zones (panel-add-btn).
-  await page.evaluate(() => {
-    const panels = Array.from(document.querySelectorAll(".panel"));
-    const ipPanel = panels.find((p) => /Zones/i.test(p.querySelector(".panel-title")?.textContent ?? ""));
-    ipPanel?.querySelector(".panel-add-btn")?.click();
-  });
+  // Specs is the default view. Click the "Zone" facet in the subnav.
+  await page.evaluate((label) => {
+    const items = Array.from(document.querySelectorAll(".specs-subnav-item"));
+    const strip = (t) => (t ?? "").trim().replace(/\d+$/, "");
+    items.find((b) => strip(b.textContent) === label)?.click();
+  }, "Zone");
   await new Promise((r) => setTimeout(r, 400));
 
-  // Fill in name field.
+  // Click the "+ Add" button in the Zone panel.
+  await page.evaluate(() => {
+    const panels = Array.from(document.querySelectorAll(".panel"));
+    const zp = panels.find((p) => /^zone\b/i.test((p.querySelector(".panel-title")?.textContent ?? "").trim()));
+    zp?.querySelector(".panel-add-btn")?.click();
+  });
+  await new Promise((r) => setTimeout(r, 500));
+
+  const drawerOpen = await page.evaluate(() =>
+    document.getElementById("detail-drawer")?.classList.contains("open"));
+  expect(drawerOpen === true, "create drawer opened on + Add");
+
+  // Fill the name field (schema-driven form: [name="name"]).
   await page.evaluate((n) => {
-    const labels = Array.from(document.querySelectorAll("#drawer-content .spec-form-label, #drawer-content label"));
-    const nameLabel = labels.find((l) => /name/i.test(l.textContent ?? ""));
-    const input = nameLabel?.parentElement?.querySelector("input") || document.querySelector("#drawer-content input");
+    const input = document.querySelector('#drawer-content [name="name"]')
+      || document.querySelector("#drawer-content input");
     if (input) { input.value = n; input.dispatchEvent(new Event("input", { bubbles: true })); }
   }, zoneName);
 
   // Submit the create form.
   await page.evaluate(() => {
-    const submit = document.querySelector(".form-submit-btn") || document.querySelector("#drawer-content button[type=button]");
-    if (submit && /create/i.test(submit.textContent ?? "")) submit.click();
-    else document.querySelectorAll("#drawer-content button").forEach((b) => {
-      if (/create/i.test(b.textContent ?? "")) b.click();
-    });
+    const btn = Array.from(document.querySelectorAll("#drawer-content button"))
+      .find((b) => /create/i.test(b.textContent ?? ""));
+    btn?.click();
   });
-  await new Promise((r) => setTimeout(r, 1200));
+  await new Promise((r) => setTimeout(r, 1000));
   await page.screenshot({ path: "/tmp/newtcon-smoke-s02-queued.png" });
 
   const barShown = await page.$eval("#pending-bar", (el) => !el.hidden);
@@ -87,29 +100,24 @@ try {
   expect(countText === "1", `pending count = 1 (got "${countText}")`);
 
   // The zone row should now appear in the panel with green pending styling.
-  const greenRowSeen = await page.evaluate(() => {
-    return document.querySelectorAll(".panel-list-row--pending-add").length;
-  });
+  const greenRowSeen = await page.evaluate(() =>
+    document.querySelectorAll(".panel-list-row--pending-add").length);
   expect(greenRowSeen >= 1, `≥1 green pending-add row in the panel (got ${greenRowSeen})`);
 
   // Confirm newtron does NOT yet have it (still queued, not saved).
-  const beforeSave = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
-  expect(beforeSave.status === 404 || beforeSave.status === 500,
-    `newtron does NOT have ${zoneName} pre-save (got ${beforeSave.status})`);
+  const beforeSave = await fetch(zoneUrl(zoneName));
+  expect(!beforeSave.ok, `newtron does NOT have ${zoneName} pre-save (got ${beforeSave.status})`);
 
-  // ─── Click Save in the header ─────────────────────────────────────
-  console.log("→ click Save in the header pending bar");
-  await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await new Promise((r) => setTimeout(r, 1500));
+  // ─── Save (+ confirm the apply-preview modal) ─────────────────────
+  console.log("→ click Save, confirm the apply-preview");
+  await saveAndConfirm(page);
   await page.screenshot({ path: "/tmp/newtcon-smoke-s03-after-save.png" });
 
-  // Bar should be hidden again.
   const barHiddenAfter = await page.$eval("#pending-bar", (el) => el.hidden);
   expect(barHiddenAfter, "pending bar hidden after Save");
 
-  // newtron should now have the spec.
-  const afterSave = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
-  expect(afterSave.ok, `newtron now serves /zone/${zoneName} (got ${afterSave.status})`);
+  const afterSave = await fetch(zoneUrl(zoneName));
+  expect(afterSave.ok, `newtron now serves zone ${zoneName} (got ${afterSave.status})`);
 
   // ─── Cleanup: queue a delete then Save ──────────────────────────
   console.log(`→ queue delete zone "${zoneName}"`);
@@ -119,17 +127,15 @@ try {
     row?.querySelector(".panel-delete-btn")?.click();
   }, zoneName);
   await new Promise((r) => setTimeout(r, 600));
-  const redRowSeen = await page.evaluate(() => {
-    return document.querySelectorAll(".panel-list-row--pending-del").length;
-  });
+  const redRowSeen = await page.evaluate(() =>
+    document.querySelectorAll(".panel-list-row--pending-del").length);
   expect(redRowSeen >= 1, `≥1 red pending-del row visible (got ${redRowSeen})`);
   await page.screenshot({ path: "/tmp/newtcon-smoke-s04-pending-delete.png" });
 
   console.log("→ click Save to apply the delete");
-  await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await new Promise((r) => setTimeout(r, 1500));
+  await saveAndConfirm(page);
 
-  const afterDelete = await fetch(`${NEWTRON}/newtron/v1/network/default/zone/${zoneName}`);
+  const afterDelete = await fetch(zoneUrl(zoneName));
   expect(!afterDelete.ok, `zone ${zoneName} gone from newtron after delete (status ${afterDelete.status})`);
 
   console.log("");
