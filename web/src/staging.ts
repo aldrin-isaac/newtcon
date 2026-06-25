@@ -24,10 +24,19 @@ export type SpecKind =
   | "services" | "ipvpns" | "macvpns" | "qos-policies" | "filters"
   | "route-policies" | "prefix-lists" | "profiles" | "zones";
 
+// The holistic thread: every spec / sub-rule / override change is one flat
+// HTTP mutation — a method + resource path + body. The queue holds these
+// uniformly (group "mutation"); applyAll just replays them. `effect` is the
+// method's meaning (POST=create, PUT=update, DELETE=delete) carried for the
+// preview/overlay. `kind`+`name` (+ optional `sub`) are the resource identity
+// used to fold edits and to overlay pending state on a row. Topology +
+// device/interface actions keep their richer typed shapes below (RPCs, wrapped
+// bodies, per-device apply) — they ride the same flat queue.
 export type Pending =
-  | { id: string; group: "spec";      kind: SpecKind; op: "create"; name: string; body: Record<string, unknown>; }
-  | { id: string; group: "spec";      kind: SpecKind; op: "update"; name: string; body: Record<string, unknown>; }
-  | { id: string; group: "spec";      kind: SpecKind; op: "delete"; name: string; }
+  | { id: string; group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
+      effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
+      sub?: { endpoint: string; key?: string | number }; title: string;
+      body?: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "remove-device"; name: string; }
   | { id: string; group: "topology";  op: "add-link";      a: string; z: string; }
@@ -53,53 +62,112 @@ export function pendingCount(): number { return queue.length; }
 
 // ---- Mutators ------------------------------------------------------------
 
-export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
-  // If a delete is pending for this name, cancel it instead.
-  const i = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "delete" && p.name === name);
-  if (i >= 0) { queue.splice(i, 1); notify(); return queue[queue.length - 1] ?? { id: "", group: "spec", kind, op: "create", name, body }; }
-  const p: Pending = { id: String(nextID++), group: "spec", kind, op: "create", name, body };
+// ---- Flat mutation helpers ----------------------------------------------
+
+const enc = encodeURIComponent;
+const specPath = (kind: SpecKind, name?: string): string =>
+  name ? `${kind}/${enc(name)}` : kind;
+const subBasePath = (kind: SpecKind, spec: string, endpoint: string): string =>
+  `${kind}/${enc(spec)}/${endpoint}`;
+
+// Logical identity of a mutation's target — folds create/update/delete of the
+// same resource together. Sub-creates have no key yet, so each is its own
+// identity (keyed by id); sub-updates/deletes key on the row.
+function mutationIdentity(p: Extract<Pending, { group: "mutation" }>): string {
+  if (p.sub) {
+    return p.sub.key === undefined
+      ? `sub-add:${p.id}`
+      : `${p.kind}/${p.name}/${p.sub.endpoint}/${p.sub.key}`;
+  }
+  return `${p.kind}/${p.name}`;
+}
+
+function findMutation(identity: string, effect?: "create" | "update" | "delete"): number {
+  return queue.findIndex((p) =>
+    p.group === "mutation" && mutationIdentity(p) === identity
+    && (effect === undefined || p.effect === effect));
+}
+
+function pushMutation(m: Omit<Extract<Pending, { group: "mutation" }>, "id">): Pending {
+  const p: Pending = { ...m, id: String(nextID++) };
   queue.push(p);
   notify();
   return p;
 }
 
-// enqueueSpecUpdate queues an edit of an existing spec (PUT /update-<kind>),
-// so edits stage and apply through the same Save loop as create/delete instead
-// of firing instantly.
+// ---- Spec create / update / delete (flat mutations) ----------------------
+
+export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
+  // A pending delete of the same spec is superseded by recreating it.
+  const di = findMutation(`${kind}/${name}`, "delete");
+  if (di >= 0) queue.splice(di, 1);
+  return pushMutation({ group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name, body });
+}
+
+// enqueueSpecUpdate queues an edit (PUT /{kind}/{name}) so it stages + applies
+// through the same Save loop as create/delete instead of firing instantly.
 export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
-  // Editing a spec that's still pending-create: fold the edit into the create
-  // (one create with the latest values), keeping create-only fields like scope.
-  const ci = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "create" && p.name === name);
+  const identity = `${kind}/${name}`;
+  // Editing a spec still pending-create folds into the create (latest values),
+  // preserving create-only fields (e.g. scope).
+  const ci = findMutation(identity, "create");
   if (ci >= 0) {
-    const c = queue[ci] as { body: Record<string, unknown> };
-    c.body = { ...c.body, ...body };
+    const c = queue[ci] as { body?: Record<string, unknown> };
+    c.body = { ...(c.body ?? {}), ...body };
     notify();
     return queue[ci]!;
   }
-  // Collapse repeated edits of the same spec to the latest body.
-  const ui = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+  // Collapse repeated edits to the latest body.
+  const ui = findMutation(identity, "update");
   if (ui >= 0) {
-    (queue[ui] as { body: Record<string, unknown> }).body = body;
+    (queue[ui] as { body?: Record<string, unknown> }).body = body;
     notify();
     return queue[ui]!;
   }
-  const p: Pending = { id: String(nextID++), group: "spec", kind, op: "update", name, body };
-  queue.push(p);
-  notify();
-  return p;
+  return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body });
 }
 
 export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null {
-  // If a create is pending for this name, just cancel it (no API round trip).
-  const i = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "create" && p.name === name);
-  if (i >= 0) { queue.splice(i, 1); notify(); return null; }
-  // A pending edit of a spec being deleted is moot — drop it.
-  const ui = queue.findIndex((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+  const identity = `${kind}/${name}`;
+  // Deleting a spec that's only pending-create just cancels the create.
+  const ci = findMutation(identity, "create");
+  if (ci >= 0) { queue.splice(ci, 1); notify(); return null; }
+  // A pending edit of a spec being deleted is moot.
+  const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
-  const p: Pending = { id: String(nextID++), group: "spec", kind, op: "delete", name };
-  queue.push(p);
-  notify();
-  return p;
+  return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name });
+}
+
+// ---- Sub-rule add / update / remove (flat mutations) ---------------------
+// queues / rules / entries on a parent spec — same flat queue, deeper path.
+
+export function enqueueSubCreate(
+  kind: SpecKind, spec: string, endpoint: string, body: Record<string, unknown>, title: string,
+): Pending {
+  return pushMutation({ group: "mutation", method: "POST", path: subBasePath(kind, spec, endpoint), effect: "create", kind, name: spec, sub: { endpoint }, title, body });
+}
+
+export function enqueueSubUpdate(
+  kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string,
+): Pending {
+  const identity = `${kind}/${spec}/${endpoint}/${key}`;
+  const ui = findMutation(identity, "update");
+  if (ui >= 0) {
+    (queue[ui] as { body?: Record<string, unknown>; title: string }).body = body;
+    (queue[ui] as { title: string }).title = title;
+    notify();
+    return queue[ui]!;
+  }
+  return pushMutation({ group: "mutation", method: "PUT", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body });
+}
+
+export function enqueueSubDelete(
+  kind: SpecKind, spec: string, endpoint: string, key: string | number, title: string,
+): Pending {
+  const identity = `${kind}/${spec}/${endpoint}/${key}`;
+  const ui = findMutation(identity, "update");
+  if (ui >= 0) queue.splice(ui, 1);
+  return pushMutation({ group: "mutation", method: "DELETE", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title });
 }
 
 export function enqueueTopologyAddDevice(name: string, body: Record<string, unknown>): Pending {
@@ -215,25 +283,38 @@ export function removeFromQueue(id: string): void {
 
 // ---- Pending-derived helpers used by views to draw green/red overlays ----
 
-export function pendingSpecCreates(kind: SpecKind): string[] {
-  return queue.filter((p) => p.group === "spec" && p.kind === kind && p.op === "create").map((p) => (p as { name: string }).name);
-}
-
-// pendingSpecCreateItems returns queued creates with their body, so the Specs
-// list can place a pending override at its real scope (its name matches the
-// existing network base, so a name-only overlay would hide it under the base).
+// pendingSpecCreateItems returns queued spec creates (top-level, not sub-rule)
+// with their body, so the Specs list can place a pending override at its real
+// scope (its name matches the network base, so a name-only overlay would hide
+// it under the base).
 export function pendingSpecCreateItems(kind: SpecKind): { name: string; body: Record<string, unknown> }[] {
   return queue
-    .filter((p) => p.group === "spec" && p.kind === kind && p.op === "create")
-    .map((p) => ({ name: (p as { name: string }).name, body: (p as { body: Record<string, unknown> }).body }));
+    .filter((p): p is Extract<Pending, { group: "mutation" }> =>
+      p.group === "mutation" && !p.sub && p.kind === kind && p.effect === "create")
+    .map((p) => ({ name: p.name, body: p.body ?? {} }));
 }
 
 export function isSpecPendingDelete(kind: SpecKind, name: string): boolean {
-  return queue.some((p) => p.group === "spec" && p.kind === kind && p.op === "delete" && p.name === name);
+  return queue.some((p) => p.group === "mutation" && !p.sub && p.kind === kind && p.effect === "delete" && p.name === name);
 }
 
 export function isSpecPendingUpdate(kind: SpecKind, name: string): boolean {
-  return queue.some((p) => p.group === "spec" && p.kind === kind && p.op === "update" && p.name === name);
+  return queue.some((p) => p.group === "mutation" && !p.sub && p.kind === kind && p.effect === "update" && p.name === name);
+}
+
+// pendingSubMutations returns queued sub-rule ops for one parent spec's
+// collection, so the inline table can overlay them on the committed rows.
+export function pendingSubMutations(
+  kind: SpecKind, spec: string, endpoint: string,
+): { id: string; effect: "create" | "update" | "delete"; key?: string | number; body?: Record<string, unknown> }[] {
+  return queue
+    .filter((p): p is Extract<Pending, { group: "mutation" }> =>
+      p.group === "mutation" && !!p.sub && p.kind === kind && p.name === spec && p.sub.endpoint === endpoint)
+    .map((p) => ({
+      id: p.id, effect: p.effect,
+      ...(p.sub!.key !== undefined ? { key: p.sub!.key } : {}),
+      ...(p.body !== undefined ? { body: p.body } : {}),
+    }));
 }
 
 export function pendingTopologyDeviceAdds(): { name: string; body: Record<string, unknown> }[] {
@@ -310,30 +391,28 @@ async function applySubset(targets: readonly Pending[], mode: "default" | "topol
 }
 
 function groupOrder(p: Pending): number {
-  if (p.group === "spec" && p.op === "create") return 1;
-  if (p.group === "spec" && p.op === "update") return 1.5;
+  if (p.group === "mutation") {
+    const sub = !!p.sub;
+    if (p.method === "POST") return sub ? 1.3 : 1.0;   // parent specs before their sub-rules
+    if (p.method === "PUT") return 1.5;
+    return sub ? 7.7 : 8.0;                            // sub-rules deleted before parent specs
+  }
   if (p.group === "topology" && p.op === "add-device") return 2;
   if (p.group === "topology" && p.op === "add-link") return 3;
   if (p.group === "device") return 4;
   if (p.group === "interface") return 5;
   if (p.group === "topology" && p.op === "remove-link") return 6;
   if (p.group === "topology" && p.op === "remove-device") return 7;
-  if (p.group === "spec" && p.op === "delete") return 8;
   return 9;
 }
 
 async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void> {
   const modeQS = mode === "topology" ? "?mode=topology" : "";
-  if (p.group === "spec" && p.op === "create") {
-    await postJSON(apiPath(p.kind), p.body);
-    return;
-  }
-  if (p.group === "spec" && p.op === "update") {
-    await put(apiPath(`${p.kind}/${encodeURIComponent(p.name)}`), p.body);
-    return;
-  }
-  if (p.group === "spec" && p.op === "delete") {
-    await del(apiPath(`${p.kind}/${encodeURIComponent(p.name)}`));
+  // The flat thread: a mutation is just its HTTP verb replayed on its path.
+  if (p.group === "mutation") {
+    if (p.method === "POST") { await postJSON(apiPath(p.path), p.body ?? {}); return; }
+    if (p.method === "PUT") { await put(apiPath(p.path), p.body ?? {}); return; }
+    await del(apiPath(p.path));
     return;
   }
   if (p.group === "topology" && p.op === "add-device") {
@@ -400,9 +479,11 @@ async function parseOrThrow(r: Response): Promise<unknown> {
 // ---- Description (for the pending-bar list) ------------------------------
 
 export function describePending(p: Pending): string {
-  if (p.group === "spec" && p.op === "create") return `+ ${p.kind} ${p.name}`;
-  if (p.group === "spec" && p.op === "update") return `~ ${p.kind} ${p.name}`;
-  if (p.group === "spec" && p.op === "delete") return `− ${p.kind} ${p.name}`;
+  if (p.group === "mutation") {
+    const sign = p.effect === "create" ? "+" : p.effect === "delete" ? "−" : "~";
+    const where = p.sub ? `${p.sub.endpoint} ${p.title} on ${p.name}` : `${p.kind} ${p.title}`;
+    return `${sign} ${where}`;
+  }
   if (p.group === "topology" && p.op === "add-device") return `+ device ${p.name}`;
   if (p.group === "topology" && p.op === "remove-device") return `− device ${p.name}`;
   if (p.group === "topology" && p.op === "add-link") return `+ link ${p.a} ↔ ${p.z}`;

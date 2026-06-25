@@ -62,20 +62,22 @@ export interface ApplyPreview {
 
 // Mirrors staging.ts groupOrder() exactly so the preview shows the same
 // order the apply loop will execute.
-const ORDER: Record<string, number> = {
-  "spec.create": 1,
-  "spec.update": 1.5,
-  "topology.add-device": 2,
-  "topology.add-link": 3,
-  "device.action": 4,
-  "interface.action": 5,
-  "topology.remove-link": 6,
-  "topology.remove-device": 7,
-  "spec.delete": 8,
-};
-
-function keyOf(p: Pending): string {
-  return `${p.group}.${p.op}`;
+function orderOf(p: Pending): number {
+  if (p.group === "mutation") {
+    const sub = !!p.sub;
+    if (p.method === "POST") return sub ? 1.3 : 1.0;
+    if (p.method === "PUT") return 1.5;
+    return sub ? 7.7 : 8.0;
+  }
+  switch (`${p.group}.${p.op}`) {
+    case "topology.add-device": return 2;
+    case "topology.add-link": return 3;
+    case "device.action": return 4;
+    case "interface.action": return 5;
+    case "topology.remove-link": return 6;
+    case "topology.remove-device": return 7;
+    default: return 9;
+  }
 }
 
 /**
@@ -84,7 +86,7 @@ function keyOf(p: Pending): string {
  */
 export function previewQueue(queue: readonly Pending[]): ApplyPreview {
   const items = queue.slice()
-    .sort((a, b) => (ORDER[keyOf(a)] ?? 99) - (ORDER[keyOf(b)] ?? 99))
+    .sort((a, b) => orderOf(a) - orderOf(b))
     .map(toPreview);
   const counts = { create: 0, update: 0, delete: 0, action: 0, danger: 0 };
   for (const it of items) {
@@ -101,25 +103,14 @@ export function previewQueue(queue: readonly Pending[]): ApplyPreview {
 }
 
 function toPreview(p: Pending): PendingPreview {
-  if (p.group === "spec" && p.op === "create") {
+  if (p.group === "mutation") {
     return {
-      id: p.id, effect: "create", kind: "spec",
-      title: p.name, scope: kindLabel(p.kind),
-      danger: false, body: p.body,
-    };
-  }
-  if (p.group === "spec" && p.op === "update") {
-    return {
-      id: p.id, effect: "update", kind: "spec",
-      title: p.name, scope: kindLabel(p.kind),
-      danger: false, body: p.body,
-    };
-  }
-  if (p.group === "spec" && p.op === "delete") {
-    return {
-      id: p.id, effect: "delete", kind: "spec",
-      title: p.name, scope: kindLabel(p.kind),
-      danger: true, body: null,
+      id: p.id, effect: p.effect,
+      kind: p.sub ? "sub-rule" : "spec",
+      title: p.title,
+      scope: p.sub ? `${kindLabel(p.kind)} · ${p.sub.endpoint}` : kindLabel(p.kind),
+      danger: p.effect === "delete",
+      body: p.body ?? null,
     };
   }
   if (p.group === "topology" && p.op === "add-device") {

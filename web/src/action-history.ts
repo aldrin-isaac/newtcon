@@ -18,7 +18,7 @@ import type { ApplyPreview } from "./apply-preview.js";
 /** Per-item record — mirrors PendingPreview + the apply outcome + any error. */
 export interface HistoryItem {
   id: string;
-  effect: "create" | "delete" | "action";
+  effect: "create" | "update" | "delete" | "action";
   kind: string;
   title: string;
   scope: string;
@@ -170,7 +170,7 @@ export function buildEntry(args: {
  */
 function isItemUndoable(
   item: {
-    effect: "create" | "delete" | "action";
+    effect: "create" | "update" | "delete" | "action";
     kind: string;
     id: string;
     actionId?: string;

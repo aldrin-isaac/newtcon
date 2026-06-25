@@ -71,6 +71,57 @@ export function itemKey(
   return null;
 }
 
+// ---- Pending overlay -----------------------------------------------------
+// Sub-rule changes queue like everything else; the inline table overlays the
+// pending ops on the committed rows so the operator sees staged adds (green),
+// edits (amber), and removes (struck) before Apply. Pure — same staging thread.
+
+export interface PendingSubOp {
+  id: string;
+  effect: "create" | "update" | "delete";
+  key?: string | number;
+  body?: Record<string, unknown>;
+}
+
+export interface SubDisplayRow {
+  /** The item to render — committed item, or (for adds/edits) the pending body. */
+  item: unknown;
+  pending: "none" | "add" | "update" | "remove";
+  /** Staging id of the pending op, so the row's control can drop it. */
+  opId?: string;
+}
+
+/**
+ * overlaySubRuleItems merges committed sub-rule items with the pending ops for
+ * that collection: edits/removes match a committed row by key; adds append as
+ * new rows. Pure — no DOM, no queue access.
+ */
+export function overlaySubRuleItems(
+  items: unknown[],
+  ops: readonly PendingSubOp[],
+  itemType: SubRuleItemType,
+  keyField?: string,
+): SubDisplayRow[] {
+  const rows: SubDisplayRow[] = items.map((item) => ({ item, pending: "none" }));
+  for (const op of ops) {
+    if (op.effect === "create") {
+      rows.push({ item: op.body ?? {}, pending: "add", opId: op.id });
+      continue;
+    }
+    const idx = rows.findIndex((r) => itemKey(r.item, itemType, keyField) === op.key);
+    if (idx < 0) continue;
+    if (op.effect === "delete") {
+      rows[idx] = { item: rows[idx]!.item, pending: "remove", opId: op.id };
+    } else {
+      rows[idx] = {
+        item: { ...(rows[idx]!.item as Record<string, unknown>), ...(op.body ?? {}) },
+        pending: "update", opId: op.id,
+      };
+    }
+  }
+  return rows;
+}
+
 /**
  * computeReorderSeq (slice #173.C) — given the sorted seq list of the
  * current rows and the seq of the row the operator wants to move,

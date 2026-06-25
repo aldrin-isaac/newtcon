@@ -26,9 +26,10 @@ describe("planUndo() — spec ops", () => {
     ]), idGen);
     assert.equal(plan.counts.planned, 1);
     const inv = plan.items[0].inverse;
-    assert.equal(inv.group, "spec");
+    assert.equal(inv.group, "mutation");
     assert.equal(inv.kind, "services");
-    assert.equal(inv.op, "delete");
+    assert.equal(inv.effect, "delete");
+    assert.equal(inv.method, "DELETE");
     assert.equal(inv.name, "transit-2026");
   });
 
@@ -37,7 +38,8 @@ describe("planUndo() — spec ops", () => {
       { id: "2", effect: "delete", kind: "spec", title: "old", scope: "zones", danger: true, outcome: "applied", undoable: true, preBody: { name: "old", description: "deprecated" } },
     ]), idGen);
     const inv = plan.items[0].inverse;
-    assert.equal(inv.op, "create");
+    assert.equal(inv.effect, "create");
+    assert.equal(inv.method, "POST");
     assert.equal(inv.kind, "zones");
     assert.deepEqual(inv.body, { name: "old", description: "deprecated" });
   });

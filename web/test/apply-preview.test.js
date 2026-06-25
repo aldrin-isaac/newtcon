@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import { previewQueue } from "../dist/apply-preview.js";
 
 const specCreate  = (id, name, kind = "services") =>
-  ({ id, group: "spec", kind, op: "create", name, body: { name } });
+  ({ id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: { name } });
 const specDelete  = (id, name, kind = "services") =>
-  ({ id, group: "spec", kind, op: "delete", name });
+  ({ id, group: "mutation", method: "DELETE", path: `${kind}/${name}`, effect: "delete", kind, name, title: name });
 const addDevice   = (id, name) =>
   ({ id, group: "topology", op: "add-device", name, body: {} });
 const removeDevice = (id, name) =>

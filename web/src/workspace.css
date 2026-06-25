@@ -1066,6 +1066,18 @@
 .subrule-edit-btn:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 .subrule-delete-btn { background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px 6px; font-size: var(--text-md); line-height: 1; border-radius: var(--radius-sm); }
 .subrule-delete-btn:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+
+/* Pending (staged) sub-rule rows — green add / amber edit / struck remove,
+ * mirroring the spec-list pending colors. The committed row stands until
+ * Apply; ↺ drops the queued op. */
+.subrule-row--pending-add { background: var(--color-success-bg); }
+.subrule-row--pending-add .subrule-td { color: var(--color-success); }
+.subrule-row--pending-update { background: var(--color-warning-bg); }
+.subrule-row--pending-update .subrule-td { color: var(--color-warning); }
+.subrule-row--pending-remove { background: var(--color-danger-bg); }
+.subrule-row--pending-remove .subrule-td { color: var(--color-danger); text-decoration: line-through; }
+.subrule-undo-btn { background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px 6px; font-size: var(--text-md); line-height: 1; border-radius: var(--radius-sm); }
+.subrule-undo-btn:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 /* Inline-edit row (slice #173.B) — replaces the read-only row when
  * the operator clicks the Edit pencil. Cell colspans the full table
  * and hosts the prefilled buildFormFields form. */
