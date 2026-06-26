@@ -60,6 +60,25 @@ export interface PendingPreview {
   preBody?: Record<string, unknown>;
 }
 
+// ---- Drift check ---------------------------------------------------------
+// A staged op assumes the server is in a certain state; between staging and
+// Apply that can drift (a concurrent change, or undoing against a world that
+// moved). driftVerdict turns "what the op assumes" + "what's there now" into a
+// pre-apply warning, so the operator isn't surprised by a post-apply failure.
+// Existence-based: it catches create-over-existing, edit/delete-of-missing, and
+// undo-resurrect. (Detecting an update that silently *clobbers* a concurrent
+// edit needs server-side versioning newtron doesn't expose yet — separate gap.)
+
+export type DriftLevel = "none" | "warn" | "info";
+export interface DriftVerdict { level: DriftLevel; reason: string; }
+
+export function driftVerdict(effect: "create" | "update" | "delete", exists: boolean): DriftVerdict {
+  if (effect === "create" && exists) return { level: "warn", reason: "already exists — apply will fail or overwrite it" };
+  if (effect === "update" && !exists) return { level: "warn", reason: "no longer exists — the edit will fail" };
+  if (effect === "delete" && !exists) return { level: "info", reason: "already gone — delete is a no-op" };
+  return { level: "none", reason: "" };
+}
+
 export interface ApplyPreview {
   total: number;
   /** Items in apply order (same order staging.applySubset uses). */

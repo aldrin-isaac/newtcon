@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { previewQueue } from "../dist/apply-preview.js";
+import { previewQueue, driftVerdict } from "../dist/apply-preview.js";
 
 const specCreate  = (id, name, kind = "services") =>
   ({ id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: { name } });
@@ -143,5 +143,26 @@ describe("previewQueue() — counts + flags", () => {
     const mixed = previewQueue([specCreate("1", "a"), specDelete("2", "b")]);
     assert.equal(mixed.hasDangerous, true);
     assert.equal(mixed.hasDeletes, true);
+  });
+});
+
+describe("driftVerdict() — pre-apply state check", () => {
+  test("create over an existing target → warn", () => {
+    assert.equal(driftVerdict("create", true).level, "warn");
+  });
+  test("create with target absent → none (clean)", () => {
+    assert.equal(driftVerdict("create", false).level, "none");
+  });
+  test("update on a missing target → warn", () => {
+    assert.equal(driftVerdict("update", false).level, "warn");
+  });
+  test("update on a present target → none", () => {
+    assert.equal(driftVerdict("update", true).level, "none");
+  });
+  test("delete on a missing target → info (no-op)", () => {
+    assert.equal(driftVerdict("delete", false).level, "info");
+  });
+  test("delete on a present target → none", () => {
+    assert.equal(driftVerdict("delete", true).level, "none");
   });
 });

@@ -609,6 +609,15 @@
 .apply-preview-body { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--color-surface); padding: var(--space-sm); border: 1px solid var(--color-border-subtle); border-radius: 4px; margin: var(--space-2xs) 0 0 32px; max-height: 240px; overflow: auto; white-space: pre; color: var(--color-text-primary); }
 .apply-preview-warn { padding: var(--space-sm) var(--space-lg); margin: 0; background: var(--color-warning-bg); color: var(--color-warning); font-size: var(--text-sm); border-top: 1px solid var(--color-warning-border); }
 
+/* Drift check — server moved since the op was staged. */
+.apply-preview-drift { padding: var(--space-sm) var(--space-lg); border-top: 1px solid var(--color-border-subtle); }
+.apply-preview-drift-status { margin: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+.apply-preview-drift-head { margin: 0 0 var(--space-2xs); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--color-warning); }
+.apply-preview-drift-list { margin: 0; padding-left: var(--space-lg); font-size: var(--text-xs); }
+.apply-preview-drift-item { font-family: var(--font-mono); }
+.apply-preview-drift-item--warn { color: var(--color-warning); }
+.apply-preview-drift-item--info { color: var(--color-text-secondary); }
+
 /* Per-device projection block in the apply-preview modal (slice #171.B) */
 .apply-preview-projection { padding: var(--space-sm) var(--space-lg); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface); }
 .apply-preview-projection-heading { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin: 0 0 var(--space-2xs); color: var(--color-text-primary); }

@@ -12,7 +12,8 @@ import {
   discardAll,
   applyAll,
 } from "./staging.js";
-import { previewQueue, type ApplyPreview, type PendingPreview } from "./apply-preview.js";
+import { previewQueue, driftVerdict, type ApplyPreview, type PendingPreview, type DriftVerdict } from "./apply-preview.js";
+import { apiPath } from "./api-path.js";
 import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
 import type { Pending } from "./staging.js";
@@ -528,6 +529,10 @@ function mountApplyPreviewModal(
     card.appendChild(renderProjectionSection(batches, activeNetwork()));
   }
 
+  // Drift check: does the server still match what each staged spec op assumes?
+  // Async — probes existence per spec mutation and warns before Apply.
+  card.appendChild(renderDriftSection(getQueue(), activeNetwork()));
+
   if (preview.hasDangerous) {
     const warn = document.createElement("p");
     warn.className = "apply-preview-warn";
@@ -629,6 +634,53 @@ function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
     row.appendChild(details);
   }
   return row;
+}
+
+// renderDriftSection probes, per staged spec mutation, whether the server
+// still matches what the op assumes (existence), and warns before Apply so the
+// operator isn't surprised by a post-apply failure or an undo-resurrect. Async,
+// like the projection section. Sub-rule / topology drift is a follow-up.
+function renderDriftSection(queue: readonly Pending[], network: string): HTMLElement {
+  const section = document.createElement("div");
+  section.className = "apply-preview-drift";
+  const specOps = queue.filter((p): p is Extract<Pending, { group: "mutation" }> =>
+    p.group === "mutation" && !p.sub);
+  if (specOps.length === 0) { section.hidden = true; return section; }
+
+  const status = document.createElement("p");
+  status.className = "apply-preview-drift-status";
+  status.textContent = "Checking for drift…";
+  section.appendChild(status);
+
+  void (async () => {
+    const hits = (await Promise.all(specOps.map(async (p) => {
+      let exists: boolean;
+      try {
+        const r = await fetch(apiPath.network(network, `${p.kind}/${encodeURIComponent(p.name)}`), { cache: "no-store" });
+        exists = r.ok;
+      } catch { return null; } // probe failed — don't cry drift on a transient error
+      const v = driftVerdict(p.effect, exists);
+      return v.level === "none" ? null : { p, v };
+    }))).filter((x): x is { p: Extract<Pending, { group: "mutation" }>; v: DriftVerdict } => x !== null);
+
+    section.textContent = "";
+    if (hits.length === 0) { section.hidden = true; return; }
+    const head = document.createElement("p");
+    head.className = "apply-preview-drift-head";
+    head.textContent = `${hits.length} possible drift${hits.length === 1 ? "" : "s"} — the server moved since you staged:`;
+    section.appendChild(head);
+    const ul = document.createElement("ul");
+    ul.className = "apply-preview-drift-list";
+    for (const { p, v } of hits) {
+      const li = document.createElement("li");
+      li.className = "apply-preview-drift-item apply-preview-drift-item--" + v.level;
+      li.textContent = `${p.kind} ${p.name}: ${v.reason}`;
+      ul.appendChild(li);
+    }
+    section.appendChild(ul);
+  })();
+
+  return section;
 }
 
 // renderProjectionSection renders the per-device projection block inside

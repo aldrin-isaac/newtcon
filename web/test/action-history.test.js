@@ -371,3 +371,68 @@ describe("storage round-trip", () => {
     assert.deepEqual(loadHistory("net2").map((e) => e.id), ["b"]);
   });
 });
+
+describe("buildEntry() — topology remove inverses backfill from captured prior state", () => {
+  const previewWith = (item) => ({
+    total: 1, items: [item], counts: { create: 0, update: 0, delete: 1, action: 0, danger: 1 },
+    hasDangerous: true, hasDeletes: true,
+  });
+
+  test("remove-device → inverse add-device gets its body backfilled; undoable", () => {
+    const item = {
+      id: "d1", effect: "delete", kind: "device", title: "r1", scope: "topology", danger: true, body: null,
+      inverse: { group: "topology", op: "add-device", name: "r1" }, // no body at stage time
+    };
+    const entry = buildEntry({
+      id: "e", timestamp: "t", user: null, network: "n",
+      preview: previewWith(item),
+      result: { applied: [{ id: "d1" }], failed: [] },
+      preBodies: new Map([["d1", { ports: { eth0: {} }, steps: [] }]]),
+    });
+    const it = entry.items[0];
+    assert.deepEqual(it.inverse, { group: "topology", op: "add-device", name: "r1", body: { ports: { eth0: {} }, steps: [] } });
+    assert.equal(it.undoable, true);
+  });
+
+  test("remove-link → inverse add-link gets both endpoints backfilled; undoable", () => {
+    const item = {
+      id: "l1", effect: "delete", kind: "link", title: "r1:eth0", scope: "topology", danger: true, body: null,
+      inverse: { group: "topology", op: "add-link" }, // no a/z at stage time
+    };
+    const entry = buildEntry({
+      id: "e", timestamp: "t", user: null, network: "n",
+      preview: previewWith(item),
+      result: { applied: [{ id: "l1" }], failed: [] },
+      preBodies: new Map([["l1", { a: "r1:eth0", z: "r2:eth0" }]]),
+    });
+    assert.deepEqual(entry.items[0].inverse, { group: "topology", op: "add-link", a: "r1:eth0", z: "r2:eth0" });
+    assert.equal(entry.items[0].undoable, true);
+  });
+
+  test("remove with no captured prior state → inverse incomplete → not undoable", () => {
+    const item = {
+      id: "d1", effect: "delete", kind: "device", title: "r1", scope: "topology", danger: true, body: null,
+      inverse: { group: "topology", op: "add-device", name: "r1" },
+    };
+    const entry = buildEntry({
+      id: "e", timestamp: "t", user: null, network: "n",
+      preview: previewWith(item),
+      result: { applied: [{ id: "d1" }], failed: [] },
+      // no preBodies
+    });
+    assert.equal(entry.items[0].undoable, false);
+  });
+
+  test("topology add-device → inverse remove-device needs no backfill; undoable", () => {
+    const item = {
+      id: "a1", effect: "create", kind: "device", title: "r9", scope: "topology", danger: false, body: { ports: {} },
+      inverse: { group: "topology", op: "remove-device", name: "r9" },
+    };
+    const entry = buildEntry({
+      id: "e", timestamp: "t", user: null, network: "n",
+      preview: { total: 1, items: [item], counts: { create: 1, update: 0, delete: 0, action: 0, danger: 0 }, hasDangerous: false, hasDeletes: false },
+      result: { applied: [{ id: "a1" }], failed: [] },
+    });
+    assert.equal(entry.items[0].undoable, true);
+  });
+});
