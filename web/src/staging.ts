@@ -32,20 +32,22 @@ export type SpecKind =
 // used to fold edits and to overlay pending state on a row. Topology +
 // device/interface actions keep their richer typed shapes below (RPCs, wrapped
 // bodies, per-device apply) — they ride the same flat queue.
-// InverseMutation describes the newtron write that reverses a mutation. The
-// inverse of a mutation is itself a mutation, so it's the same fields minus the
-// queue id and its own inverse (recomputed when the undo is itself staged).
-// Born together with the forward op — undo just replays it.
-export interface InverseMutation {
-  method: "POST" | "PUT" | "DELETE";
-  path: string;
-  effect: "create" | "update" | "delete";
-  kind: SpecKind;
-  name: string;
-  sub?: { endpoint: string; key?: string | number };
-  title: string;
-  body?: Record<string, unknown>;
-}
+// PendingInverse is the op that reverses a Pending — the same shape minus the
+// queue id and its own inverse. The inverse of any op is itself an op, so this
+// mirrors Pending's variants. Every op computes its inverse when it's staged
+// (full context: path, verb, body, prior state); undo just replays it. The
+// fields a remove can't know until apply (a re-create's body, a re-link's far
+// endpoint) are optional here and backfilled at apply from capturePreApplyBodies.
+export type PendingInverse =
+  | { group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
+      effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
+      sub?: { endpoint: string; key?: string | number }; title: string; body?: Record<string, unknown>; }
+  | { group: "topology";  op: "add-device";    name: string; body?: Record<string, unknown>; }
+  | { group: "topology";  op: "remove-device"; name: string; }
+  | { group: "topology";  op: "add-link";      a?: string; z?: string; }
+  | { group: "topology";  op: "remove-link";   device: string; iface: string; }
+  | { group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
+  | { group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; };
 
 export type Pending =
   | { id: string; group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
@@ -55,16 +57,13 @@ export type Pending =
       // Prior server state (display + spec-delete inverse backfill). Captured
       // from the UI at stage time, or fetched at apply for a bare ×.
       preBody?: Record<string, unknown>;
-      // The op that undoes this one, computed at stage time from full context.
-      // Absent ⇒ not undoable. For a spec-delete the body is backfilled at
-      // apply (the × hasn't read the spec); everything else is complete here.
-      inverse?: InverseMutation; }
-  | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
-  | { id: string; group: "topology";  op: "remove-device"; name: string; }
-  | { id: string; group: "topology";  op: "add-link";      a: string; z: string; }
-  | { id: string; group: "topology";  op: "remove-link";   device: string; iface: string; }
-  | { id: string; group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
-  | { id: string; group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; };
+      inverse?: PendingInverse; }
+  | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; inverse?: PendingInverse; }
+  | { id: string; group: "topology";  op: "remove-device"; name: string; inverse?: PendingInverse; }
+  | { id: string; group: "topology";  op: "add-link";      a: string; z: string; inverse?: PendingInverse; }
+  | { id: string; group: "topology";  op: "remove-link";   device: string; iface: string; inverse?: PendingInverse; }
+  | { id: string; group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; }
+  | { id: string; group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; };
 
 // ---- Store ---------------------------------------------------------------
 
@@ -125,7 +124,7 @@ export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<str
   // A pending delete of the same spec is superseded by recreating it.
   const di = findMutation(`${kind}/${name}`, "delete");
   if (di >= 0) queue.splice(di, 1);
-  const inverse: InverseMutation = { method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name };
+  const inverse: PendingInverse = { group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name };
   return pushMutation({ group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name, body, inverse });
 }
 
@@ -149,8 +148,8 @@ export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<str
     notify();
     return queue[ui]!;
   }
-  const inverse: InverseMutation | undefined = preBody
-    ? { method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body: preBody }
+  const inverse: PendingInverse | undefined = preBody
+    ? { group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body: preBody }
     : undefined;
   return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
@@ -165,7 +164,7 @@ export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null 
   if (ui >= 0) queue.splice(ui, 1);
   // The × hasn't read the spec, so the inverse's body is backfilled at apply
   // (capturePreApplyBodies) — the structure is known here.
-  const inverse: InverseMutation = { method: "POST", path: specPath(kind), effect: "create", kind, name, title: name };
+  const inverse: PendingInverse = { group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name };
   return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name, inverse });
 }
 
@@ -178,7 +177,7 @@ export function enqueueSubCreate(
   kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string,
 ): Pending {
   const base = subBasePath(kind, spec, endpoint);
-  const inverse: InverseMutation = { method: "DELETE", path: `${base}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title };
+  const inverse: PendingInverse = { group: "mutation", method: "DELETE", path: `${base}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title };
   return pushMutation({ group: "mutation", method: "POST", path: base, effect: "create", kind, name: spec, sub: { endpoint, key }, title, body, inverse });
 }
 
@@ -195,8 +194,8 @@ export function enqueueSubUpdate(
     return queue[ui]!;
   }
   const path = `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`;
-  const inverse: InverseMutation | undefined = preBody
-    ? { method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
+  const inverse: PendingInverse | undefined = preBody
+    ? { group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
     : undefined;
   return pushMutation({ group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
@@ -214,8 +213,8 @@ export function enqueueSubDelete(
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
   const base = subBasePath(kind, spec, endpoint);
-  const inverse: InverseMutation | undefined = preBody
-    ? { method: "POST", path: base, effect: "create", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
+  const inverse: PendingInverse | undefined = preBody
+    ? { group: "mutation", method: "POST", path: base, effect: "create", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
     : undefined;
   return pushMutation({ group: "mutation", method: "DELETE", path: `${base}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
@@ -229,40 +228,83 @@ export function enqueueSubReorder(
   fwdBody: Record<string, unknown>, invBody: Record<string, unknown>, title: string,
 ): Pending {
   const base = subBasePath(kind, spec, endpoint);
-  const inverse: InverseMutation = { method: "PUT", path: `${base}/${enc(String(toKey))}`, effect: "update", kind, name: spec, sub: { endpoint, key: toKey }, title, body: invBody };
+  const inverse: PendingInverse = { group: "mutation", method: "PUT", path: `${base}/${enc(String(toKey))}`, effect: "update", kind, name: spec, sub: { endpoint, key: toKey }, title, body: invBody };
   return pushMutation({ group: "mutation", method: "PUT", path: `${base}/${enc(String(fromKey))}`, effect: "update", kind, name: spec, sub: { endpoint, key: fromKey }, title, body: fwdBody, inverse });
 }
 
+// ---- Topology ops (carry their own inverse) ------------------------------
+// add ⇄ remove. A remove can't know its re-create body / far endpoint at stage
+// time (the × only has the near side), so the inverse carries the structure and
+// capturePreApplyBodies backfills the rest at apply.
+
 export function enqueueTopologyAddDevice(name: string, body: Record<string, unknown>): Pending {
-  const p: Pending = { id: String(nextID++), group: "topology", op: "add-device", name, body };
+  const inverse: PendingInverse = { group: "topology", op: "remove-device", name };
+  const p: Pending = { id: String(nextID++), group: "topology", op: "add-device", name, body, inverse };
   queue.push(p); notify(); return p;
 }
 
 export function enqueueTopologyRemoveDevice(name: string): Pending | null {
   const i = queue.findIndex((p) => p.group === "topology" && p.op === "add-device" && p.name === name);
   if (i >= 0) { queue.splice(i, 1); notify(); return null; }
-  const p: Pending = { id: String(nextID++), group: "topology", op: "remove-device", name };
+  const inverse: PendingInverse = { group: "topology", op: "add-device", name }; // body backfilled at apply
+  const p: Pending = { id: String(nextID++), group: "topology", op: "remove-device", name, inverse };
   queue.push(p); notify(); return p;
 }
 
 export function enqueueTopologyAddLink(a: string, z: string): Pending {
-  const p: Pending = { id: String(nextID++), group: "topology", op: "add-link", a, z };
+  // Inverse removes the link by its A endpoint (newtron matches either side).
+  const colon = a.indexOf(":");
+  const inverse: PendingInverse = colon >= 0
+    ? { group: "topology", op: "remove-link", device: a.slice(0, colon), iface: a.slice(colon + 1) }
+    : { group: "topology", op: "remove-link", device: a, iface: "" };
+  const p: Pending = { id: String(nextID++), group: "topology", op: "add-link", a, z, inverse };
   queue.push(p); notify(); return p;
 }
 
 export function enqueueTopologyRemoveLink(device: string, iface: string): Pending {
-  const p: Pending = { id: String(nextID++), group: "topology", op: "remove-link", device, iface };
+  const inverse: PendingInverse = { group: "topology", op: "add-link" }; // a/z backfilled at apply
+  const p: Pending = { id: String(nextID++), group: "topology", op: "remove-link", device, iface, inverse };
   queue.push(p); notify(); return p;
 }
 
 export function enqueueDeviceAction(device: string, actionId: string, label: string, body: Record<string, unknown>, danger?: boolean): Pending {
+  // No node-level inverses mapped yet (NODE_ACTIONS is empty) → not undoable.
   const p: Pending = { id: String(nextID++), group: "device", op: "action", device, actionId, label, body, ...(danger ? { danger: true } : {}) };
   queue.push(p); notify(); return p;
 }
 
 export function enqueueInterfaceAction(device: string, iface: string, actionId: string, label: string, body: Record<string, unknown>, danger?: boolean): Pending {
-  const p: Pending = { id: String(nextID++), group: "interface", op: "action", device, iface, actionId, label, body, ...(danger ? { danger: true } : {}) };
+  const inverse = interfaceActionInverse(device, iface, actionId, body);
+  const p: Pending = { id: String(nextID++), group: "interface", op: "action", device, iface, actionId, label, body, ...(danger ? { danger: true } : {}), ...(inverse ? { inverse } : {}) };
   queue.push(p); notify(); return p;
+}
+
+// interfaceActionInverse composes the inverse RPC for an interface action, from
+// the action + its body (all known at stage time). Returns undefined when no
+// faithful inverse exists (→ not undoable). Relocated here from undo-plan so the
+// op is born with its inverse like every other op.
+//   apply-service                  → remove-service
+//   configure-interface trunk-add  → remove-trunk-vlan (atomic per-VLAN strip)
+//   configure-interface access/rtd → unconfigure-interface (newtron case A:
+//                                    these modes are only entered from empty)
+function interfaceActionInverse(
+  device: string, iface: string, actionId: string, body: Record<string, unknown>,
+): PendingInverse | undefined {
+  if (actionId === "apply-service") {
+    return { group: "interface", op: "action", device, iface, actionId: "remove-service", label: "Unbind service from " + device + ":" + iface, body: {}, danger: true };
+  }
+  if (actionId === "configure-interface") {
+    if (body["tagged"] === true) {
+      const vlanId = body["vlan_id"];
+      if (typeof vlanId !== "number") return undefined;
+      return { group: "interface", op: "action", device, iface, actionId: "remove-trunk-vlan", label: "Remove trunk VLAN " + vlanId + " from " + device + ":" + iface, body: { vlan_id: vlanId }, danger: true };
+    }
+    const isAccess = body["tagged"] === false && typeof body["vlan_id"] === "number";
+    const isRouted = typeof body["vrf"] === "string" || typeof body["ip"] === "string";
+    if (!isAccess && !isRouted) return undefined;
+    return { group: "interface", op: "action", device, iface, actionId: "unconfigure-interface", label: "Clear port configuration on " + device + ":" + iface, body: {}, danger: true };
+  }
+  return undefined;
 }
 
 // Filter helpers — used by per-device Apply/Discard buttons.

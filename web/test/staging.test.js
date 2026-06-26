@@ -13,6 +13,12 @@ import {
   enqueueSubUpdate,
   enqueueSubDelete,
   enqueueSubReorder,
+  enqueueTopologyAddDevice,
+  enqueueTopologyRemoveDevice,
+  enqueueTopologyAddLink,
+  enqueueTopologyRemoveLink,
+  enqueueDeviceAction,
+  enqueueInterfaceAction,
   pendingSubMutations,
   isSpecPendingUpdate,
   getQueue,
@@ -124,7 +130,7 @@ describe("mutations carry their own inverse (born together)", () => {
 
   test("spec create → inverse delete", () => {
     const p = enqueueSpecCreate("ipvpns", "IRB", { l3vni: 1 });
-    assert.deepEqual(p.inverse, { method: "DELETE", path: "ipvpns/IRB", effect: "delete", kind: "ipvpns", name: "IRB", title: "IRB" });
+    assert.deepEqual(p.inverse, { group: "mutation", method: "DELETE", path: "ipvpns/IRB", effect: "delete", kind: "ipvpns", name: "IRB", title: "IRB" });
   });
 
   test("spec update with preBody → inverse update restoring preBody", () => {
@@ -161,5 +167,57 @@ describe("mutations carry their own inverse (born together)", () => {
     assert.deepEqual(p.body, { new_seq: 20 });
     assert.equal(p.inverse.path, "filters/ACL/rules/20", "inverse addresses the target seq");
     assert.deepEqual(p.inverse.body, { new_seq: 10 });
+  });
+});
+
+describe("topology + action ops carry their own inverse", () => {
+  beforeEach(() => discardAll());
+
+  test("topology add-device → inverse remove-device", () => {
+    const p = enqueueTopologyAddDevice("r1", { ports: {} });
+    assert.deepEqual(p.inverse, { group: "topology", op: "remove-device", name: "r1" });
+  });
+
+  test("topology remove-device → inverse add-device (body backfilled at apply)", () => {
+    const p = enqueueTopologyRemoveDevice("r1");
+    assert.deepEqual(p.inverse, { group: "topology", op: "add-device", name: "r1" });
+  });
+
+  test("topology add-link → inverse remove-link by the A endpoint", () => {
+    const p = enqueueTopologyAddLink("r1:eth0", "r2:eth0");
+    assert.deepEqual(p.inverse, { group: "topology", op: "remove-link", device: "r1", iface: "eth0" });
+  });
+
+  test("topology remove-link → inverse add-link (endpoints backfilled at apply)", () => {
+    const p = enqueueTopologyRemoveLink("r1", "eth0");
+    assert.deepEqual(p.inverse, { group: "topology", op: "add-link" });
+  });
+
+  test("interface apply-service → inverse remove-service", () => {
+    const p = enqueueInterfaceAction("r1", "eth0", "apply-service", "Apply X", { service: "X" });
+    assert.equal(p.inverse.actionId, "remove-service");
+    assert.equal(p.inverse.group, "interface");
+  });
+
+  test("configure-interface trunk-add → inverse remove-trunk-vlan with vlan_id", () => {
+    const p = enqueueInterfaceAction("r1", "eth0", "configure-interface", "Trunk +100", { tagged: true, vlan_id: 100 });
+    assert.equal(p.inverse.actionId, "remove-trunk-vlan");
+    assert.deepEqual(p.inverse.body, { vlan_id: 100 });
+  });
+
+  test("configure-interface access/routed → inverse unconfigure-interface", () => {
+    const a = enqueueInterfaceAction("r1", "eth0", "configure-interface", "Access 100", { tagged: false, vlan_id: 100 });
+    assert.equal(a.inverse.actionId, "unconfigure-interface");
+    discardAll();
+    const r = enqueueInterfaceAction("r1", "eth1", "configure-interface", "Routed", { vrf: "V", ip: "1.1.1.1/30" });
+    assert.equal(r.inverse.actionId, "unconfigure-interface");
+  });
+
+  test("non-invertible action → no inverse (not undoable)", () => {
+    const p = enqueueInterfaceAction("r1", "eth0", "configure-interface", "weird", {});
+    assert.equal(p.inverse, undefined);
+    discardAll();
+    const d = enqueueDeviceAction("r1", "reboot", "Reboot", {});
+    assert.equal(d.inverse, undefined);
   });
 });
