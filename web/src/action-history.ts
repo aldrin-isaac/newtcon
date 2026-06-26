@@ -202,10 +202,15 @@ function isItemUndoable(
     return predicate(item.body ?? undefined);
   }
   // Spec / sub-rule / topology mutations: a create inverts to a delete (no
-  // prior state needed); a delete/update inverts only when we captured the
-  // prior body (fetched at apply, or staged from the UI for sub-rules/edits).
+  // prior state needed); a delete/update inverts when we captured the prior
+  // body (fetched at apply, or staged from the UI for sub-rules/edits).
   if (item.effect === "create") return true;
-  return preBodies.has(item.id) || !!item.preBody;
+  if (preBodies.has(item.id) || !!item.preBody) return true;
+  // A key-changing update (reorder / rename) carries its own renumber in the
+  // body (new_<key>), so the inverse is computable without a prior body.
+  if (item.effect === "update" && item.body
+    && Object.keys(item.body).some((k) => k.startsWith("new_"))) return true;
+  return false;
 }
 
 /**

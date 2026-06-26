@@ -300,3 +300,44 @@ describe("planUndo() — empty entry", () => {
     assert.deepEqual(plan.counts, { planned: 0, skipped: 0 });
   });
 });
+
+describe("planUndo() — sub-rule reorder / rename inverses", () => {
+  test("reorder (body new_seq, no preBody) → renumber back, keyed by the new seq", () => {
+    const plan = planUndo(entry([
+      { id: "1", effect: "update", kind: "sub-rule", title: "10", scope: "filters · rules",
+        resourceKind: "filters", resourceName: "ACL", sub: { endpoint: "rules", key: 10 },
+        body: { new_seq: 20 }, danger: false, outcome: "applied", undoable: true },
+    ]), idGen);
+    assert.equal(plan.counts.planned, 1);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.method, "PUT");
+    assert.equal(inv.path, "filters/ACL/rules/20", "inverse addresses the NEW seq");
+    assert.deepEqual(inv.body, { new_seq: 10 }, "renumbers back to the original seq");
+  });
+
+  test("edit + rename (body new_seq + fields, preBody) → restore fields at the new seq", () => {
+    const plan = planUndo(entry([
+      { id: "1", effect: "update", kind: "sub-rule", title: "10", scope: "filters · rules",
+        resourceKind: "filters", resourceName: "ACL", sub: { endpoint: "rules", key: 10 },
+        body: { new_seq: 20, action: "deny" }, preBody: { seq: 10, action: "permit" },
+        danger: false, outcome: "applied", undoable: true },
+    ]), idGen);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.path, "filters/ACL/rules/20");
+    assert.equal(inv.body.new_seq, 10, "renumber back");
+    assert.equal(inv.body.action, "permit", "prior field restored");
+    assert.equal("seq" in inv.body, false, "the raw key field is not re-sent");
+  });
+
+  test("string-entry delete with reconstructed preBody → re-create on the collection", () => {
+    const plan = planUndo(entry([
+      { id: "1", effect: "delete", kind: "sub-rule", title: "10.0.0.0/8", scope: "prefix-lists · entries",
+        resourceKind: "prefix-lists", resourceName: "MYLIST", sub: { endpoint: "entries", key: "10.0.0.0/8" },
+        preBody: { prefix: "10.0.0.0/8", prefix_list: "MYLIST" }, danger: true, outcome: "applied", undoable: true },
+    ]), idGen);
+    const inv = plan.items[0].inverse;
+    assert.equal(inv.method, "POST");
+    assert.equal(inv.path, "prefix-lists/MYLIST/entries");
+    assert.deepEqual(inv.body, { prefix: "10.0.0.0/8", prefix_list: "MYLIST" });
+  });
+});

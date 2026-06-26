@@ -1585,9 +1585,15 @@ function renderSubRuleRow(
     delBtn.addEventListener("click", () => {
       // Queue the removal; the row re-renders struck-through (pending) and is
       // confirmed at Apply, like every other staged change. preBody (the row +
-      // the parent-ref the re-create POST needs) lets undo re-create it.
-      const pre = conf.itemType === "object" && item && typeof item === "object"
-        ? injectParentName(kind, specName, item as Record<string, unknown>) : undefined;
+      // the parent-ref the re-create POST needs) lets undo re-create it — for
+      // object rows it's the row itself; for string entries (prefix lists) we
+      // rebuild the add-body from the entry value + its add-form field name.
+      let pre: Record<string, unknown> | undefined;
+      if (conf.itemType === "object" && item && typeof item === "object") {
+        pre = injectParentName(kind, specName, item as Record<string, unknown>);
+      } else if (conf.itemType === "string" && typeof item === "string" && conf.addFields[0]) {
+        pre = injectParentName(kind, specName, { [conf.addFields[0].name]: item });
+      }
       enqueueSubDelete(kind as StagingSpecKind, specName, conf.endpoint, key, String(key), pre);
       openDetail(kind, kindTitleFor(kind), specName);
     });

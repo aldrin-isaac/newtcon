@@ -108,6 +108,22 @@ function inverseMutation(item: HistoryItem, id: string): Pending | null {
       return { id, group: "mutation", method: "POST", path: base, effect: "create", kind, name, title: item.title, sub: { endpoint, ...(key !== undefined ? { key } : {}) }, body: item.preBody };
     }
     if (item.effect === "update") {
+      // Key-changing update (reorder / rename): the body carries new_<key> =
+      // where the row moved to, so the row now lives at newKey. Invert by
+      // renumbering it back to the original key (restoring other fields from
+      // preBody when present, e.g. an edit that also renamed).
+      const renumberField = item.body ? Object.keys(item.body).find((k) => k.startsWith("new_")) : undefined;
+      if (renumberField && key !== undefined) {
+        const newKey = (item.body as Record<string, unknown>)[renumberField];
+        if (newKey === undefined || newKey === null) return null;
+        const invBody: Record<string, unknown> = { [renumberField]: key };
+        if (item.preBody) {
+          const kf = renumberField.slice(4); // strip "new_"
+          for (const [k, v] of Object.entries(item.preBody)) if (k !== kf) invBody[k] = v;
+        }
+        return { id, group: "mutation", method: "PUT", path: `${base}/${e(String(newKey))}`, effect: "update", kind, name, title: item.title, sub: { endpoint, key: newKey as string | number }, body: invBody };
+      }
+      // Plain field edit: restore the prior body at the same key.
       if (!item.preBody || key === undefined) return null;
       return { id, group: "mutation", method: "PUT", path: `${base}/${e(String(key))}`, effect: "update", kind, name, title: item.title, sub: { endpoint, key }, body: item.preBody };
     }
