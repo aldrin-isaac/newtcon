@@ -14,7 +14,7 @@
 // the switch) is a separate diff layer and needs a newtron-side
 // projection endpoint; out of scope here.
 
-import type { Pending } from "./staging.js";
+import type { Pending, InverseMutation } from "./staging.js";
 
 export type PreviewEffect = "create" | "update" | "delete" | "action";
 
@@ -50,15 +50,13 @@ export interface PendingPreview {
    */
   iface?: string;
   /**
-   * For flat-mutation items — the structured resource identity, so undo
-   * composes the inverse from real fields (wire kind / parent / sub-row key)
-   * rather than parsing a display string. `resourceName` is the parent spec.
+   * For flat-mutation items — the op that undoes this one, computed at stage
+   * time and carried verbatim, so undo never re-derives it. Absent ⇒ not
+   * undoable. (A spec-delete's inverse body is backfilled at apply.)
    */
-  resourceKind?: string;
-  resourceName?: string;
-  sub?: { endpoint: string; key?: string | number };
-  /** Prior server state for a delete/update mutation — undo re-creates or
-   *  restores it. Captured when the op was staged from the UI. */
+  inverse?: InverseMutation;
+  /** Prior server state for a delete/update mutation — shown in history, and
+   *  backfilled into a spec-delete's inverse body at apply. */
   preBody?: Record<string, unknown>;
 }
 
@@ -122,9 +120,7 @@ function toPreview(p: Pending): PendingPreview {
       scope: p.sub ? `${kindLabel(p.kind)} · ${p.sub.endpoint}` : kindLabel(p.kind),
       danger: p.effect === "delete",
       body: p.body ?? null,
-      resourceKind: p.kind,
-      resourceName: p.name,
-      ...(p.sub ? { sub: p.sub } : {}),
+      ...(p.inverse ? { inverse: p.inverse } : {}),
       ...(p.preBody ? { preBody: p.preBody } : {}),
     };
   }

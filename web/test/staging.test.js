@@ -12,6 +12,7 @@ import {
   enqueueSubCreate,
   enqueueSubUpdate,
   enqueueSubDelete,
+  enqueueSubReorder,
   pendingSubMutations,
   isSpecPendingUpdate,
   getQueue,
@@ -115,5 +116,50 @@ describe("sub-rule ops queue as flat mutations", () => {
     assert.equal(acl.length, 1);
     assert.equal(acl[0].effect, "create");
     assert.deepEqual(acl[0].body, { seq: 10 });
+  });
+});
+
+describe("mutations carry their own inverse (born together)", () => {
+  beforeEach(() => discardAll());
+
+  test("spec create → inverse delete", () => {
+    const p = enqueueSpecCreate("ipvpns", "IRB", { l3vni: 1 });
+    assert.deepEqual(p.inverse, { method: "DELETE", path: "ipvpns/IRB", effect: "delete", kind: "ipvpns", name: "IRB", title: "IRB" });
+  });
+
+  test("spec update with preBody → inverse update restoring preBody", () => {
+    const p = enqueueSpecUpdate("ipvpns", "IRB", { l3vni: 2 }, { l3vni: 1 });
+    assert.equal(p.inverse.method, "PUT");
+    assert.equal(p.inverse.path, "ipvpns/IRB");
+    assert.deepEqual(p.inverse.body, { l3vni: 1 });
+  });
+
+  test("spec delete → inverse create, body backfilled later", () => {
+    const p = enqueueSpecDelete("ipvpns", "IRB");
+    assert.equal(p.inverse.method, "POST");
+    assert.equal(p.inverse.path, "ipvpns");      // POST to the collection
+    assert.equal(p.inverse.effect, "create");
+    assert.equal(p.inverse.body, undefined);     // filled at apply from preBody
+  });
+
+  test("sub create → inverse delete by key", () => {
+    const p = enqueueSubCreate("filters", "ACL", "rules", 10, { seq: 10 }, "10");
+    assert.equal(p.inverse.method, "DELETE");
+    assert.equal(p.inverse.path, "filters/ACL/rules/10");
+  });
+
+  test("sub delete with preBody → inverse re-create on the collection", () => {
+    const p = enqueueSubDelete("filters", "ACL", "rules", 10, "10", { seq: 10, action: "permit", filter: "ACL" });
+    assert.equal(p.inverse.method, "POST");
+    assert.equal(p.inverse.path, "filters/ACL/rules");
+    assert.deepEqual(p.inverse.body, { seq: 10, action: "permit", filter: "ACL" });
+  });
+
+  test("reorder → inverse is the opposite renumber, keyed by the target", () => {
+    const p = enqueueSubReorder("filters", "ACL", "rules", 10, 20, { new_seq: 20 }, { new_seq: 10 }, "10");
+    assert.equal(p.path, "filters/ACL/rules/10", "forward addresses the current seq");
+    assert.deepEqual(p.body, { new_seq: 20 });
+    assert.equal(p.inverse.path, "filters/ACL/rules/20", "inverse addresses the target seq");
+    assert.deepEqual(p.inverse.body, { new_seq: 10 });
   });
 });

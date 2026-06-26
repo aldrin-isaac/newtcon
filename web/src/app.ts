@@ -135,6 +135,7 @@ import {
   enqueueSubCreate,
   enqueueSubUpdate,
   enqueueSubDelete,
+  enqueueSubReorder,
   pendingSpecCreateItems,
   pendingSubMutations,
   isSpecPendingDelete,
@@ -1893,11 +1894,13 @@ function makeReorderBtn(
   }
   btn.title = `Move ${direction} (new seq ${target})`;
   btn.addEventListener("click", () => {
-    // The keyField is the rename target; the URL identifies the row by
-    // currentSeq. composeUpdateBody handles the new_<keyField> translation.
-    // Queue it like any edit — re-render marks the row pending (amber).
-    const body = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
-    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, currentSeq, body, String(currentSeq));
+    // A reorder renumbers currentSeq → target. composeUpdateBody emits the
+    // new_<keyField>. We compose both directions here (we have the keyField),
+    // so the queued op carries its own inverse — the opposite renumber — and
+    // undo needs no body-sniffing.
+    const fwdBody = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
+    const invBody = composeUpdateBody({ [conf.keyField!]: currentSeq }, conf.itemType, conf.keyField, target);
+    enqueueSubReorder(kind as StagingSpecKind, specName, conf.endpoint, currentSeq, target, fwdBody, invBody, String(currentSeq));
     openDetail(kind, kindTitleFor(kind), specName);
   });
   return btn;

@@ -30,9 +30,11 @@ function installStorageShim() {
 const SAMPLE_PREVIEW = {
   total: 3,
   items: [
-    { id: "1", effect: "create", kind: "spec", title: "transit-2026", scope: "services", danger: false, body: null },
+    { id: "1", effect: "create", kind: "spec", title: "transit-2026", scope: "services", danger: false, body: null,
+      inverse: { method: "DELETE", path: "services/transit-2026", effect: "delete", kind: "services", name: "transit-2026", title: "transit-2026" } },
     { id: "2", effect: "action", kind: "device action", title: "create-vlan", scope: "r1", danger: false, body: null },
-    { id: "3", effect: "delete", kind: "spec", title: "old", scope: "zones", danger: true, body: null },
+    { id: "3", effect: "delete", kind: "spec", title: "old", scope: "zones", danger: true, body: null,
+      inverse: { method: "POST", path: "zones", effect: "create", kind: "zones", name: "old", title: "old" } },
   ],
   counts: { create: 1, delete: 1, action: 1, danger: 1 },
   hasDangerous: true,
