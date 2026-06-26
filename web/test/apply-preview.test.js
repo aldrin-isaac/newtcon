@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { previewQueue, driftVerdict } from "../dist/apply-preview.js";
+import { previewQueue, driftVerdict, shouldDriftCheck } from "../dist/apply-preview.js";
 
 const specCreate  = (id, name, kind = "services") =>
   ({ id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: { name } });
@@ -164,5 +164,23 @@ describe("driftVerdict() — pre-apply state check", () => {
   });
   test("delete on a present target → none", () => {
     assert.equal(driftVerdict("delete", true).level, "none");
+  });
+});
+
+describe("shouldDriftCheck() — which ops are existence-probeable", () => {
+  test("top-level spec mutation → yes", () => {
+    assert.equal(shouldDriftCheck({ group: "mutation", body: { l3vni: 1 } }), true);
+  });
+  test("network-scope create → yes", () => {
+    assert.equal(shouldDriftCheck({ group: "mutation", body: { scope: "network" } }), true);
+  });
+  test("override (zone-scope) create → no (would false-positive on the base)", () => {
+    assert.equal(shouldDriftCheck({ group: "mutation", body: { scope: "zone", scope_instance: "amer" } }), false);
+  });
+  test("sub-rule mutation → no", () => {
+    assert.equal(shouldDriftCheck({ group: "mutation", sub: { endpoint: "rules", key: 10 } }), false);
+  });
+  test("topology op → no", () => {
+    assert.equal(shouldDriftCheck({ group: "topology" }), false);
   });
 });

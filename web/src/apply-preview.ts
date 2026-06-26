@@ -72,6 +72,18 @@ export interface PendingPreview {
 export type DriftLevel = "none" | "warn" | "info";
 export interface DriftVerdict { level: DriftLevel; reason: string; }
 
+// shouldDriftCheck decides whether an op's drift is probeable by a plain
+// GET {kind}/{name}. Only top-level spec mutations qualify. Override creates
+// (scope ≠ network) target the override, not the base, so a base existence
+// probe would falsely warn "already exists" — skip them (override existence
+// needs /spec-instances; follow-up). Sub-rules are skipped likewise for now.
+export function shouldDriftCheck(op: { group: string; sub?: unknown; body?: Record<string, unknown> | null }): boolean {
+  if (op.group !== "mutation" || op.sub) return false;
+  const scope = op.body?.scope;
+  if (typeof scope === "string" && scope !== "network") return false;
+  return true;
+}
+
 export function driftVerdict(effect: "create" | "update" | "delete", exists: boolean): DriftVerdict {
   if (effect === "create" && exists) return { level: "warn", reason: "already exists — apply will fail or overwrite it" };
   if (effect === "update" && !exists) return { level: "warn", reason: "no longer exists — the edit will fail" };

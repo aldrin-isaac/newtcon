@@ -12,7 +12,7 @@ import {
   discardAll,
   applyAll,
 } from "./staging.js";
-import { previewQueue, driftVerdict, type ApplyPreview, type PendingPreview, type DriftVerdict } from "./apply-preview.js";
+import { previewQueue, driftVerdict, shouldDriftCheck, type ApplyPreview, type PendingPreview, type DriftVerdict } from "./apply-preview.js";
 import { apiPath } from "./api-path.js";
 import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
@@ -644,7 +644,7 @@ function renderDriftSection(queue: readonly Pending[], network: string): HTMLEle
   const section = document.createElement("div");
   section.className = "apply-preview-drift";
   const specOps = queue.filter((p): p is Extract<Pending, { group: "mutation" }> =>
-    p.group === "mutation" && !p.sub);
+    shouldDriftCheck(p));
   if (specOps.length === 0) { section.hidden = true; return section; }
 
   const status = document.createElement("p");
