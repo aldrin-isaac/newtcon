@@ -19,81 +19,42 @@ function entry(items) {
   };
 }
 
-describe("planUndo() — spec ops", () => {
-  test("spec.create → spec.delete by name", () => {
+describe("planUndo() — flat mutations replay the carried inverse", () => {
+  // The inverse is computed at stage time (see staging.test.js) and rides on
+  // the history item. planUndo just hands it back, ready to enqueue.
+  test("passes the carried inverse through verbatim (+ a fresh id)", () => {
+    const inverse = { method: "DELETE", path: "services/x", effect: "delete", kind: "services", name: "x", title: "x" };
     const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "spec", title: "transit-2026", scope: "services", resourceKind: "services", resourceName: "transit-2026", danger: false, outcome: "applied", undoable: true },
+      { id: "1", effect: "create", kind: "spec", title: "x", scope: "services", inverse, danger: false, outcome: "applied", undoable: true },
     ]), idGen);
     assert.equal(plan.counts.planned, 1);
-    const inv = plan.items[0].inverse;
-    assert.equal(inv.group, "mutation");
-    assert.equal(inv.kind, "services");
-    assert.equal(inv.effect, "delete");
-    assert.equal(inv.method, "DELETE");
-    assert.equal(inv.name, "transit-2026");
+    assert.deepEqual(plan.items[0].inverse, { id: "undo-0", group: "mutation", ...inverse });
   });
 
-  test("spec.delete with preBody → spec.create with body", () => {
+  test("sub-rule inverse passes through with its sub identity + body", () => {
+    const inverse = { method: "POST", path: "filters/ACL/rules", effect: "create", kind: "filters", name: "ACL", sub: { endpoint: "rules", key: 10 }, title: "10", body: { seq: 10, action: "permit", filter: "ACL" } };
     const plan = planUndo(entry([
-      { id: "2", effect: "delete", kind: "spec", title: "old", scope: "zones", resourceKind: "zones", resourceName: "old", danger: true, outcome: "applied", undoable: true, preBody: { name: "old", description: "deprecated" } },
+      { id: "1", effect: "delete", kind: "sub-rule", title: "10", scope: "filters · rules", inverse, danger: true, outcome: "applied", undoable: true },
     ]), idGen);
-    const inv = plan.items[0].inverse;
-    assert.equal(inv.effect, "create");
-    assert.equal(inv.method, "POST");
-    assert.equal(inv.kind, "zones");
-    assert.deepEqual(inv.body, { name: "old", description: "deprecated" });
+    assert.equal(plan.items[0].inverse.path, "filters/ACL/rules");
+    assert.deepEqual(plan.items[0].inverse.body, { seq: 10, action: "permit", filter: "ACL" });
   });
 
-  test("spec.delete without preBody → skipped with body-not-captured reason", () => {
-    const plan = planUndo(entry([
-      { id: "2", effect: "delete", kind: "spec", title: "old", scope: "zones", danger: true, outcome: "applied", undoable: false },
-    ]), idGen);
-    assert.equal(plan.counts.skipped, 1);
-    assert.ok(plan.items[0].reason && /pre-apply body/.test(plan.items[0].reason));
+  test("inverses are planned in reverse of the forward apply order", () => {
+    const mk = (id, name) => ({
+      id, effect: "create", kind: "spec", title: name, scope: "services",
+      inverse: { method: "DELETE", path: "services/" + name, effect: "delete", kind: "services", name, title: name },
+      danger: false, outcome: "applied", undoable: true,
+    });
+    const plan = planUndo(entry([mk("1", "a"), mk("2", "b")]), idGen);
+    // Applied forward as a, b → undo must replay b's inverse, then a's.
+    assert.equal(plan.items[0].inverse.name, "b");
+    assert.equal(plan.items[1].inverse.name, "a");
   });
 
-  test("structured resourceKind drives the inverse (no display-string parsing)", () => {
+  test("not-undoable item (no carried inverse) is skipped", () => {
     const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "spec", title: "rt-policy", scope: "qos policies", resourceKind: "qos-policies", resourceName: "rt-policy", danger: false, outcome: "applied", undoable: true },
-    ]), idGen);
-    assert.equal(plan.items[0].inverse.kind, "qos-policies");
-  });
-
-  test("sub-rule create → delete of the same row by key", () => {
-    const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "sub-rule", title: "10", scope: "filters · rules", resourceKind: "filters", resourceName: "ACL", sub: { endpoint: "rules", key: 10 }, danger: false, outcome: "applied", undoable: true },
-    ]), idGen);
-    const inv = plan.items[0].inverse;
-    assert.equal(inv.effect, "delete");
-    assert.equal(inv.method, "DELETE");
-    assert.equal(inv.path, "filters/ACL/rules/10");
-  });
-
-  test("sub-rule delete with preBody → re-create on the collection", () => {
-    const plan = planUndo(entry([
-      { id: "1", effect: "delete", kind: "sub-rule", title: "10", scope: "filters · rules", resourceKind: "filters", resourceName: "ACL", sub: { endpoint: "rules", key: 10 }, preBody: { seq: 10, action: "permit" }, danger: true, outcome: "applied", undoable: true },
-    ]), idGen);
-    const inv = plan.items[0].inverse;
-    assert.equal(inv.effect, "create");
-    assert.equal(inv.method, "POST");
-    assert.equal(inv.path, "filters/ACL/rules");
-    assert.deepEqual(inv.body, { seq: 10, action: "permit" });
-  });
-
-  test("sub-rule update with preBody → PUT the prior body back", () => {
-    const plan = planUndo(entry([
-      { id: "1", effect: "update", kind: "sub-rule", title: "10", scope: "filters · rules", resourceKind: "filters", resourceName: "ACL", sub: { endpoint: "rules", key: 10 }, preBody: { seq: 10, action: "permit" }, danger: false, outcome: "applied", undoable: true },
-    ]), idGen);
-    const inv = plan.items[0].inverse;
-    assert.equal(inv.effect, "update");
-    assert.equal(inv.method, "PUT");
-    assert.equal(inv.path, "filters/ACL/rules/10");
-    assert.deepEqual(inv.body, { seq: 10, action: "permit" });
-  });
-
-  test("unknown scope → no inverse", () => {
-    const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "spec", title: "x", scope: "unknown-kind", danger: false, outcome: "applied", undoable: true },
+      { id: "1", effect: "delete", kind: "spec", title: "old", scope: "zones", danger: true, outcome: "applied", undoable: false },
     ]), idGen);
     assert.equal(plan.counts.skipped, 1);
     assert.ok(plan.items[0].reason);
@@ -273,7 +234,7 @@ describe("planUndo() — device/interface actions (175.C.2)", () => {
 describe("planUndo() — mixed entry", () => {
   test("mix of planned + skipped is counted accurately", () => {
     const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "spec", title: "a", scope: "services", resourceKind: "services", resourceName: "a", danger: false, outcome: "applied", undoable: true },
+      { id: "1", effect: "create", kind: "spec", title: "a", scope: "services", inverse: { method: "DELETE", path: "services/a", effect: "delete", kind: "services", name: "a", title: "a" }, danger: false, outcome: "applied", undoable: true },
       { id: "2", effect: "delete", kind: "spec", title: "b", scope: "zones", danger: true, outcome: "applied", undoable: false },
       { id: "3", effect: "action", kind: "device action", title: "x", scope: "r1", danger: false, outcome: "applied", undoable: false },
       { id: "4", effect: "create", kind: "device", title: "r-new", scope: "topology", danger: false, outcome: "applied", undoable: true },
@@ -285,8 +246,8 @@ describe("planUndo() — mixed entry", () => {
 
   test("each planned item gets a unique id from idGen", () => {
     const plan = planUndo(entry([
-      { id: "1", effect: "create", kind: "spec", title: "a", scope: "services", resourceKind: "services", resourceName: "a", danger: false, outcome: "applied", undoable: true },
-      { id: "2", effect: "create", kind: "spec", title: "b", scope: "services", resourceKind: "services", resourceName: "b", danger: false, outcome: "applied", undoable: true },
+      { id: "1", effect: "create", kind: "spec", title: "a", scope: "services", inverse: { method: "DELETE", path: "services/a", effect: "delete", kind: "services", name: "a", title: "a" }, danger: false, outcome: "applied", undoable: true },
+      { id: "2", effect: "create", kind: "spec", title: "b", scope: "services", inverse: { method: "DELETE", path: "services/b", effect: "delete", kind: "services", name: "b", title: "b" }, danger: false, outcome: "applied", undoable: true },
     ]), idGen);
     const ids = plan.items.filter((i) => i.planned).map((i) => i.inverse.id);
     assert.notEqual(ids[0], ids[1]);
@@ -300,3 +261,4 @@ describe("planUndo() — empty entry", () => {
     assert.deepEqual(plan.counts, { planned: 0, skipped: 0 });
   });
 });
+

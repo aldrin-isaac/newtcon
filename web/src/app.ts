@@ -135,6 +135,7 @@ import {
   enqueueSubCreate,
   enqueueSubUpdate,
   enqueueSubDelete,
+  enqueueSubReorder,
   pendingSpecCreateItems,
   pendingSubMutations,
   isSpecPendingDelete,
@@ -1585,9 +1586,15 @@ function renderSubRuleRow(
     delBtn.addEventListener("click", () => {
       // Queue the removal; the row re-renders struck-through (pending) and is
       // confirmed at Apply, like every other staged change. preBody (the row +
-      // the parent-ref the re-create POST needs) lets undo re-create it.
-      const pre = conf.itemType === "object" && item && typeof item === "object"
-        ? injectParentName(kind, specName, item as Record<string, unknown>) : undefined;
+      // the parent-ref the re-create POST needs) lets undo re-create it — for
+      // object rows it's the row itself; for string entries (prefix lists) we
+      // rebuild the add-body from the entry value + its add-form field name.
+      let pre: Record<string, unknown> | undefined;
+      if (conf.itemType === "object" && item && typeof item === "object") {
+        pre = injectParentName(kind, specName, item as Record<string, unknown>);
+      } else if (conf.itemType === "string" && typeof item === "string" && conf.addFields[0]) {
+        pre = injectParentName(kind, specName, { [conf.addFields[0].name]: item });
+      }
       enqueueSubDelete(kind as StagingSpecKind, specName, conf.endpoint, key, String(key), pre);
       openDetail(kind, kindTitleFor(kind), specName);
     });
@@ -1887,11 +1894,13 @@ function makeReorderBtn(
   }
   btn.title = `Move ${direction} (new seq ${target})`;
   btn.addEventListener("click", () => {
-    // The keyField is the rename target; the URL identifies the row by
-    // currentSeq. composeUpdateBody handles the new_<keyField> translation.
-    // Queue it like any edit — re-render marks the row pending (amber).
-    const body = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
-    enqueueSubUpdate(kind as StagingSpecKind, specName, conf.endpoint, currentSeq, body, String(currentSeq));
+    // A reorder renumbers currentSeq → target. composeUpdateBody emits the
+    // new_<keyField>. We compose both directions here (we have the keyField),
+    // so the queued op carries its own inverse — the opposite renumber — and
+    // undo needs no body-sniffing.
+    const fwdBody = composeUpdateBody({ [conf.keyField!]: target }, conf.itemType, conf.keyField, currentSeq);
+    const invBody = composeUpdateBody({ [conf.keyField!]: currentSeq }, conf.itemType, conf.keyField, target);
+    enqueueSubReorder(kind as StagingSpecKind, specName, conf.endpoint, currentSeq, target, fwdBody, invBody, String(currentSeq));
     openDetail(kind, kindTitleFor(kind), specName);
   });
   return btn;

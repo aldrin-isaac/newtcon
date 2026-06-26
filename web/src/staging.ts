@@ -32,15 +32,33 @@ export type SpecKind =
 // used to fold edits and to overlay pending state on a row. Topology +
 // device/interface actions keep their richer typed shapes below (RPCs, wrapped
 // bodies, per-device apply) — they ride the same flat queue.
+// InverseMutation describes the newtron write that reverses a mutation. The
+// inverse of a mutation is itself a mutation, so it's the same fields minus the
+// queue id and its own inverse (recomputed when the undo is itself staged).
+// Born together with the forward op — undo just replays it.
+export interface InverseMutation {
+  method: "POST" | "PUT" | "DELETE";
+  path: string;
+  effect: "create" | "update" | "delete";
+  kind: SpecKind;
+  name: string;
+  sub?: { endpoint: string; key?: string | number };
+  title: string;
+  body?: Record<string, unknown>;
+}
+
 export type Pending =
   | { id: string; group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
       effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
       sub?: { endpoint: string; key?: string | number }; title: string;
       body?: Record<string, unknown>;
-      // Prior server state, captured when the op is staged from the UI (which
-      // has the committed row). Lets undo compute a faithful inverse — re-create
-      // a removed row, or restore an edited one — without a second fetch.
-      preBody?: Record<string, unknown>; }
+      // Prior server state (display + spec-delete inverse backfill). Captured
+      // from the UI at stage time, or fetched at apply for a bare ×.
+      preBody?: Record<string, unknown>;
+      // The op that undoes this one, computed at stage time from full context.
+      // Absent ⇒ not undoable. For a spec-delete the body is backfilled at
+      // apply (the × hasn't read the spec); everything else is complete here.
+      inverse?: InverseMutation; }
   | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; }
   | { id: string; group: "topology";  op: "remove-device"; name: string; }
   | { id: string; group: "topology";  op: "add-link";      a: string; z: string; }
@@ -100,21 +118,23 @@ function pushMutation(m: Omit<Extract<Pending, { group: "mutation" }>, "id">): P
 }
 
 // ---- Spec create / update / delete (flat mutations) ----------------------
+// Each op computes its own inverse from the context it has at stage time, so
+// undo never re-derives it. create⇄delete, update→update(preBody).
 
 export function enqueueSpecCreate(kind: SpecKind, name: string, body: Record<string, unknown>): Pending {
   // A pending delete of the same spec is superseded by recreating it.
   const di = findMutation(`${kind}/${name}`, "delete");
   if (di >= 0) queue.splice(di, 1);
-  return pushMutation({ group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name, body });
+  const inverse: InverseMutation = { method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name };
+  return pushMutation({ group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name, body, inverse });
 }
 
-// enqueueSpecUpdate queues an edit (PUT /{kind}/{name}) so it stages + applies
-// through the same Save loop as create/delete instead of firing instantly.
-// preBody (the spec before the edit) lets undo restore it.
+// enqueueSpecUpdate queues an edit (PUT /{kind}/{name}); preBody (the spec
+// before the edit) is the inverse body.
 export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<string, unknown>, preBody?: Record<string, unknown>): Pending {
   const identity = `${kind}/${name}`;
   // Editing a spec still pending-create folds into the create (latest values),
-  // preserving create-only fields (e.g. scope).
+  // preserving create-only fields (e.g. scope) — the create's inverse stands.
   const ci = findMutation(identity, "create");
   if (ci >= 0) {
     const c = queue[ci] as { body?: Record<string, unknown> };
@@ -122,14 +142,17 @@ export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<str
     notify();
     return queue[ci]!;
   }
-  // Collapse repeated edits to the latest body (keep the earliest preBody).
+  // Collapse repeated edits to the latest body (keep the earliest inverse).
   const ui = findMutation(identity, "update");
   if (ui >= 0) {
     (queue[ui] as { body?: Record<string, unknown> }).body = body;
     notify();
     return queue[ui]!;
   }
-  return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}) });
+  const inverse: InverseMutation | undefined = preBody
+    ? { method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body: preBody }
+    : undefined;
+  return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
 
 export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null {
@@ -140,21 +163,26 @@ export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null 
   // A pending edit of a spec being deleted is moot.
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
-  return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name });
+  // The × hasn't read the spec, so the inverse's body is backfilled at apply
+  // (capturePreApplyBodies) — the structure is known here.
+  const inverse: InverseMutation = { method: "POST", path: specPath(kind), effect: "create", kind, name, title: name };
+  return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name, inverse });
 }
 
 // ---- Sub-rule add / update / remove (flat mutations) ---------------------
 // queues / rules / entries on a parent spec — same flat queue, deeper path.
 
 // `key` is the row's identity (seq / queue_id / prefix the operator chose) —
-// carried even on create so undo can DELETE exactly that row.
+// carried even on create so the inverse can DELETE exactly that row.
 export function enqueueSubCreate(
   kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string,
 ): Pending {
-  return pushMutation({ group: "mutation", method: "POST", path: subBasePath(kind, spec, endpoint), effect: "create", kind, name: spec, sub: { endpoint, key }, title, body });
+  const base = subBasePath(kind, spec, endpoint);
+  const inverse: InverseMutation = { method: "DELETE", path: `${base}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title };
+  return pushMutation({ group: "mutation", method: "POST", path: base, effect: "create", kind, name: spec, sub: { endpoint, key }, title, body, inverse });
 }
 
-// preBody (the row before the edit) lets undo restore it.
+// preBody (the row before the edit) is the inverse body.
 export function enqueueSubUpdate(
   kind: SpecKind, spec: string, endpoint: string, key: string | number, body: Record<string, unknown>, title: string, preBody?: Record<string, unknown>,
 ): Pending {
@@ -166,10 +194,15 @@ export function enqueueSubUpdate(
     notify();
     return queue[ui]!;
   }
-  return pushMutation({ group: "mutation", method: "PUT", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body, ...(preBody ? { preBody } : {}) });
+  const path = `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`;
+  const inverse: InverseMutation | undefined = preBody
+    ? { method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
+    : undefined;
+  return pushMutation({ group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
 
-// preBody (the removed row) lets undo re-create it.
+// preBody (the removed row, with the parent-ref the re-create needs) is the
+// inverse body.
 export function enqueueSubDelete(
   kind: SpecKind, spec: string, endpoint: string, key: string | number, title: string, preBody?: Record<string, unknown>,
 ): Pending | null {
@@ -180,7 +213,24 @@ export function enqueueSubDelete(
   // A pending edit of a row being removed is moot.
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
-  return pushMutation({ group: "mutation", method: "DELETE", path: `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title, ...(preBody ? { preBody } : {}) });
+  const base = subBasePath(kind, spec, endpoint);
+  const inverse: InverseMutation | undefined = preBody
+    ? { method: "POST", path: base, effect: "create", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
+    : undefined;
+  return pushMutation({ group: "mutation", method: "DELETE", path: `${base}/${enc(String(key))}`, effect: "delete", kind, name: spec, sub: { endpoint, key }, title, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
+}
+
+// enqueueSubReorder queues a renumber (PUT .../{fromKey} {new_<key>: toKey});
+// its inverse is the opposite renumber (PUT .../{toKey} {new_<key>: fromKey}).
+// The caller composes both bodies (it knows the keyField) — no body-sniffing.
+export function enqueueSubReorder(
+  kind: SpecKind, spec: string, endpoint: string,
+  fromKey: string | number, toKey: string | number,
+  fwdBody: Record<string, unknown>, invBody: Record<string, unknown>, title: string,
+): Pending {
+  const base = subBasePath(kind, spec, endpoint);
+  const inverse: InverseMutation = { method: "PUT", path: `${base}/${enc(String(toKey))}`, effect: "update", kind, name: spec, sub: { endpoint, key: toKey }, title, body: invBody };
+  return pushMutation({ group: "mutation", method: "PUT", path: `${base}/${enc(String(fromKey))}`, effect: "update", kind, name: spec, sub: { endpoint, key: fromKey }, title, body: fwdBody, inverse });
 }
 
 export function enqueueTopologyAddDevice(name: string, body: Record<string, unknown>): Pending {

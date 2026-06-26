@@ -15,7 +15,7 @@
 // that decision: an item with undoable=false yields no plan entry.
 
 import type { HistoryItem, HistoryEntry } from "./action-history.js";
-import type { Pending, SpecKind } from "./staging.js";
+import type { Pending } from "./staging.js";
 
 /** Per-item plan result. */
 export interface UndoPlanItem {
@@ -49,9 +49,13 @@ export function planUndo(
   entry: HistoryEntry,
   idGen: (i: number) => string,
 ): UndoPlan {
-  const items: UndoPlanItem[] = entry.items.map((item, i) =>
-    planItem(item, idGen(i)),
-  );
+  // Reverse-order replay: undo applies inverses in the reverse of the forward
+  // apply order. applySubset sorts by group (stable), so emitting the inverses
+  // reversed keeps dependent ops (e.g. a delete that must precede its parent's)
+  // correctly ordered within each tier.
+  const items: UndoPlanItem[] = entry.items
+    .slice().reverse()
+    .map((item, i) => planItem(item, idGen(i)));
   return {
     items,
     counts: {
@@ -81,59 +85,16 @@ function planItem(item: HistoryItem, id: string): UndoPlanItem {
 }
 
 /**
- * inverseFor maps a HistoryItem to its inverse Pending. Returns null
- * when the item's shape doesn't carry enough information to compose an
- * inverse (e.g. a delete-style item with no preBody). The result is in
- * staging's Pending shape so it can be enqueued directly.
+ * inverseFor maps a HistoryItem to its inverse Pending, ready to enqueue.
+ * Flat mutations (spec / sub-rule) carry their inverse — born together with
+ * the forward op from full context — so undo just replays it; no derivation,
+ * no heuristics. Topology / device-action items compute their inverse here
+ * (RPC verbs with body-shaped inverses). Returns null when not undoable.
  */
-// inverseMutation composes the inverse of a flat mutation from its structured
-// identity (resourceKind / resourceName / sub) + captured prior state. The
-// inverse of a create is a delete of the same row; of a delete, a re-create
-// from preBody; of an update, a restore to preBody.
-function inverseMutation(item: HistoryItem, id: string): Pending | null {
-  const kind = item.resourceKind as SpecKind | undefined;
-  const name = item.resourceName;
-  if (!kind || !name) return null;
-  const e = encodeURIComponent;
-
-  if (item.sub) {
-    const { endpoint, key } = item.sub;
-    const base = `${kind}/${e(name)}/${endpoint}`;
-    if (item.effect === "create") {
-      if (key === undefined) return null;
-      return { id, group: "mutation", method: "DELETE", path: `${base}/${e(String(key))}`, effect: "delete", kind, name, title: item.title, sub: { endpoint, key } };
-    }
-    if (item.effect === "delete") {
-      if (!item.preBody) return null;
-      return { id, group: "mutation", method: "POST", path: base, effect: "create", kind, name, title: item.title, sub: { endpoint, ...(key !== undefined ? { key } : {}) }, body: item.preBody };
-    }
-    if (item.effect === "update") {
-      if (!item.preBody || key === undefined) return null;
-      return { id, group: "mutation", method: "PUT", path: `${base}/${e(String(key))}`, effect: "update", kind, name, title: item.title, sub: { endpoint, key }, body: item.preBody };
-    }
-    return null;
-  }
-
-  if (item.effect === "create") {
-    return { id, group: "mutation", method: "DELETE", path: `${kind}/${e(name)}`, effect: "delete", kind, name, title: name };
-  }
-  if (item.effect === "delete") {
-    if (!item.preBody) return null;
-    return { id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: item.preBody };
-  }
-  if (item.effect === "update") {
-    if (!item.preBody) return null;
-    return { id, group: "mutation", method: "PUT", path: `${kind}/${e(name)}`, effect: "update", kind, name, title: name, body: item.preBody };
-  }
-  return null;
-}
-
 function inverseFor(item: HistoryItem, id: string): Pending | null {
-  // Flat mutations (spec + sub-rule) carry their structured identity, so the
-  // inverse composes from real fields — no display-string parsing. The inverse
-  // of a mutation is itself a mutation: create↔delete, update↔update(preBody).
+  // Flat mutation — the inverse rode along from stage time.
   if (item.kind === "spec" || item.kind === "sub-rule") {
-    return inverseMutation(item, id);
+    return item.inverse ? { id, group: "mutation", ...item.inverse } : null;
   }
   if (item.kind === "device") {
     // topology add-device ↔ remove-device. Operator's title is the

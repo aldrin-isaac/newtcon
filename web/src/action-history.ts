@@ -14,6 +14,7 @@
 // copy.
 
 import type { ApplyPreview } from "./apply-preview.js";
+import type { InverseMutation } from "./staging.js";
 
 /** Per-item record — mirrors PendingPreview + the apply outcome + any error. */
 export interface HistoryItem {
@@ -33,13 +34,11 @@ export interface HistoryItem {
    */
   preBody?: Record<string, unknown>;
   /**
-   * For flat-mutation items — the structured resource identity, so undo
-   * composes the inverse directly (no display-string parsing). `resourceName`
-   * is the parent spec; `sub` is set for sub-rule rows.
+   * For flat-mutation items — the carried inverse op, computed at stage time.
+   * undo just replays it; no derivation. (A spec-delete's inverse body is
+   * backfilled here from preBody, captured at apply.)
    */
-  resourceKind?: string;
-  resourceName?: string;
-  sub?: { endpoint: string; key?: string | number };
+  inverse?: InverseMutation;
   /**
    * Whether this specific item can be undone via the data-layer or
    * device-action planner. Computed at buildEntry time. False for
@@ -118,7 +117,6 @@ export function buildEntry(args: {
   const preBodies = args.preBodies ?? new Map<string, Record<string, unknown>>();
   const items: HistoryItem[] = args.preview.items.map((p) => {
     const failed = failedIds.has(p.id);
-    const undoable = isItemUndoable(p, preBodies);
     const it: HistoryItem = {
       id: p.id,
       effect: p.effect,
@@ -127,7 +125,7 @@ export function buildEntry(args: {
       scope: p.scope,
       danger: p.danger,
       outcome: failed ? "failed" : "applied",
-      undoable,
+      undoable: false,
     };
     const err = errorById.get(p.id);
     if (failed && err !== undefined) it.error = err;
@@ -135,21 +133,22 @@ export function buildEntry(args: {
     // the staged-from-UI preBody on the item (sub-rules, spec edits).
     const cached = preBodies.get(p.id) ?? p.preBody;
     if (cached !== undefined) it.preBody = cached;
-    if (p.resourceKind !== undefined) it.resourceKind = p.resourceKind;
-    if (p.resourceName !== undefined) it.resourceName = p.resourceName;
-    if (p.sub !== undefined) it.sub = p.sub;
+    // Carry the inverse verbatim; backfill a spec-delete's create body from
+    // the prior state captured at apply (the × hadn't read the spec).
+    if (p.inverse) {
+      it.inverse = (p.inverse.body === undefined && cached !== undefined)
+        ? { ...p.inverse, body: cached } : p.inverse;
+    }
     if (p.actionId !== undefined) it.actionId = p.actionId;
     if (p.device !== undefined) it.device = p.device;
     if (p.iface !== undefined) it.iface = p.iface;
-    // Capture the request body for every item that carries one (spec /
-    // device creates + device / interface actions). The undo planner
-    // reads it for action items (e.g. configure-interface's `tagged`
-    // discriminator); the History renderer shows it as expandable detail
-    // so the operator can see *what* a change submitted, not just that it
-    // happened.
+    // Capture the request body for action items (the undo predicates read it,
+    // e.g. configure-interface's `tagged` discriminator) and for the history
+    // detail view (so the operator sees *what* a change submitted).
     if (p.body && typeof p.body === "object" && Object.keys(p.body).length > 0) {
       it.body = p.body as Record<string, unknown>;
     }
+    it.undoable = isItemUndoable(it);
     return it;
   });
   return {
@@ -181,17 +180,7 @@ export function buildEntry(args: {
  * still be undoable in principle; the History UI surfaces both flags so
  * the operator can choose.
  */
-function isItemUndoable(
-  item: {
-    effect: "create" | "update" | "delete" | "action";
-    kind: string;
-    id: string;
-    actionId?: string;
-    body?: Record<string, unknown> | null;
-    preBody?: Record<string, unknown>;
-  },
-  preBodies: ReadonlyMap<string, Record<string, unknown>>,
-): boolean {
+function isItemUndoable(item: HistoryItem): boolean {
   // Action items — per-actionId predicate map; for some actionIds the
   // predicate inspects the body (e.g. configure-interface is only
   // undoable for the trunk-add variant where body.tagged === true).
@@ -201,11 +190,16 @@ function isItemUndoable(
     if (!predicate) return false;
     return predicate(item.body ?? undefined);
   }
-  // Spec / sub-rule / topology mutations: a create inverts to a delete (no
-  // prior state needed); a delete/update inverts only when we captured the
-  // prior body (fetched at apply, or staged from the UI for sub-rules/edits).
+  // Flat mutations (spec / sub-rule) carry their inverse. It's complete — and
+  // thus undoable — when a delete inverse needs no body, or a create/update
+  // inverse has its prior-state body (backfilled for spec-deletes at apply).
+  if (item.kind === "spec" || item.kind === "sub-rule") {
+    return !!item.inverse && (item.inverse.effect === "delete" || item.inverse.body !== undefined);
+  }
+  // Topology (device / link): create inverts to a delete; a remove inverts
+  // only when the prior body was captured.
   if (item.effect === "create") return true;
-  return preBodies.has(item.id) || !!item.preBody;
+  return !!item.preBody;
 }
 
 /**
