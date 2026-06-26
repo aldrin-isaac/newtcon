@@ -14,7 +14,7 @@
 // the switch) is a separate diff layer and needs a newtron-side
 // projection endpoint; out of scope here.
 
-import type { Pending, InverseMutation } from "./staging.js";
+import type { Pending, PendingInverse } from "./staging.js";
 
 export type PreviewEffect = "create" | "update" | "delete" | "action";
 
@@ -54,7 +54,7 @@ export interface PendingPreview {
    * time and carried verbatim, so undo never re-derives it. Absent ⇒ not
    * undoable. (A spec-delete's inverse body is backfilled at apply.)
    */
-  inverse?: InverseMutation;
+  inverse?: PendingInverse;
   /** Prior server state for a delete/update mutation — shown in history, and
    *  backfilled into a spec-delete's inverse body at apply. */
   preBody?: Record<string, unknown>;
@@ -111,7 +111,16 @@ export function previewQueue(queue: readonly Pending[]): ApplyPreview {
   };
 }
 
+// toPreview attaches the carried inverse + prior body uniformly, so every op
+// type flows them into the history item for undo without per-branch wiring.
 function toPreview(p: Pending): PendingPreview {
+  const pv = previewBase(p);
+  if (p.inverse) pv.inverse = p.inverse;
+  if ("preBody" in p && p.preBody) pv.preBody = p.preBody;
+  return pv;
+}
+
+function previewBase(p: Pending): PendingPreview {
   if (p.group === "mutation") {
     return {
       id: p.id, effect: p.effect,
@@ -120,8 +129,6 @@ function toPreview(p: Pending): PendingPreview {
       scope: p.sub ? `${kindLabel(p.kind)} · ${p.sub.endpoint}` : kindLabel(p.kind),
       danger: p.effect === "delete",
       body: p.body ?? null,
-      ...(p.inverse ? { inverse: p.inverse } : {}),
-      ...(p.preBody ? { preBody: p.preBody } : {}),
     };
   }
   if (p.group === "topology" && p.op === "add-device") {

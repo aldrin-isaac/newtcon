@@ -14,7 +14,7 @@
 // copy.
 
 import type { ApplyPreview } from "./apply-preview.js";
-import type { InverseMutation } from "./staging.js";
+import type { PendingInverse } from "./staging.js";
 
 /** Per-item record — mirrors PendingPreview + the apply outcome + any error. */
 export interface HistoryItem {
@@ -38,7 +38,7 @@ export interface HistoryItem {
    * undo just replays it; no derivation. (A spec-delete's inverse body is
    * backfilled here from preBody, captured at apply.)
    */
-  inverse?: InverseMutation;
+  inverse?: PendingInverse;
   /**
    * Whether this specific item can be undone via the data-layer or
    * device-action planner. Computed at buildEntry time. False for
@@ -133,12 +133,9 @@ export function buildEntry(args: {
     // the staged-from-UI preBody on the item (sub-rules, spec edits).
     const cached = preBodies.get(p.id) ?? p.preBody;
     if (cached !== undefined) it.preBody = cached;
-    // Carry the inverse verbatim; backfill a spec-delete's create body from
-    // the prior state captured at apply (the × hadn't read the spec).
-    if (p.inverse) {
-      it.inverse = (p.inverse.body === undefined && cached !== undefined)
-        ? { ...p.inverse, body: cached } : p.inverse;
-    }
+    // Carry the inverse verbatim, backfilling the prior state a remove couldn't
+    // know at stage time (a re-create's body / a re-link's far endpoint).
+    if (p.inverse) it.inverse = backfilledInverse(p.inverse, cached);
     if (p.actionId !== undefined) it.actionId = p.actionId;
     if (p.device !== undefined) it.device = p.device;
     if (p.iface !== undefined) it.iface = p.iface;
@@ -166,78 +163,38 @@ export function buildEntry(args: {
   };
 }
 
-/**
- * isItemUndoable decides whether a preview item can be undone. Rules:
- *
- *   create-style (spec, device, link)  always undoable (DELETE by name)
- *   delete-style                       undoable iff preBody was captured
- *   action items                       undoable iff actionId is in the
- *                                      per-action-kind inverse map
- *                                      (slice #175.C.2.a + later
- *                                      sub-slices)
- *
- * Note: undoable does NOT mean the item succeeded. A FAILED apply may
- * still be undoable in principle; the History UI surfaces both flags so
- * the operator can choose.
- */
-function isItemUndoable(item: HistoryItem): boolean {
-  // Action items — per-actionId predicate map; for some actionIds the
-  // predicate inspects the body (e.g. configure-interface is only
-  // undoable for the trunk-add variant where body.tagged === true).
-  if (item.kind === "device action" || item.kind === "interface action") {
-    if (item.actionId === undefined) return false;
-    const predicate = ACTION_INVERSE_PREDICATES[item.actionId];
-    if (!predicate) return false;
-    return predicate(item.body ?? undefined);
-  }
-  // Flat mutations (spec / sub-rule) carry their inverse. It's complete — and
-  // thus undoable — when a delete inverse needs no body, or a create/update
-  // inverse has its prior-state body (backfilled for spec-deletes at apply).
-  if (item.kind === "spec" || item.kind === "sub-rule") {
-    return !!item.inverse && (item.inverse.effect === "delete" || item.inverse.body !== undefined);
-  }
-  // Topology (device / link): create inverts to a delete; a remove inverts
-  // only when the prior body was captured.
-  if (item.effect === "create") return true;
-  return !!item.preBody;
+// backfilledInverse fills the prior state a remove couldn't know at stage time
+// (captured at apply): a re-create's body, or a re-link's far endpoint. Every
+// other inverse is already complete, so this is a no-op for them.
+function backfilledInverse(inv: PendingInverse, prior?: Record<string, unknown>): PendingInverse {
+  if (!prior) return inv;
+  if (inv.group === "mutation" && inv.body === undefined) return { ...inv, body: prior };
+  if (inv.group === "topology" && inv.op === "add-device" && inv.body === undefined) return { ...inv, body: prior };
+  if (inv.group === "topology" && inv.op === "add-link" && (inv.a === undefined || inv.z === undefined)
+    && typeof prior.a === "string" && typeof prior.z === "string") return { ...inv, a: prior.a, z: prior.z };
+  return inv;
 }
 
 /**
- * ACTION_INVERSE_PREDICATES maps actionId → predicate(body) that
- * answers "is this specific call undoable?". Predicates inspect body
- * when the inverse depends on the request shape.
- *
- * Updated as sub-slices of 175.C.2 land:
- *
- *   175.C.2.a — apply-service (inverse: remove-service, no body)
- *   175.C.2.b — configure-interface tagged:true (trunk add) → inverse
- *               is remove-trunk-vlan {vlan_id} (newtron PR #225)
- *   175.C.2.c — configure-interface tagged:false (access) and routed
- *               (vrf+ip) → inverse is unconfigure-interface (newtron
- *               case A: cross-mode transitions rejected at the intent
- *               DAG, so the prior state was always empty — clearing
- *               the port restores it)
- *   future   — unconfigure-interface undo (needs InterfaceDetail +
- *              ServiceBindingDetail + ACL pre-state cache to compose
- *              the multi-call restore sequence)
+ * isItemUndoable — one rule now that every op carries its inverse: undoable iff
+ * the inverse exists and is *ready* (a re-create/re-link has its prior state).
+ * undoable does NOT mean the item succeeded; the History UI surfaces both.
  */
-const ACTION_INVERSE_PREDICATES: Record<string, (body: Record<string, unknown> | undefined) => boolean> = {
-  "apply-service": () => true,
-  "configure-interface": (body) => {
-    if (!body || typeof body !== "object") return false;
-    // Trunk add (#175.C.2.b) — inverse via remove-trunk-vlan, needs
-    // a numeric vlan_id alongside tagged:true.
-    if (body["tagged"] === true) return typeof body["vlan_id"] === "number";
-    // Access (#175.C.2.c) — inverse via unconfigure-interface;
-    // requires the body actually describes an access set
-    // (vlan_id present, tagged explicitly false).
-    if (body["tagged"] === false && typeof body["vlan_id"] === "number") return true;
-    // Routed (#175.C.2.c) — inverse via unconfigure-interface;
-    // requires the body describes a routed set (vrf and/or ip).
-    if (typeof body["vrf"] === "string" || typeof body["ip"] === "string") return true;
-    return false;
-  },
-};
+function isItemUndoable(item: HistoryItem): boolean {
+  return !!item.inverse && inverseReady(item.inverse);
+}
+
+// inverseReady — an inverse is enqueueable when it has everything it needs. A
+// remove inverse needs no body; a re-create/re-link needs its backfilled state.
+function inverseReady(inv: PendingInverse): boolean {
+  if (inv.group === "mutation") return inv.effect === "delete" || inv.body !== undefined;
+  if (inv.group === "topology") {
+    if (inv.op === "add-device") return inv.body !== undefined && Object.keys(inv.body).length > 0;
+    if (inv.op === "add-link") return typeof inv.a === "string" && typeof inv.z === "string";
+    return true; // remove-device / remove-link need no prior state
+  }
+  return true; // device / interface action inverses are self-contained
+}
 
 const STORAGE_KEY_PREFIX = "newtcon:history:";
 
