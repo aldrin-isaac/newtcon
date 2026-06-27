@@ -44,6 +44,7 @@ export type PendingInverse =
       sub?: { endpoint: string; key?: string | number }; title: string; body?: Record<string, unknown>; }
   | { group: "topology";  op: "add-device";    name: string; body?: Record<string, unknown>; }
   | { group: "topology";  op: "remove-device"; name: string; }
+  | { group: "topology";  op: "update-device"; name: string; body: Record<string, unknown>; }
   | { group: "topology";  op: "add-link";      a?: string; z?: string; }
   | { group: "topology";  op: "remove-link";   device: string; iface: string; }
   | { group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
@@ -60,6 +61,7 @@ export type Pending =
       inverse?: PendingInverse; }
   | { id: string; group: "topology";  op: "add-device";    name: string; body: Record<string, unknown>; inverse?: PendingInverse; }
   | { id: string; group: "topology";  op: "remove-device"; name: string; inverse?: PendingInverse; }
+  | { id: string; group: "topology";  op: "update-device"; name: string; body: Record<string, unknown>; inverse?: PendingInverse; }
   | { id: string; group: "topology";  op: "add-link";      a: string; z: string; inverse?: PendingInverse; }
   | { id: string; group: "topology";  op: "remove-link";   device: string; iface: string; inverse?: PendingInverse; }
   | { id: string; group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; }
@@ -251,6 +253,50 @@ export function enqueueTopologyRemoveDevice(name: string): Pending | null {
   queue.push(p); notify(); return p;
 }
 
+// enqueuePortConfig stages a per-port config edit on a topology device. Port
+// config lives in the device's `ports` map and persists via the whole-device
+// PUT (newtron has no per-port verb), so every port edit to one device FOLDS
+// into a single update-device op carrying the full merged {steps, ports} — a
+// separate PUT per port would replace the device and clobber sibling ports.
+// `currentDevice` is the device's committed body (full {steps, ports}); it
+// seeds the merge and is the inverse body that undo restores.
+export function enqueuePortConfig(
+  device: string,
+  port: string,
+  config: Record<string, unknown>,
+  currentDevice: Record<string, unknown>,
+): Pending {
+  // Device still pending-add → fold the port into the add body (one POST).
+  const ai = queue.findIndex((p) => p.group === "topology" && p.op === "add-device" && (p as { name: string }).name === device);
+  if (ai >= 0) {
+    const a = queue[ai] as { body: Record<string, unknown> };
+    a.body = mergePortBody(a.body, port, config);
+    notify();
+    return queue[ai]!;
+  }
+  // Existing pending update-device → merge into its body (earliest inverse stands).
+  const ui = queue.findIndex((p) => p.group === "topology" && p.op === "update-device" && (p as { name: string }).name === device);
+  if (ui >= 0) {
+    const u = queue[ui] as { body: Record<string, unknown> };
+    u.body = mergePortBody(u.body, port, config);
+    notify();
+    return queue[ui]!;
+  }
+  // First edit → new update-device; its inverse restores the pre-edit device.
+  const body = mergePortBody(currentDevice, port, config);
+  const inverse: PendingInverse = { group: "topology", op: "update-device", name: device, body: currentDevice };
+  const p: Pending = { id: String(nextID++), group: "topology", op: "update-device", name: device, body, inverse };
+  queue.push(p); notify(); return p;
+}
+
+// mergePortBody returns a new device body with `config` set at `port` in its
+// ports map — immutable; steps + sibling ports preserved.
+function mergePortBody(device: Record<string, unknown>, port: string, config: Record<string, unknown>): Record<string, unknown> {
+  const ports = { ...((device.ports as Record<string, unknown>) ?? {}) };
+  ports[port] = config;
+  return { ...device, ports };
+}
+
 export function enqueueTopologyAddLink(a: string, z: string): Pending {
   // Inverse removes the link by its A endpoint (newtron matches either side).
   const colon = a.indexOf(":");
@@ -431,6 +477,18 @@ export function isDevicePendingRemove(name: string): boolean {
   return queue.some((p) => p.group === "topology" && p.op === "remove-device" && (p as { name: string }).name === name);
 }
 
+// pendingPortConfigs returns the ports staged for a device — from a pending
+// update-device, or an add-device's body when the device is still pending-new —
+// so the port picker can mark rows "configured (pending)".
+export function pendingPortConfigs(device: string): Record<string, Record<string, unknown>> {
+  const p = queue.find((q) => q.group === "topology"
+    && (q.op === "update-device" || q.op === "add-device")
+    && (q as { name: string }).name === device);
+  if (!p) return {};
+  const ports = ((p as { body?: Record<string, unknown> }).body ?? {}).ports;
+  return ports && typeof ports === "object" ? ports as Record<string, Record<string, unknown>> : {};
+}
+
 export function pendingTopologyLinkAdds(): { a: string; z: string }[] {
   return queue.filter((p) => p.group === "topology" && p.op === "add-link")
     .map((p) => ({ a: (p as { a: string }).a, z: (p as { z: string }).z }));
@@ -503,6 +561,9 @@ function groupOrder(p: Pending): number {
     return sub ? 7.7 : 8.0;                            // sub-rules deleted before parent specs
   }
   if (p.group === "topology" && p.op === "add-device") return 2;
+  // Port config on an existing device runs after device adds and before links /
+  // interface actions, so ports exist before anything references them.
+  if (p.group === "topology" && p.op === "update-device") return 2.5;
   if (p.group === "topology" && p.op === "add-link") return 3;
   if (p.group === "device") return 4;
   if (p.group === "interface") return 5;
@@ -526,6 +587,11 @@ async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void>
   }
   if (p.group === "topology" && p.op === "remove-device") {
     await del(apiPath(`topology/nodes/${encodeURIComponent(p.name)}`));
+    return;
+  }
+  if (p.group === "topology" && p.op === "update-device") {
+    // Whole-device replace: PUT the full {steps, ports} body.
+    await put(apiPath(`topology/nodes/${encodeURIComponent(p.name)}`), p.body);
     return;
   }
   if (p.group === "topology" && p.op === "add-link") {
@@ -591,6 +657,7 @@ export function describePending(p: Pending): string {
   }
   if (p.group === "topology" && p.op === "add-device") return `+ device ${p.name}`;
   if (p.group === "topology" && p.op === "remove-device") return `− device ${p.name}`;
+  if (p.group === "topology" && p.op === "update-device") return `~ ports on ${p.name}`;
   if (p.group === "topology" && p.op === "add-link") return `+ link ${p.a} ↔ ${p.z}`;
   if (p.group === "topology" && p.op === "remove-link") return `− link ${p.device}:${p.iface}`;
   if (p.group === "device" && p.op === "action") return `${p.device}: ${p.label}`;

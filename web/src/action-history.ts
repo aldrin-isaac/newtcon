@@ -190,6 +190,7 @@ function inverseReady(inv: PendingInverse): boolean {
   if (inv.group === "mutation") return inv.effect === "delete" || inv.body !== undefined;
   if (inv.group === "topology") {
     if (inv.op === "add-device") return inv.body !== undefined && Object.keys(inv.body).length > 0;
+    if (inv.op === "update-device") return inv.body !== undefined; // pre-edit device restore
     if (inv.op === "add-link") return typeof inv.a === "string" && typeof inv.z === "string";
     return true; // remove-device / remove-link need no prior state
   }

@@ -111,6 +111,7 @@ function orderOf(p: Pending): number {
   }
   switch (`${p.group}.${p.op}`) {
     case "topology.add-device": return 2;
+    case "topology.update-device": return 2.5;
     case "topology.add-link": return 3;
     case "device.action": return 4;
     case "interface.action": return 5;
@@ -174,6 +175,13 @@ function previewBase(p: Pending): PendingPreview {
       id: p.id, effect: "delete", kind: "device",
       title: p.name, scope: "topology",
       danger: true, body: null,
+    };
+  }
+  if (p.group === "topology" && p.op === "update-device") {
+    return {
+      id: p.id, effect: "update", kind: "device",
+      title: p.name, scope: "ports",
+      danger: false, body: p.body,
     };
   }
   if (p.group === "topology" && p.op === "add-link") {
