@@ -21,7 +21,7 @@ import {
   planLoad,
   summarisePlan,
 } from "./sample-network.js";
-import { attachServerValidationToForm, clearFieldErrors } from "./form-error-binding.js";
+import { clearFieldErrors } from "./form-error-binding.js";
 import {
   type ViewState,
   ZOOM_STEP,
@@ -66,10 +66,6 @@ import {
   fetchNodeProjection,
   fetchNodeIntentTree,
   postNodeReconcile,
-  deleteTopologyLink,
-  postBindService,
-  postUnbindService,
-  postRefreshService,
 } from "./api/newtcon/nodes.js";
 import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
@@ -137,6 +133,7 @@ import {
   type IfaceBinding,
   type PlatformPort,
 } from "./device-interfaces.js";
+import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
 import {
   enqueueSpecCreate,
   enqueueSpecDelete,
@@ -156,6 +153,9 @@ import {
   pendingTopologyDeviceAdds,
   isDevicePendingRemove,
   pendingTopologyLinkAdds,
+  enqueueInterfaceAction,
+  enqueueTopologyRemoveLink,
+  deviceQueue,
   subscribe as subscribePending,
   type SpecKind as StagingSpecKind,
 } from "./staging.js";
@@ -653,17 +653,6 @@ const subRuleTables: Partial<Record<SpecKind, SubRuleTable>> = {
     ],
   },
 };
-
-// translateErrorKind converts error kind identifiers to operator-readable language.
-function translateErrorKind(kind: string): string {
-  switch (kind) {
-    case "validation_failure": return "validation failed";
-    case "precondition_failure": return "precondition not met";
-    case "drift_refusal": return "drift detected — refused to apply";
-    case "newtron_unavailable": return "newtron unreachable";
-    default: return "error";
-  }
-}
 
 // ---- Form drawer (create spec) ---------------------------------------------
 
@@ -3088,83 +3077,6 @@ function renderRefChip(refKind: string, name: string): HTMLElement {
   return chip;
 }
 
-// openBindServiceDrawer opens a form drawer for binding a service to an interface.
-// serviceNames is pre-fetched to populate the service dropdown.
-function openBindServiceDrawer(
-  device: string,
-  ifaceName: string,
-  serviceNames: string[],
-  onSuccess: () => void
-): void {
-  const drawer = document.getElementById("detail-drawer");
-  const content = document.getElementById("drawer-content");
-  if (!drawer || !content) return;
-
-  drawer.setAttribute("aria-hidden", "false");
-  drawer.classList.add("open");
-  content.textContent = "";
-
-  content.appendChild(el("p", { className: "drawer-kind" }, "Interface"));
-  content.appendChild(el("h2", { className: "drawer-name" }, `Bind service — ${ifaceName}`));
-
-  const serviceField: FieldDef = serviceNames.length > 0
-    ? { name: "service", label: "Service", type: "select", required: true, options: serviceNames, placeholder: "service name" }
-    : { name: "service", label: "Service", type: "text", required: true, placeholder: "service name" };
-  const fields: FieldDef[] = [
-    serviceField,
-    { name: "vlan", label: "VLAN", type: "number", placeholder: "e.g. 100 (optional)" },
-    { name: "ip_address", label: "IP address", type: "text", placeholder: "e.g. 10.0.0.1/24 (optional)" },
-    { name: "peer_as", label: "Peer AS", type: "number", placeholder: "e.g. 65001 (optional)" },
-  ];
-
-  const { form, getValues, validate } = buildFormFields(fields);
-  content.appendChild(form);
-
-  const errorOut = el("div", { className: "form-error-out" });
-  content.appendChild(errorOut);
-
-  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Bind service");
-  content.appendChild(submitBtn);
-
-  submitBtn.addEventListener("click", async () => {
-    clearFieldErrors(form);
-    if (!validate()) return;
-    errorOut.textContent = "";
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Binding…";
-    try {
-      const values = getValues();
-      if (!values["service"]) {
-        errorOut.appendChild(el("p", { className: "panel-error" }, "Service name is required."));
-        submitBtn.disabled = false;
-        submitBtn.textContent = "Bind service";
-        return;
-      }
-      await postBindService(device, ifaceName, values);
-      submitBtn.textContent = "Bound";
-      content.insertBefore(el("p", { className: "form-success" }, "Service bound."), submitBtn);
-      onSuccess();
-      setTimeout(() => {
-        drawer.setAttribute("aria-hidden", "true");
-        drawer.classList.remove("open");
-      }, 800);
-    } catch (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = "Bind service";
-      if (!attachServerValidationToForm(form, err)) {
-        if (err instanceof ApiError) {
-          errorOut.appendChild(el("p", { className: "panel-error" },
-            translateErrorKind(err.kind) + ": " + err.message));
-        } else {
-          errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-        }
-      }
-    }
-  });
-}
-
-// renderInterfaceTab renders the interfaces sub-tab with click-to-expand detail
-// and service binding/unbind/refresh actions.
 // renderInterfaceTab renders the unified, sorted device interface view: one row
 // per platform port (configured AND available), joining inventory + topology
 // port config + live state + service bindings + topology links. Rows expand
@@ -3265,20 +3177,28 @@ function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[
 
   const renderRows = (): void => {
     tbody.textContent = "";
+    const pending = new Set(
+      deviceQueue(device)
+        .filter((p) => p.group === "interface")
+        .map((p) => (p as { iface?: string }).iface)
+        .filter((x): x is string => !!x),
+    );
     const shown = applyIfaceFilter(rows, filter, query);
     empty.hidden = shown.length > 0;
-    for (const row of shown) renderIfaceRow(tbody, device, row, reload);
+    for (const row of shown) renderIfaceRow(tbody, device, row, reload, pending);
   };
   renderRows();
 }
 
-function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, reload: () => void): void {
-  const tr = el("tr", { className: "iface-row" + (row.available ? " iface-row--available" : ""), tabIndex: 0 });
+function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, reload: () => void, pending: Set<string>): void {
+  const isPending = pending.has(row.name);
+  const tr = el("tr", { className: "iface-row" + (row.available ? " iface-row--available" : "") + (isPending ? " iface-row--pending" : ""), tabIndex: 0 });
 
-  // Port cell: status dot + name.
+  // Port cell: status dot + name (+ pending marker when a queued action targets it).
   const portCell = el("td", { className: "iface-cell-port" });
   portCell.appendChild(el("span", { className: `iface-dot iface-dot--${row.status}`, title: statusTitle(row) }));
   portCell.appendChild(el("span", { className: "iface-name" }, row.name));
+  if (isPending) portCell.appendChild(el("span", { className: "iface-pending-chip", title: "Queued changes — Save to apply" }, "pending"));
   tr.appendChild(portCell);
 
   tr.appendChild(el("td", {}, el("span", { className: `iface-role iface-role--${row.role}` }, roleLabel(row.role))));
@@ -3291,7 +3211,7 @@ function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, r
     svcCell.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
   } else {
     const apply = el("button", { type: "button", className: "iface-apply-cta" }, "+ Apply");
-    apply.addEventListener("click", (e) => { e.stopPropagation(); openApplyServiceFor(device, row.name, reload); });
+    apply.addEventListener("click", (e) => { e.stopPropagation(); expand(true); });
     svcCell.appendChild(apply);
   }
   tr.appendChild(svcCell);
@@ -3308,16 +3228,23 @@ function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, r
   tbody.appendChild(detailTr);
 
   let built = false;
+  // expand opens the detail (optionally auto-opening the Apply-service form);
+  // toggle collapses if already open.
+  const expand = (autoApply: boolean): void => {
+    detailTr.hidden = false;
+    tr.classList.add("iface-row--expanded");
+    if (!built || autoApply) { built = true; renderIfaceDetail(detailTd, device, row, reload, autoApply); }
+  };
   const toggle = (): void => {
-    detailTr.hidden = !detailTr.hidden;
-    tr.classList.toggle("iface-row--expanded", !detailTr.hidden);
-    if (!detailTr.hidden && !built) { built = true; renderIfaceDetail(detailTd, device, row, reload); }
+    if (detailTr.hidden) { expand(false); return; }
+    detailTr.hidden = true;
+    tr.classList.remove("iface-row--expanded");
   };
   tr.addEventListener("click", toggle);
   tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
 }
 
-function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow, reload: () => void): void {
+function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow, reload: () => void, autoApply = false): void {
   host.textContent = "";
 
   // Properties (tailored, not a JSON dump).
@@ -3342,38 +3269,44 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
     host.appendChild(svc);
   }
 
-  // Actions.
+  // Already-queued actions for this port (workspace queue overlay).
+  const queued = deviceQueue(device).filter((p) => p.group === "interface" && (p as { iface?: string }).iface === row.name);
+  if (queued.length > 0) {
+    const q = el("div", { className: "iface-detail-queued" });
+    q.appendChild(el("span", { className: "iface-pending-chip" }, "pending"));
+    q.appendChild(el("span", { className: "iface-detail-queued-list" }, queued.map((p) => (p as { label: string }).label).join(" · ")));
+    host.appendChild(q);
+  }
+
+  // Actions — staged through the workspace queue (preview + undo), consistent
+  // with the rest of the workspace. Buttons reveal an inline form in formHost
+  // for actions that take fields; field-less actions stage on click.
   const actions = el("div", { className: "iface-actions" });
+  const formHost = el("div", { className: "iface-action-form-host" });
+
+  actions.appendChild(portModeMenu(formHost, device, row.name, reload));
+
   if (row.canApplyService) {
-    const bind = el("button", { type: "button", className: "iface-action-btn" }, "Apply service");
-    bind.addEventListener("click", () => openApplyServiceFor(device, row.name, reload));
-    actions.appendChild(bind);
+    const apply = el("button", { type: "button", className: "iface-action-btn" }, "Apply service");
+    apply.addEventListener("click", () => openIfaceForm(formHost, device, row.name, findIfaceAction("Service", "apply-service"), reload));
+    actions.appendChild(apply);
   } else {
-    const refresh = el("button", { type: "button", className: "iface-action-btn" }, "Refresh");
-    refresh.addEventListener("click", async () => {
-      refresh.disabled = true; refresh.textContent = "Refreshing…";
-      try { await postRefreshService(device, row.name); reload(); }
-      catch (err) { refresh.disabled = false; refresh.textContent = "Refresh"; showToast({ kind: "error", title: "Refresh failed", body: errMsg(err) }); }
-    });
-    actions.appendChild(refresh);
     const unbind = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Unbind service");
-    unbind.addEventListener("click", async () => {
-      if (!await confirmInline({ title: `Unbind service from ${row.name}?`, body: "This cannot be undone.", danger: true, confirmLabel: "Unbind" })) return;
-      try { await postUnbindService(device, row.name); reload(); }
-      catch (err) { showToast({ kind: "error", title: "Unbind failed", body: errMsg(err) }); }
-    });
+    unbind.addEventListener("click", () => void stageIfaceAction(device, row.name, findIfaceAction("Service", "remove-service"), {}, reload));
     actions.appendChild(unbind);
   }
+
   if (row.link) {
-    const rmLink = el("button", { type: "button", className: "iface-action-btn" }, "Remove link");
-    rmLink.addEventListener("click", async () => {
-      if (!await confirmInline({ title: `Remove the link on ${row.name}?`, danger: true, confirmLabel: "Remove link" })) return;
-      try { await deleteTopologyLink(device, row.name); reload(); }
-      catch (err) { showToast({ kind: "error", title: "Remove link failed", body: errMsg(err) }); }
-    });
+    const rmLink = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Remove link");
+    rmLink.addEventListener("click", () => { enqueueTopologyRemoveLink(device, row.name); showToast({ kind: "success", title: "Queued", body: `Remove link on ${row.name} — Save to apply.` }); reload(); });
     actions.appendChild(rmLink);
   }
   host.appendChild(actions);
+  host.appendChild(formHost);
+
+  if (autoApply && row.canApplyService) {
+    openIfaceForm(formHost, device, row.name, findIfaceAction("Service", "apply-service"), reload);
+  }
 
   // Raw, tucked for power users (replaces the old always-on JSON dump).
   if (row.live) {
@@ -3384,17 +3317,117 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
   }
 }
 
-// openApplyServiceFor fetches service names then opens the bind-service drawer
-// for an interface (reuses the existing flow), refreshing the view on success.
-function openApplyServiceFor(device: string, iface: string, reload: () => void): void {
-  fetch(apiPath("services"), { cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : { services: [] }))
-    .then((d: unknown) => {
-      const names = Array.isArray((d as { services?: { name: string }[] }).services)
-        ? (d as { services: { name: string }[] }).services.map((s) => s.name) : [];
-      openBindServiceDrawer(device, iface, names, reload);
-    })
-    .catch(() => openBindServiceDrawer(device, iface, [], reload));
+// findIfaceAction locates an INTERFACE_ACTIONS def by group + id (+ optional
+// label, for the configure-interface variants that share one id).
+function findIfaceAction(group: string, id: string, label?: string): ActionDef | undefined {
+  const g = INTERFACE_ACTIONS.find((x) => x.group === group);
+  return g?.items.find((a) => a.id === id && (label === undefined || a.label === label));
+}
+
+// portModeMenu builds the "Configure ▾" button; clicking it lists the Port-mode
+// variants (access / trunk / routed / clear) into formHost. Field actions open
+// an inline form; the field-less Clear confirms then stages.
+function portModeMenu(formHost: HTMLElement, device: string, iface: string, reload: () => void): HTMLElement {
+  const btn = el("button", { type: "button", className: "iface-action-btn" }, "Configure ▾");
+  btn.addEventListener("click", () => {
+    formHost.textContent = "";
+    const menu = el("div", { className: "iface-portmode-menu" });
+    const group = INTERFACE_ACTIONS.find((x) => x.group === "Port mode");
+    for (const action of group?.items ?? []) {
+      const b = el("button", { type: "button", className: "iface-action-btn" + (action.danger ? " iface-action-btn--danger" : "") }, action.label);
+      b.addEventListener("click", async () => {
+        if ((action.fields ?? []).length === 0) {
+          if (action.confirm && !await confirmInline({ title: `${action.label}?`, body: action.confirm, danger: !!action.danger, confirmLabel: "Queue" })) return;
+          await stageIfaceAction(device, iface, action, {}, reload);
+        } else {
+          openIfaceForm(formHost, device, iface, action, reload);
+        }
+      });
+      menu.appendChild(b);
+    }
+    formHost.appendChild(menu);
+  });
+  return btn;
+}
+
+// openIfaceForm renders an interface action's inline form into formHost.
+function openIfaceForm(formHost: HTMLElement, device: string, iface: string, action: ActionDef | undefined, reload: () => void): void {
+  formHost.textContent = "";
+  if (!action) return;
+  const form = el("form", { className: "iface-action-form" });
+  form.appendChild(el("p", { className: "iface-action-form-title" }, `${action.label} · ${iface}`));
+  const reads: Array<{ field: ActionField; get: () => string | number }> = [];
+  for (const field of action.fields ?? []) {
+    const r = renderActionField(field);
+    form.appendChild(r.row);
+    reads.push({ field, get: r.get });
+  }
+  const errOut = el("div", { className: "form-error-out" });
+  form.appendChild(errOut);
+  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
+  cancel.addEventListener("click", () => { formHost.textContent = ""; });
+  const stage = el("button", { type: "submit", className: "btn btn-primary btn-sm" + (action.danger ? " btn-danger" : "") }, "Queue");
+  btnRow.appendChild(cancel);
+  btnRow.appendChild(stage);
+  form.appendChild(btnRow);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errOut.textContent = "";
+    const values: Record<string, unknown> = {};
+    for (const { field, get } of reads) {
+      const v = get();
+      if (field.required && (v === "" || v === undefined)) {
+        errOut.appendChild(el("p", { className: "panel-error" }, `${field.label} is required.`));
+        return;
+      }
+      if (v !== "" && v !== undefined) values[field.name] = v;
+    }
+    if (action.confirm && !await confirmInline({ title: `${action.label}?`, body: action.confirm, danger: !!action.danger, confirmLabel: "Queue" })) return;
+    formHost.textContent = "";
+    await stageIfaceAction(device, iface, action, values, reload);
+  });
+  formHost.appendChild(form);
+}
+
+// renderActionField renders one interface action field (text / number / select).
+// The "service" field is a dropdown populated from the network's services.
+function renderActionField(field: ActionField): { row: HTMLElement; get: () => string | number } {
+  const row = el("div", { className: "iface-field" });
+  row.appendChild(el("label", { className: "iface-field-label" }, field.label + (field.required ? " *" : "")));
+  if (field.name === "service") {
+    const sel = el("select", { className: "form-control" }) as HTMLSelectElement;
+    sel.appendChild(new Option("Loading…", ""));
+    void fetch(apiPath("services"), { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { services: [] }))
+      .then((d: unknown) => {
+        sel.textContent = "";
+        sel.appendChild(new Option("Select a service…", ""));
+        for (const s of (d as { services?: { name: string }[] }).services ?? []) sel.appendChild(new Option(s.name, s.name));
+      })
+      .catch(() => { sel.textContent = ""; sel.appendChild(new Option("(couldn't load services)", "")); });
+    row.appendChild(sel);
+    return { row, get: () => sel.value };
+  }
+  const input = el("input", { type: field.type === "number" ? "number" : "text", className: "form-control" }) as HTMLInputElement;
+  if (field.hint) input.placeholder = field.hint;
+  row.appendChild(input);
+  return {
+    row,
+    get: () => field.type === "number"
+      ? (input.value.trim() === "" ? "" : Number(input.value))
+      : input.value.trim(),
+  };
+}
+
+// stageIfaceAction enqueues an interface action onto the workspace queue (which
+// computes its undo inverse) and refreshes the view to reflect the pending edit.
+async function stageIfaceAction(device: string, iface: string, action: ActionDef | undefined, values: Record<string, unknown>, reload: () => void): Promise<void> {
+  if (!action) return;
+  const body = { ...(action.wireBody ?? {}), ...values };
+  enqueueInterfaceAction(device, iface, action.id, `${action.label} · ${iface}`, body, action.danger);
+  showToast({ kind: "success", title: "Queued", body: `${action.label} on ${iface} — Save to apply.` });
+  reload();
 }
 
 function statusTitle(row: InterfaceRow): string {
@@ -3406,9 +3439,6 @@ function roleLabel(role: InterfaceRow["role"]): string {
     case "available": return "Available";
     default: return role.charAt(0).toUpperCase() + role.slice(1);
   }
-}
-function errMsg(err: unknown): string {
-  return err instanceof ApiError ? translateErrorKind(err.kind) + ": " + err.message : String(err);
 }
 
 // renderConfigDBTab renders the CONFIG_DB sub-tab with 3-level navigation.
