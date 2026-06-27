@@ -1734,6 +1734,16 @@
   color: var(--color-text-secondary);
   margin: 0;
 }
+/* At-a-glance stats folded from the old Summary tab (always-visible header). */
+.node-drawer-stats { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin: var(--space-2xs) 0 0; }
+.node-drawer-stat {
+  font-size: var(--text-2xs); padding: 1px 8px; border-radius: var(--radius-full);
+  background: var(--color-surface-sunken); color: var(--color-text-secondary);
+}
+.node-drawer-stat--up { background: var(--color-success-bg); color: var(--color-success); }
+.node-drawer-stat--down { background: var(--color-danger-bg); color: var(--color-danger); }
+.node-drawer-stat--drift { background: var(--color-warning-bg); color: var(--color-warning); }
+.node-drawer-stat--clean { color: var(--color-text-muted); }
 .node-drawer-actions {
   display: flex;
   gap: var(--space-xs);
@@ -1756,27 +1766,8 @@
   color: var(--color-accent);
 }
 
-/* Summary tab — at-a-glance cards (Identity / Interfaces / Drift) */
-.node-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-md);
-}
-.node-summary-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  padding: var(--space-sm);
-}
-.node-summary-card-title {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-  color: var(--color-text-muted);
-  font-weight: var(--weight-medium);
-  margin: 0 0 var(--space-xs);
-}
-.node-summary-card-body { font-size: var(--text-sm); }
+/* Shared "summary"-style bits reused by the State sub-sections + BGP/EVPN
+   renderers (the Summary tab itself folded into the always-visible header). */
 .node-summary-loading { color: var(--color-text-muted); font-style: italic; margin: 0; }
 .node-summary-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-sm); margin: 0; }
 .node-summary-dt { color: var(--color-text-muted); font-size: var(--text-xs); }
@@ -1790,17 +1781,7 @@
 }
 .node-summary-stat-total { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 .node-summary-stat-label { color: var(--color-text-secondary); font-size: var(--text-xs); }
-.node-summary-stat-pill {
-  font-size: var(--text-xs);
-  padding: 1px var(--space-2xs);
-  border-radius: 999px;
-  font-weight: var(--weight-medium);
-}
-.node-summary-stat-pill--up   { background: var(--color-success-bg); color: var(--color-success); }
-.node-summary-stat-pill--down { background: var(--color-danger-bg);  color: var(--color-danger); }
-.node-summary-stat-pill--drift{ background: var(--color-warning-bg); color: var(--color-warning); }
 .node-summary-stat-clean { color: var(--color-success); margin: 0; font-size: var(--text-sm); }
-.node-summary-stat-hint  { color: var(--color-text-muted); font-size: var(--text-xs); margin: var(--space-2xs) 0 0; }
 
 /* State tab — disclosure-per-domain */
 .node-state-intro {
