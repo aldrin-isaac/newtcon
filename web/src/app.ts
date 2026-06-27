@@ -134,6 +134,7 @@ import {
   type PlatformPort,
 } from "./device-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
+import { deviceServiceUsage, countServiceInstances, type ServiceUsage } from "./device-resources.js";
 import {
   enqueueSpecCreate,
   enqueueSpecDelete,
@@ -4345,7 +4346,11 @@ async function renderSummaryTab(container: HTMLElement, device: string): Promise
 async function renderStateTab(container: HTMLElement, device: string): Promise<void> {
   container.textContent = "";
   container.appendChild(el("p", { className: "node-state-intro" },
-    "Observed reality from this device. Sub-sections fetch on expand."));
+    "Provisioned resources on this device + observed runtime state. Sub-sections fetch on expand."));
+
+  // Resource lens (the inverse of the interface table): provisioned services on
+  // this device, grouped by service → the interfaces they're applied to.
+  container.appendChild(renderServicesDisclosure(device));
 
   for (const sub of STATE_SUBSECTIONS) {
     const details = el("details", { className: "node-state-section" }) as HTMLDetailsElement;
@@ -4377,6 +4382,67 @@ async function renderStateTab(container: HTMLElement, device: string): Promise<v
     });
 
     container.appendChild(details);
+  }
+}
+
+// renderServicesDisclosure builds the resource-lens "Services" disclosure:
+// services provisioned on this device → the interfaces they're applied to
+// (derived from the topology's apply-service steps; the inverse of the
+// per-interface service column in the Interfaces table).
+function renderServicesDisclosure(device: string): HTMLElement {
+  const details = el("details", { className: "node-state-section node-state-section--services" }) as HTMLDetailsElement;
+  details.open = true;
+  const summary = el("summary", { className: "node-state-section-summary" });
+  summary.appendChild(el("span", { className: "node-state-section-title" }, "Services"));
+  const badge = el("span", { className: "node-state-section-badge" }, "");
+  summary.appendChild(badge);
+  details.appendChild(summary);
+  const body = el("div", { className: "node-state-section-body" });
+  body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));
+  details.appendChild(body);
+
+  void fetchTopology()
+    .then((topo) => {
+      const entry = ((topo as { devices?: Record<string, unknown> } | null)?.devices ?? {})[device] ?? null;
+      const usage = deviceServiceUsage(entry);
+      const n = countServiceInstances(usage);
+      badge.textContent = n === 0 ? "—" : `${n}`;
+      renderServiceLensInto(body, usage);
+    })
+    .catch((err) => renderErrorInto(body, err));
+  return details;
+}
+
+// renderServiceLensInto renders each provisioned service as a card listing the
+// interfaces it's applied to (+ per-interface vlan / ip / peer-AS).
+function renderServiceLensInto(body: HTMLElement, usage: ServiceUsage[]): void {
+  body.textContent = "";
+  if (usage.length === 0) {
+    body.appendChild(el("p", { className: "node-summary-stat-clean" },
+      "No services applied to this device's interfaces yet — apply one from the Interfaces tab."));
+    return;
+  }
+  for (const u of usage) {
+    const card = el("div", { className: "svc-lens-card" });
+    const head = el("div", { className: "svc-lens-head" });
+    head.appendChild(el("span", { className: "iface-svc-chip" }, u.service));
+    head.appendChild(el("span", { className: "svc-lens-count" },
+      `${u.instances.length} interface${u.instances.length === 1 ? "" : "s"}`));
+    card.appendChild(head);
+    const table = el("table", { className: "svc-lens-table" });
+    const hr = el("tr");
+    for (const h of ["Interface", "VLAN", "IP", "Peer AS"]) hr.appendChild(el("th", {}, h));
+    table.appendChild(hr);
+    for (const inst of u.instances) {
+      const tr = el("tr");
+      tr.appendChild(el("td", { className: "iface-name" }, inst.iface));
+      tr.appendChild(el("td", {}, inst.vlan ?? "—"));
+      tr.appendChild(el("td", { className: "iface-cell-mono" }, inst.ip ?? "—"));
+      tr.appendChild(el("td", {}, inst.peerAs ?? "—"));
+      table.appendChild(tr);
+    }
+    card.appendChild(table);
+    body.appendChild(card);
   }
 }
 
