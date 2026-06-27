@@ -22,6 +22,7 @@ import {
   enqueuePortConfig,
   pendingSubMutations,
   pendingPortConfigs,
+  deviceQueue,
   isSpecPendingUpdate,
   getQueue,
   discardAll,
@@ -268,5 +269,13 @@ describe("enqueuePortConfig() — port edits fold into one whole-device update",
     discardAll();
     enqueueTopologyAddDevice("spine1", { steps: [], ports: { Ethernet0: { mtu: 1500 } } });
     assert.deepEqual(pendingPortConfigs("spine1").Ethernet0, { mtu: 1500 });
+  });
+
+  test("deviceQueue includes the update-device op so the per-device panel sees it", () => {
+    enqueuePortConfig("switch1", "Ethernet4", { admin_status: "up" }, dev());
+    const dq = deviceQueue("switch1");
+    assert.equal(dq.length, 1);
+    assert.equal(dq[0].op, "update-device");
+    assert.equal(deviceQueue("other").length, 0, "scoped to the target device");
   });
 });
