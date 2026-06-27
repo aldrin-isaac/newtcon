@@ -113,6 +113,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-palette.ts       → resolvePalette + resolveDevicePalette — pure resolver from per-element actuation observation to the unified five-state palette (spec-only / actuated-ok / actuated-down / drift / unknown); foundation for the layered Topology views (slice #210.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
+    port-config.ts            → buildPicker + mergePort + prefillForPort — pure helpers for the schema-driven port-config flow: platform inventory is the menu, topology device ports the chosen subset; backs the Topology "Configure a port" picker + whole-device write-back (PortConfig schema kind)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints

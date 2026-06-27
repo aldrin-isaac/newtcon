@@ -27,11 +27,18 @@ import {
 import {
   enqueueDeviceAction,
   enqueueInterfaceAction,
+  enqueuePortConfig,
+  pendingPortConfigs,
   deviceQueue,
   applyDevice,
   discardDevice,
   describePending,
 } from "./staging.js";
+import { renderSchemaForm } from "./schema-form.js";
+import { fetchSchema } from "./api/newtcon/schema.js";
+import { fetchSpecDetail } from "./api/newtcon/network.js";
+import { fetchTopology } from "./api/newtcon/nodes.js";
+import { buildPicker, prefillForPort, type PlatformPort } from "./port-config.js";
 
 // ---- HTTP plumbing --------------------------------------------------------
 
@@ -428,7 +435,138 @@ function renderInterfacesTab(device: string, deps: PanelDeps): HTMLElement {
     count.textContent = `${list.querySelectorAll(".topo-iface-chip").length}`;
   });
 
+  // Port-config authoring: pick a port from the platform inventory and
+  // configure it (the interfaces above ARE this device's configured ports).
+  section.appendChild(renderPortConfigSection(device, deps));
+
   return section;
+}
+
+// ---- Port config (platform inventory → schema form → whole-device update) ---
+//
+// Two ports concepts (newtron platform-port model): the platform inventory is
+// the MENU of every front-panel port; the topology device's `ports` map holds
+// only the CHOSEN subset of configured ports. The operator picks an inventory
+// port and configures it via the schema-driven PortConfig form; the edit stages
+// as a whole-device update (enqueuePortConfig folds all of a device's port edits
+// into one PUT so sibling ports aren't clobbered). The picker keeps
+// topology.Ports ⊆ platform.Ports true by construction.
+function renderPortConfigSection(device: string, deps: PanelDeps): HTMLElement {
+  const wrap = el("details", { className: "topo-portcfg" });
+  wrap.appendChild(el("summary", { className: "topo-portcfg-summary" }, "Configure a port"));
+  const body = el("div", { className: "topo-portcfg-body" });
+  wrap.appendChild(body);
+
+  let loaded = false;
+  wrap.addEventListener("toggle", () => {
+    if ((wrap as HTMLDetailsElement).open && !loaded) {
+      loaded = true;
+      void loadPortConfig(device, body, deps);
+    }
+  });
+  return wrap;
+}
+
+async function loadPortConfig(device: string, body: HTMLElement, deps: PanelDeps): Promise<void> {
+  body.textContent = "";
+  body.appendChild(el("p", { className: "topo-portcfg-loading" }, "Loading platform ports…"));
+
+  let inventory: PlatformPort[];
+  let currentDevice: Record<string, unknown>;
+  try {
+    const [profile, topo] = await Promise.all([
+      fetchSpecDetail("profiles", device),
+      fetchTopology(),
+    ]);
+    const platform = (profile as { platform?: string } | null)?.platform ?? "";
+    const devices = (topo as { devices?: Record<string, Record<string, unknown>> } | null)?.devices ?? {};
+    currentDevice = devices[device] ?? {};
+    if (!platform) {
+      body.textContent = "";
+      body.appendChild(panelError("This device's profile has no platform; set one to configure ports."));
+      return;
+    }
+    const plat = await fetchSpecDetail("platforms", platform);
+    const ports = (plat as { ports?: PlatformPort[] } | null)?.ports;
+    inventory = Array.isArray(ports) ? ports : [];
+  } catch (e) {
+    body.textContent = "";
+    body.appendChild(panelError(formatError(e)));
+    return;
+  }
+
+  if (inventory.length === 0) {
+    body.textContent = "";
+    body.appendChild(el("p", { className: "topo-action-panel-empty-hint" },
+      "This platform exposes no ports to configure."));
+    return;
+  }
+
+  const committed = (currentDevice.ports as Record<string, Record<string, unknown>>) ?? {};
+  const pending = pendingPortConfigs(device);
+  const picker = buildPicker(inventory, committed, pending);
+
+  body.textContent = "";
+
+  // Port picker.
+  const pickRow = el("div", { className: "topo-portcfg-pick" });
+  pickRow.appendChild(el("label", { className: "schema-form-label" }, "Port"));
+  const select = el("select", { className: "schema-form-input topo-portcfg-select" }) as HTMLSelectElement;
+  select.appendChild(new Option("Select a port…", ""));
+  for (const p of picker) {
+    const tag = p.status === "pending" ? " · pending" : p.status === "configured" ? " · configured" : "";
+    select.appendChild(new Option(`${p.name}${p.speed ? " (" + p.speed + ")" : ""}${tag}`, p.name));
+  }
+  pickRow.appendChild(select);
+  body.appendChild(pickRow);
+
+  const formHost = el("div", { className: "topo-portcfg-form" });
+  body.appendChild(formHost);
+
+  select.addEventListener("change", () => { void renderFormFor(select.value); });
+
+  async function renderFormFor(portName: string): Promise<void> {
+    formHost.textContent = "";
+    if (!portName) return;
+    const picked = picker.find((p) => p.name === portName);
+    if (!picked) return;
+
+    let schema;
+    try {
+      schema = await fetchSchema("PortConfig");
+    } catch {
+      formHost.appendChild(panelError(
+        "Port configuration isn't available yet — this newtron build exposes no PortConfig schema."));
+      return;
+    }
+
+    // `port` is the ports-map key (chosen via the picker), not a body field —
+    // skip it in the form. The schema drives admin_status / mtu / speed / …
+    const sf = await renderSchemaForm({
+      schema,
+      prefill: prefillForPort(picked),
+      skipFields: new Set(["port"]),
+    });
+    formHost.appendChild(sf.form);
+
+    const errOut = el("div", { className: "form-error-out" });
+    formHost.appendChild(errOut);
+
+    const actions = el("div", { className: "topo-action-form-actions" });
+    const queueBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" },
+      picked.status === "unconfigured" ? "Queue port config" : "Queue update");
+    actions.appendChild(queueBtn);
+    formHost.appendChild(actions);
+
+    queueBtn.addEventListener("click", () => {
+      errOut.textContent = "";
+      if (!sf.validate()) return;
+      const config = sf.getValues();
+      enqueuePortConfig(device, portName, config, currentDevice);
+      flash(queueBtn, "Queued");
+      deps.onChange();
+    });
+  }
 }
 
 function renderInterfaceChip(device: string, iface: string, deps: PanelDeps): HTMLElement {

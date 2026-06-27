@@ -2239,6 +2239,21 @@
   flex-wrap: wrap;
   gap: 4px;
 }
+
+/* Port-config authoring (platform inventory → schema form → whole-device PUT). */
+.topo-portcfg { margin-top: var(--space-xs); }
+.topo-portcfg-summary {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-link);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.topo-portcfg-body { margin-top: var(--space-xs); display: flex; flex-direction: column; gap: var(--space-xs); }
+.topo-portcfg-loading { font-size: var(--text-2xs); color: var(--color-text-secondary); margin: 0; }
+.topo-portcfg-pick { display: flex; flex-direction: column; gap: 2px; }
+.topo-portcfg-select { width: 100%; }
+.topo-portcfg-form { display: flex; flex-direction: column; gap: var(--space-xs); }
 .topo-iface-chip {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);

@@ -19,7 +19,9 @@ import {
   enqueueTopologyRemoveLink,
   enqueueDeviceAction,
   enqueueInterfaceAction,
+  enqueuePortConfig,
   pendingSubMutations,
+  pendingPortConfigs,
   isSpecPendingUpdate,
   getQueue,
   discardAll,
@@ -219,5 +221,52 @@ describe("topology + action ops carry their own inverse", () => {
     discardAll();
     const d = enqueueDeviceAction("r1", "reboot", "Reboot", {});
     assert.equal(d.inverse, undefined);
+  });
+});
+
+describe("enqueuePortConfig() — port edits fold into one whole-device update", () => {
+  beforeEach(() => discardAll());
+
+  const dev = () => ({ steps: [{ url: "/setup-device" }], ports: { Ethernet0: { mtu: 9100 } } });
+
+  test("first edit stages an update-device with the merged body + restore inverse", () => {
+    const p = enqueuePortConfig("switch1", "Ethernet4", { admin_status: "up" }, dev());
+    const q = getQueue();
+    assert.equal(q.length, 1);
+    assert.equal(p.group, "topology");
+    assert.equal(p.op, "update-device");
+    assert.equal(p.name, "switch1");
+    assert.deepEqual(p.body.ports, { Ethernet0: { mtu: 9100 }, Ethernet4: { admin_status: "up" } });
+    assert.deepEqual(p.body.steps, [{ url: "/setup-device" }], "steps preserved in the PUT body");
+    // Inverse restores the pre-edit device (full {steps, ports}).
+    assert.equal(p.inverse.op, "update-device");
+    assert.deepEqual(p.inverse.body.ports, { Ethernet0: { mtu: 9100 } });
+  });
+
+  test("a second port folds into the same update-device (no clobber)", () => {
+    enqueuePortConfig("switch1", "Ethernet4", { admin_status: "up" }, dev());
+    enqueuePortConfig("switch1", "Ethernet8", { admin_status: "down" }, dev());
+    const q = getQueue();
+    assert.equal(q.length, 1, "one update op for the device, not two");
+    assert.deepEqual(Object.keys(q[0].body.ports).sort(), ["Ethernet0", "Ethernet4", "Ethernet8"]);
+    // Earliest inverse stands — restores the original pre-edit device.
+    assert.deepEqual(q[0].inverse.body.ports, { Ethernet0: { mtu: 9100 } });
+  });
+
+  test("editing a port on a still-pending new device folds into the add (one POST)", () => {
+    enqueueTopologyAddDevice("spine1", { steps: [], ports: {} });
+    enqueuePortConfig("spine1", "Ethernet0", { admin_status: "up" }, {});
+    const q = getQueue();
+    assert.equal(q.length, 1, "still a single add-device");
+    assert.equal(q[0].op, "add-device");
+    assert.deepEqual(q[0].body.ports, { Ethernet0: { admin_status: "up" } });
+  });
+
+  test("pendingPortConfigs surfaces staged ports (update + add paths)", () => {
+    enqueuePortConfig("switch1", "Ethernet4", { admin_status: "up" }, dev());
+    assert.deepEqual(pendingPortConfigs("switch1").Ethernet4, { admin_status: "up" });
+    discardAll();
+    enqueueTopologyAddDevice("spine1", { steps: [], ports: { Ethernet0: { mtu: 1500 } } });
+    assert.deepEqual(pendingPortConfigs("spine1").Ethernet0, { mtu: 1500 });
   });
 });
