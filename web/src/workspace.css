@@ -1229,6 +1229,15 @@
 .iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
 .iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
 
+/* Resource lens — services provisioned on the device → interfaces. */
+.node-state-section--services .node-state-section-title { font-weight: var(--weight-semibold); }
+.svc-lens-card { margin-bottom: var(--space-sm); }
+.svc-lens-head { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: 2px; }
+.svc-lens-count { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.svc-lens-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
+.svc-lens-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
+.svc-lens-table td { padding: 2px 8px; border-bottom: 1px solid var(--color-border-subtle); }
+
 /* Pending overlay + staged per-port action forms. */
 .iface-pending-chip {
   display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full);
