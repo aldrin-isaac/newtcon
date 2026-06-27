@@ -1229,6 +1229,11 @@
 .iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
 .iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
 
+/* Tailored State resource tables (VRFs / VLANs / ACLs). */
+.resource-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
+.resource-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
+.resource-table td { padding: 2px 8px; border-bottom: 1px solid var(--color-border-subtle); font-family: var(--font-mono); }
+
 /* Resource lens — services provisioned on the device → interfaces. */
 .node-state-section--services .node-state-section-title { font-weight: var(--weight-semibold); }
 .svc-lens-card { margin-bottom: var(--space-sm); }

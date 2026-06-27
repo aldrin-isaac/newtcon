@@ -134,7 +134,11 @@ import {
   type PlatformPort,
 } from "./device-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
-import { deviceServiceUsage, countServiceInstances, type ServiceUsage } from "./device-resources.js";
+import {
+  deviceServiceUsage, countServiceInstances, shapeResourceRows,
+  VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS,
+  type ServiceUsage, type ResourceColumn,
+} from "./device-resources.js";
 import {
   enqueueSpecCreate,
   enqueueSpecDelete,
@@ -4392,12 +4396,33 @@ function renderStateSubsection(
   switch (id) {
     case "bgp":       renderBGPStatus(body, data); break;
     case "evpn":      renderEVPNStatus(body, data); break;
+    case "vrfs":      renderResourceTable(body, data, VRF_COLUMNS); break;
+    case "vlans":     renderResourceTable(body, data, VLAN_COLUMNS); break;
+    case "acls":      renderResourceTable(body, data, ACL_COLUMNS); break;
     case "neighbors": renderAutoTable(body, data); break;
-    case "vlans":
-    case "vrfs":
-    case "acls":
     case "lags":      renderAutoTable(body, data); break;
   }
+}
+
+// renderResourceTable renders a State resource (VRFs / VLANs / ACLs) as a
+// curated, scannable table — replacing the generic auto-table's raw key dump.
+function renderResourceTable(body: HTMLElement, data: unknown, columns: ResourceColumn[]): void {
+  body.textContent = "";
+  const { headers, rows } = shapeResourceRows(data, columns);
+  if (rows.length === 0) {
+    body.appendChild(el("p", { className: "node-summary-stat-clean" }, "(none)"));
+    return;
+  }
+  const table = el("table", { className: "resource-table" });
+  const hr = el("tr");
+  for (const h of headers) hr.appendChild(el("th", {}, h));
+  table.appendChild(hr);
+  for (const row of rows) {
+    const tr = el("tr");
+    for (const cell of row) tr.appendChild(el("td", {}, cell));
+    table.appendChild(tr);
+  }
+  body.appendChild(table);
 }
 
 // renderBGPStatus — BGP /status returns
