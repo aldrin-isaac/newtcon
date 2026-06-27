@@ -3,7 +3,33 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { deviceServiceUsage, countServiceInstances, shapeResourceRows, VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS } from "../dist/device-resources.js";
+import { deviceServiceUsage, countServiceInstances, shapeResourceRows, VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS, LAG_COLUMNS, HEALTH_COLUMNS, BGP_NEIGHBOR_COLUMNS, isHealthCheckList } from "../dist/device-resources.js";
+
+describe("shapeResourceRows() — LAG / health / bgp-neighbor columns", () => {
+  test("LAG members derived as active/total; status columns present", () => {
+    const t = shapeResourceRows([{ name: "PortChannel1", admin_status: "up", oper_status: "down", members: ["Ethernet0", "Ethernet4"], active_members: ["Ethernet0"], mtu: 9100 }], LAG_COLUMNS);
+    assert.deepEqual(t.headers, ["LAG", "Admin", "Oper", "Members", "MTU"]);
+    assert.deepEqual(t.rows, [["PortChannel1", "up", "down", "1/2", "9100"]]);
+  });
+  test("health-check rows: status/check/message", () => {
+    const t = shapeResourceRows([{ check: "bgp", status: "warn", message: "No BGP neighbors configured" }], HEALTH_COLUMNS);
+    assert.deepEqual(t.rows, [["warn", "bgp", "No BGP neighbors configured"]]);
+  });
+  test("bgp neighbor address falls back to neighbor_ip", () => {
+    const t = shapeResourceRows([{ neighbor_ip: "10.0.0.2", remote_as: 65010, admin_status: "up" }], BGP_NEIGHBOR_COLUMNS);
+    assert.equal(t.rows[0][0], "10.0.0.2");
+    assert.equal(t.rows[0][4], "up");
+  });
+});
+
+describe("isHealthCheckList()", () => {
+  test("true for check+status items, false otherwise", () => {
+    assert.equal(isHealthCheckList([{ check: "bgp", status: "ok" }]), true);
+    assert.equal(isHealthCheckList([{ address: "10.0.0.1" }]), false);
+    assert.equal(isHealthCheckList([]), false);
+    assert.equal(isHealthCheckList(null), false);
+  });
+});
 
 describe("shapeResourceRows() — curated State tables", () => {
   test("VRF rows: name/state/interfaces; 0 stays '0'", () => {

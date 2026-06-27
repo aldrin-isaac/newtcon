@@ -135,8 +135,8 @@ import {
 } from "./device-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
 import {
-  deviceServiceUsage, countServiceInstances, shapeResourceRows,
-  VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS,
+  deviceServiceUsage, countServiceInstances, shapeResourceRows, isHealthCheckList,
+  VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS, LAG_COLUMNS, HEALTH_COLUMNS, BGP_NEIGHBOR_COLUMNS,
   type ServiceUsage, type ResourceColumn,
 } from "./device-resources.js";
 import {
@@ -4399,13 +4399,20 @@ function renderStateSubsection(
     case "vrfs":      renderResourceTable(body, data, VRF_COLUMNS); break;
     case "vlans":     renderResourceTable(body, data, VLAN_COLUMNS); break;
     case "acls":      renderResourceTable(body, data, ACL_COLUMNS); break;
-    case "neighbors": renderAutoTable(body, data); break;
-    case "lags":      renderAutoTable(body, data); break;
+    case "lags":      renderResourceTable(body, data, LAG_COLUMNS); break;
+    // /neighbors returns device health-checks (check/status/message); render
+    // those as a status table, falling back to the auto-table for any other
+    // shape (e.g. real LLDP neighbor records).
+    case "neighbors":
+      if (isHealthCheckList(data)) renderResourceTable(body, data, HEALTH_COLUMNS);
+      else renderAutoTable(body, data);
+      break;
   }
 }
 
-// renderResourceTable renders a State resource (VRFs / VLANs / ACLs) as a
-// curated, scannable table — replacing the generic auto-table's raw key dump.
+// renderResourceTable renders a State resource as a curated, scannable table —
+// replacing the generic auto-table's raw key dump. Columns flagged `status`
+// render as colored pills (up/ok → ok, warn → warn, else down).
 function renderResourceTable(body: HTMLElement, data: unknown, columns: ResourceColumn[]): void {
   body.textContent = "";
   const { headers, rows } = shapeResourceRows(data, columns);
@@ -4419,10 +4426,24 @@ function renderResourceTable(body: HTMLElement, data: unknown, columns: Resource
   table.appendChild(hr);
   for (const row of rows) {
     const tr = el("tr");
-    for (const cell of row) tr.appendChild(el("td", {}, cell));
+    row.forEach((cell, j) => {
+      if (columns[j]?.status && cell !== "—") {
+        tr.appendChild(el("td", {}, el("span", { className: `resource-pill resource-pill--${statusTone(cell)}` }, cell)));
+      } else {
+        tr.appendChild(el("td", {}, cell));
+      }
+    });
     table.appendChild(tr);
   }
   body.appendChild(table);
+}
+
+// statusTone maps a status string to a pill tone.
+function statusTone(value: string): "ok" | "warn" | "down" {
+  const s = value.toLowerCase();
+  if (/\b(up|ok|ready|enabled|healthy|active|established|pass)\b/.test(s)) return "ok";
+  if (/\b(warn|warning|degraded|pending|partial)\b/.test(s)) return "warn";
+  return "down";
 }
 
 // renderBGPStatus — BGP /status returns
@@ -4451,7 +4472,7 @@ function renderBGPStatus(body: HTMLElement, data: unknown): void {
   const neighbors = Array.isArray(d.neighbors) ? d.neighbors : [];
   if (neighbors.length > 0) {
     body.appendChild(el("p", { className: "node-subsection-label" }, "Neighbors"));
-    renderAutoTable(body, neighbors);
+    renderResourceTable(body, neighbors, BGP_NEIGHBOR_COLUMNS);
   }
   const evpnPeers = Array.isArray(d.evpn_peers) ? d.evpn_peers : [];
   if (evpnPeers.length > 0) {
