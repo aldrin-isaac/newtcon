@@ -1229,6 +1229,26 @@
 .iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
 .iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
 
+/* Pending overlay + staged per-port action forms. */
+.iface-pending-chip {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full);
+  font-size: var(--text-2xs); background: var(--color-warning-bg, #fff3cd); color: var(--color-warning, #8a6d00);
+}
+.iface-row--pending > td { background: var(--color-warning-bg, #fff8e1); }
+.iface-detail-queued { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm); }
+.iface-detail-queued-list { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.iface-action-form-host { margin-top: var(--space-sm); }
+.iface-portmode-menu { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.iface-action-form {
+  display: flex; flex-direction: column; gap: var(--space-xs);
+  border: 1px solid var(--color-border-default); border-radius: var(--radius-sm);
+  padding: var(--space-sm); background: var(--color-surface-sunken); margin-top: var(--space-xs);
+}
+.iface-action-form-title { font-size: var(--text-2xs); font-weight: var(--weight-medium); margin: 0; }
+.iface-action-form-actions { display: flex; gap: var(--space-xs); }
+.iface-field { display: flex; flex-direction: column; gap: 2px; }
+.iface-field-label { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+
 /* Interface action buttons */
 .iface-action-btn {
   display: inline-flex;
