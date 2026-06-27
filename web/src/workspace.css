@@ -1165,6 +1165,70 @@
 }
 .topology-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-lg); text-align: center; }
 
+/* ── Unified device interface table ───────────────────────────────── */
+.iface-view-loading { color: var(--color-text-secondary); font-size: var(--text-sm); padding: var(--space-sm); }
+.iface-view-counts { color: var(--color-text-secondary); font-size: var(--text-xs); margin: 0 0 var(--space-sm); }
+.iface-view-controls { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm); }
+.iface-seg { display: inline-flex; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); overflow: hidden; }
+.iface-seg-btn {
+  padding: 3px 10px; font-size: var(--text-xs); background: var(--color-surface);
+  color: var(--color-text-secondary); border: 0; border-right: 1px solid var(--color-border-subtle); cursor: pointer;
+}
+.iface-seg-btn:last-child { border-right: 0; }
+.iface-seg-btn--active { background: var(--color-accent-bg); color: var(--color-text-link); font-weight: var(--weight-medium); }
+.iface-search { flex: 1 1 auto; min-width: 0; max-width: 260px; }
+
+.iface-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
+.iface-table th {
+  text-align: left; padding: 4px 8px; color: var(--color-text-secondary);
+  font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default);
+}
+.iface-table td { padding: 4px 8px; border-bottom: 1px solid var(--color-border-subtle); vertical-align: middle; }
+.iface-row { cursor: pointer; }
+.iface-row:hover > td { background: var(--color-surface-sunken); }
+.iface-row--available > td { color: var(--color-text-muted); }
+.iface-row--expanded > td { background: var(--color-accent-bg); }
+.iface-cell-port { white-space: nowrap; }
+.iface-name { font-family: var(--font-mono); }
+.iface-cell-mono { font-family: var(--font-mono); white-space: nowrap; }
+.iface-cell-l2l3 { font-family: var(--font-mono); }
+.iface-cell-link { font-family: var(--font-mono); color: var(--color-text-secondary); }
+
+.iface-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--color-text-muted); vertical-align: middle; }
+.iface-dot--up { background: var(--color-success, #2e7d32); }
+.iface-dot--down { background: var(--color-text-muted); }
+.iface-dot--unknown { background: var(--color-border-default); }
+
+.iface-role {
+  display: inline-block; padding: 1px 7px; border-radius: var(--radius-full);
+  font-size: var(--text-2xs); background: var(--color-surface-sunken); color: var(--color-text-secondary);
+}
+.iface-role--routed { background: var(--color-accent-bg); color: var(--color-text-link); }
+.iface-role--access, .iface-role--trunk { background: var(--color-accent-bg); color: var(--color-text-link); }
+.iface-role--linked { background: var(--color-surface-sunken); color: var(--color-text-primary); }
+.iface-role--available { background: transparent; color: var(--color-text-muted); border: 1px dashed var(--color-border-default); }
+
+.iface-svc-chip {
+  display: inline-block; padding: 1px 8px; border-radius: var(--radius-full);
+  background: var(--color-accent-bg); color: var(--color-text-link); font-size: var(--text-2xs);
+}
+.iface-apply-cta {
+  border: 1px dashed var(--color-border-default); background: transparent; color: var(--color-text-link);
+  border-radius: var(--radius-full); padding: 1px 8px; font-size: var(--text-2xs); cursor: pointer;
+}
+.iface-apply-cta:hover { background: var(--color-accent-bg); }
+
+.iface-detail-cell { background: var(--color-surface); padding: var(--space-sm) var(--space-md); }
+.iface-prop-grid { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 var(--space-sm); font-size: var(--text-2xs); }
+.iface-prop-grid dt { color: var(--color-text-secondary); }
+.iface-prop-grid dd { margin: 0; font-family: var(--font-mono); }
+.iface-detail-svc { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm); }
+.iface-detail-svc-meta { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.iface-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.iface-detail-raw { margin-top: var(--space-sm); font-size: var(--text-2xs); }
+.iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
+.iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
+
 /* Interface action buttons */
 .iface-action-btn {
   display: inline-flex;
