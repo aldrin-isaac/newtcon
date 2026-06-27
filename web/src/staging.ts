@@ -360,7 +360,8 @@ export function deviceQueue(device: string): readonly Pending[] {
     (p.group === "device" && (p as { device: string }).device === device) ||
     (p.group === "interface" && (p as { device: string }).device === device) ||
     (p.group === "topology" && p.op === "remove-device" && (p as { name: string }).name === device) ||
-    (p.group === "topology" && p.op === "add-device" && (p as { name: string }).name === device));
+    (p.group === "topology" && p.op === "add-device" && (p as { name: string }).name === device) ||
+    (p.group === "topology" && p.op === "update-device" && (p as { name: string }).name === device));
 }
 
 export async function applyDevice(device: string): Promise<ApplyResult> {
