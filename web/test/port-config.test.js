@@ -4,7 +4,24 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildPicker, mergePort, prefillForPort } from "../dist/port-config.js";
+import { buildPicker, mergePort, prefillForPort, comparePorts } from "../dist/port-config.js";
+
+describe("comparePorts() — numeric, not lexicographic", () => {
+  test("orders Ethernet ports low→high by trailing number", () => {
+    const got = ["Ethernet100", "Ethernet0", "Ethernet12", "Ethernet4", "Ethernet124", "Ethernet8"].sort(comparePorts);
+    assert.deepEqual(got, ["Ethernet0", "Ethernet4", "Ethernet8", "Ethernet12", "Ethernet100", "Ethernet124"]);
+  });
+
+  test("handles multi-number names (ge-0/0/0 < ge-0/0/10)", () => {
+    const got = ["ge-0/0/10", "ge-0/0/2", "ge-0/0/0", "ge-0/0/1"].sort(comparePorts);
+    assert.deepEqual(got, ["ge-0/0/0", "ge-0/0/1", "ge-0/0/2", "ge-0/0/10"]);
+  });
+
+  test("falls back to lexicographic for non-numeric tails", () => {
+    const got = ["Loopback0", "Ethernet0", "Vlan10"].sort(comparePorts);
+    assert.deepEqual(got, ["Ethernet0", "Loopback0", "Vlan10"]);
+  });
+});
 
 const inventory = [
   { name: "Ethernet0", nic_index: 1, speed: "40G" },
@@ -43,6 +60,14 @@ describe("buildPicker() — inventory is the menu, topology marks the chosen", (
     const rows = buildPicker(inventory, { Ethernet999: { admin_status: "up" } }, undefined);
     assert.equal(rows.length, 3);
     assert.equal(rows.some((r) => r.name === "Ethernet999"), false);
+  });
+
+  test("returns rows numerically ordered regardless of inventory array order", () => {
+    const unsorted = [
+      { name: "Ethernet8" }, { name: "Ethernet124" }, { name: "Ethernet0" }, { name: "Ethernet12" },
+    ];
+    const rows = buildPicker(unsorted, undefined, undefined);
+    assert.deepEqual(rows.map((r) => r.name), ["Ethernet0", "Ethernet8", "Ethernet12", "Ethernet124"]);
   });
 });
 

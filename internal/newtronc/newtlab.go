@@ -85,6 +85,13 @@ func (c *Client) newtlabGet(ctx context.Context, path string) (json.RawMessage, 
 // newtlab-server path. Pass nil body for no-body POSTs. Returns the decoded
 // "data" field. Accepts both 200 OK and 202 Accepted as success.
 func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (int, json.RawMessage, error) {
+	return c.newtlabPostWith(ctx, c.httpClient, path, bodyData)
+}
+
+// newtlabPostWith is newtlabPost with an explicit *http.Client, so long
+// synchronous operations (provision) can run on the long-timeout client while
+// everything else keeps the short default timeout.
+func (c *Client) newtlabPostWith(ctx context.Context, hc *http.Client, path string, bodyData any) (int, json.RawMessage, error) {
 	var bodyReader io.Reader
 	if bodyData != nil {
 		b, err := json.Marshal(bodyData)
@@ -104,7 +111,7 @@ func (c *Client) newtlabPost(ctx context.Context, path string, bodyData any) (in
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return 0, nil, &UnavailableError{Cause: err.Error()}
 	}
@@ -181,7 +188,10 @@ func (c *Client) LabProvision(ctx context.Context, name string, parallel int) (j
 	if parallel > 0 {
 		path += fmt.Sprintf("?parallel=%d", parallel)
 	}
-	_, data, err := c.newtlabPost(ctx, path, nil)
+	// Provision is long-running (SSH config push + container restarts); use the
+	// long-timeout client so newtcon surfaces newtron's real outcome instead of
+	// a premature client timeout.
+	_, data, err := c.newtlabPostWith(ctx, c.longClient, path, nil)
 	return data, err
 }
 

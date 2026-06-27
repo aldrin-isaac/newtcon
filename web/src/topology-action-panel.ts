@@ -38,7 +38,7 @@ import { renderSchemaForm } from "./schema-form.js";
 import { fetchSchema } from "./api/newtcon/schema.js";
 import { fetchSpecDetail } from "./api/newtcon/network.js";
 import { fetchTopology } from "./api/newtcon/nodes.js";
-import { buildPicker, prefillForPort, type PlatformPort } from "./port-config.js";
+import { buildPicker, prefillForPort, comparePorts, type PlatformPort } from "./port-config.js";
 
 // ---- HTTP plumbing --------------------------------------------------------
 
@@ -425,11 +425,13 @@ function renderInterfacesTab(device: string, deps: PanelDeps): HTMLElement {
     list.appendChild(renderInterfaceChip(device, iface, deps));
   }
 
-  // Fire a live-state refresh that may add detail later.
+  // Fire a live-state refresh that may add detail later. Any live ports not in
+  // the topology declaration are appended in numeric order (comparePorts), so
+  // the list stays low→high rather than lexicographic.
   fetchSource(`interfaces:${device}`).then((live) => {
     const known = new Set(topoPorts);
-    for (const iface of live) {
-      if (known.has(iface)) continue;
+    const extras = live.filter((iface) => !known.has(iface)).sort(comparePorts);
+    for (const iface of extras) {
       list.appendChild(renderInterfaceChip(device, iface, deps));
     }
     count.textContent = `${list.querySelectorAll(".topo-iface-chip").length}`;

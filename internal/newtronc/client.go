@@ -38,6 +38,13 @@ const (
 	// DefaultTimeout is the default per-request timeout for calls to newtron-server.
 	// Overridden via WithTimeout.
 	DefaultTimeout = 10 * time.Second
+
+	// DefaultProvisionTimeout is the timeout for long synchronous lab operations
+	// (provision). Provisioning a device pushes config over SSH and can restart
+	// SONiC containers, legitimately taking minutes — the short DefaultTimeout
+	// would mask the real outcome behind a client timeout. Overridden via
+	// WithProvisionTimeout.
+	DefaultProvisionTimeout = 10 * time.Minute
 )
 
 // Client is the HTTP client for newtron-server. It is the ONLY mechanism through
@@ -47,6 +54,11 @@ const (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	// longClient shares httpClient's Transport (bearer + TLS) but carries a
+	// much longer timeout, for synchronous operations that legitimately run for
+	// minutes (lab provision). Built in New after options are applied.
+	longClient       *http.Client
+	provisionTimeout time.Duration
 }
 
 // Option configures a [Client] at construction time.
@@ -64,6 +76,14 @@ func WithHTTPClient(c *http.Client) Option {
 func WithTimeout(d time.Duration) Option {
 	return func(cl *Client) {
 		cl.httpClient.Timeout = d
+	}
+}
+
+// WithProvisionTimeout sets the timeout for long synchronous lab operations
+// (provision). Default is [DefaultProvisionTimeout].
+func WithProvisionTimeout(d time.Duration) Option {
+	return func(cl *Client) {
+		cl.provisionTimeout = d
 	}
 }
 
@@ -108,9 +128,17 @@ func New(baseURL string, opts ...Option) *Client {
 			Timeout:   DefaultTimeout,
 			Transport: &bearerInjector{inner: base},
 		},
+		provisionTimeout: DefaultProvisionTimeout,
 	}
 	for _, o := range opts {
 		o(c)
+	}
+	// longClient shares the (possibly option-customized) Transport so bearer +
+	// TLS posture match httpClient exactly; only the timeout differs. Built here,
+	// after options, so WithHTTPClient / WithTLSConfig are already reflected.
+	c.longClient = &http.Client{
+		Timeout:   c.provisionTimeout,
+		Transport: c.httpClient.Transport,
 	}
 	return c
 }

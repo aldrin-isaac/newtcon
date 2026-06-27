@@ -17,6 +17,7 @@
 import { ApiError, type ErrorEnvelope } from "./api/newtcon/services.js";
 import { apiPath } from "./api-path.js";
 import { formatErrorBrief as formatError } from "./render-error.js";
+import { mergePort } from "./port-config.js";
 
 // ---- Pending change shapes -----------------------------------------------
 
@@ -270,7 +271,7 @@ export function enqueuePortConfig(
   const ai = queue.findIndex((p) => p.group === "topology" && p.op === "add-device" && (p as { name: string }).name === device);
   if (ai >= 0) {
     const a = queue[ai] as { body: Record<string, unknown> };
-    a.body = mergePortBody(a.body, port, config);
+    a.body = mergePort(a.body, port, config);
     notify();
     return queue[ai]!;
   }
@@ -278,23 +279,15 @@ export function enqueuePortConfig(
   const ui = queue.findIndex((p) => p.group === "topology" && p.op === "update-device" && (p as { name: string }).name === device);
   if (ui >= 0) {
     const u = queue[ui] as { body: Record<string, unknown> };
-    u.body = mergePortBody(u.body, port, config);
+    u.body = mergePort(u.body, port, config);
     notify();
     return queue[ui]!;
   }
   // First edit → new update-device; its inverse restores the pre-edit device.
-  const body = mergePortBody(currentDevice, port, config);
+  const body = mergePort(currentDevice, port, config);
   const inverse: PendingInverse = { group: "topology", op: "update-device", name: device, body: currentDevice };
   const p: Pending = { id: String(nextID++), group: "topology", op: "update-device", name: device, body, inverse };
   queue.push(p); notify(); return p;
-}
-
-// mergePortBody returns a new device body with `config` set at `port` in its
-// ports map — immutable; steps + sibling ports preserved.
-function mergePortBody(device: Record<string, unknown>, port: string, config: Record<string, unknown>): Record<string, unknown> {
-  const ports = { ...((device.ports as Record<string, unknown>) ?? {}) };
-  ports[port] = config;
-  return { ...device, ports };
 }
 
 export function enqueueTopologyAddLink(a: string, z: string): Pending {

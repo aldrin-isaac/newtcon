@@ -59,7 +59,12 @@ async function fetchNetworks(): Promise<NetworkInfo[]> {
 function activeLabel(active: string, infos: NetworkInfo[]): string {
   const match = infos.find((n) => n.id === active);
   if (!match) return active;
-  return match.topology ? `${match.id} · ${match.topology}` : match.id;
+  // Show the topology facet only when it adds information — a network whose
+  // topology name equals its id (the common case) would otherwise read as the
+  // name printed twice ("foo · foo").
+  return match.topology && match.topology !== match.id
+    ? `${match.id} · ${match.topology}`
+    : match.id;
 }
 
 function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
