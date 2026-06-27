@@ -3,7 +3,29 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { deviceServiceUsage, countServiceInstances } from "../dist/device-resources.js";
+import { deviceServiceUsage, countServiceInstances, shapeResourceRows, VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS } from "../dist/device-resources.js";
+
+describe("shapeResourceRows() — curated State tables", () => {
+  test("VRF rows: name/state/interfaces; 0 stays '0'", () => {
+    const t = shapeResourceRows([{ name: "Vrf_TEST", interfaces: 0, state: "ok" }], VRF_COLUMNS);
+    assert.deepEqual(t.headers, ["VRF", "State", "Interfaces"]);
+    assert.deepEqual(t.rows, [["Vrf_TEST", "ok", "0"]]);
+  });
+  test("VLAN rows: id/name/member_count", () => {
+    const t = shapeResourceRows([{ id: 100, name: "test", member_count: 2 }], VLAN_COLUMNS);
+    assert.deepEqual(t.rows, [["100", "test", "2"]]);
+  });
+  test("ACL rows: empty cells → —, real columns kept", () => {
+    const t = shapeResourceRows([{ name: "A", type: "L3", stage: "ingress", interfaces: "", rule_count: 0 }], ACL_COLUMNS);
+    assert.deepEqual(t.headers, ["ACL", "Type", "Stage", "Rules", "Interfaces"]);
+    assert.deepEqual(t.rows, [["A", "L3", "ingress", "0", "—"]]);
+  });
+  test("null / non-array → empty rows, headers preserved", () => {
+    const t = shapeResourceRows(null, VRF_COLUMNS);
+    assert.deepEqual(t.headers, ["VRF", "State", "Interfaces"]);
+    assert.deepEqual(t.rows, []);
+  });
+});
 
 describe("deviceServiceUsage()", () => {
   test("groups apply-service steps by service, with per-interface params", () => {
