@@ -127,6 +127,17 @@ import { iconSVG } from "./icons.js";
 import { renderActionPanel } from "./topology-action-panel.js";
 import { comparePorts } from "./port-config.js";
 import {
+  buildDeviceInterfaceView,
+  deriveDeviceBindings,
+  linksForDevice,
+  countView,
+  applyFilter as applyIfaceFilter,
+  type InterfaceRow,
+  type LiveIface,
+  type IfaceBinding,
+  type PlatformPort,
+} from "./device-interfaces.js";
+import {
   enqueueSpecCreate,
   enqueueSpecDelete,
   enqueueTopologyAddDevice,
@@ -2958,6 +2969,82 @@ function renderSpecDetailInto(container: HTMLElement, fields: SpecField[], data:
   }
 }
 
+// humanizeStepUrl turns a topology step verb ("/setup-device") into a readable
+// title ("Setup device").
+function humanizeStepUrl(url: string): string {
+  const slug = url.replace(/^\//, "").replace(/-/g, " ").trim();
+  return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "Step";
+}
+
+// renderTopologyIntentInto renders a device's topology.json entry — its
+// provisioning steps (the declared intent newtron replays on provision) and its
+// per-port config — into the Spec tab. Steps render as labeled field groups;
+// ports as a compact table ordered low→high (comparePorts).
+function renderTopologyIntentInto(host: HTMLElement, entry: unknown): void {
+  host.textContent = "";
+  const e = entry && typeof entry === "object" ? entry as { steps?: unknown; ports?: unknown } : {};
+  const steps = Array.isArray(e.steps) ? e.steps : [];
+  const ports = e.ports && typeof e.ports === "object" ? e.ports as Record<string, Record<string, unknown>> : {};
+  const portNames = Object.keys(ports).sort(comparePorts);
+
+  if (steps.length === 0 && portNames.length === 0) {
+    host.appendChild(el("p", { className: "spec-detail-empty-state" },
+      "No topology intent declared — no provisioning steps or port config in topology.json for this device."));
+    return;
+  }
+
+  if (steps.length > 0) {
+    host.appendChild(el("h5", { className: "node-spec-subtitle" }, `Provisioning steps (${steps.length})`));
+    for (const raw of steps) {
+      const step = raw && typeof raw === "object" ? raw as { url?: unknown; params?: unknown } : {};
+      const url = typeof step.url === "string" ? step.url : "step";
+      const det = el("details", { className: "node-spec-step" });
+      (det as HTMLDetailsElement).open = true;
+      det.appendChild(el("summary", { className: "node-spec-step-summary" }, humanizeStepUrl(url)));
+      const params = step.params && typeof step.params === "object" ? step.params as Record<string, unknown> : {};
+      const fields = params.fields && typeof params.fields === "object" ? params.fields as Record<string, unknown> : params;
+      const dl = el("dl", { className: "spec-detail drawer-detail" });
+      const fieldEntries = Object.entries(fields);
+      if (fieldEntries.length === 0) {
+        dl.appendChild(el("dd", { className: "spec-detail-value spec-detail-empty" }, "—"));
+      } else {
+        for (const [k, v] of fieldEntries) {
+          dl.appendChild(el("dt", { className: "spec-detail-label" }, k));
+          const dd = el("dd", { className: "spec-detail-value" });
+          dd.appendChild(renderValue(v));
+          dl.appendChild(dd);
+        }
+      }
+      det.appendChild(dl);
+      host.appendChild(det);
+    }
+  }
+
+  if (portNames.length > 0) {
+    host.appendChild(el("h5", { className: "node-spec-subtitle" }, `Port config (${portNames.length})`));
+    const cols = ["admin_status", "mtu", "speed", "description"];
+    const table = el("table", { className: "node-spec-port-table" });
+    const thead = el("thead");
+    const hr = el("tr");
+    for (const l of ["Port", "Admin", "MTU", "Speed", "Description"]) hr.appendChild(el("th", {}, l));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    for (const name of portNames) {
+      const cfg = ports[name] ?? {};
+      const tr = el("tr");
+      tr.appendChild(el("td", { className: "node-spec-port-name" }, name));
+      for (const c of cols) {
+        const v = cfg[c];
+        tr.appendChild(el("td", {}, v === undefined || v === null || v === "" ? "—" : String(v)));
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+}
+
 // renderSpecValue renders one SpecRow's value cell. Empty values show
 // "—". Ref rows (refKind set) with a non-empty string value render as a
 // clickable chip that opens the referenced spec's drawer; everything
@@ -3078,191 +3165,250 @@ function openBindServiceDrawer(
 
 // renderInterfaceTab renders the interfaces sub-tab with click-to-expand detail
 // and service binding/unbind/refresh actions.
+// renderInterfaceTab renders the unified, sorted device interface view: one row
+// per platform port (configured AND available), joining inventory + topology
+// port config + live state + service bindings + topology links. Rows expand
+// in place to full per-port detail + actions. `data` is the live interface
+// list already fetched by the tab loader; the rest is fetched here and joined
+// via buildDeviceInterfaceView (pure).
 function renderInterfaceTab(container: HTMLElement, device: string, data: unknown): void {
   container.textContent = "";
+  const host = el("div", { className: "iface-view" });
+  container.appendChild(host);
+  void buildAndRenderIfaceView(host, device, data);
+}
 
-  let items: unknown[] = [];
-  if (Array.isArray(data)) {
-    items = data;
-  } else if (data !== null && typeof data === "object") {
-    // Some newtron endpoints return objects — wrap as single item.
-    items = [data];
-  }
+async function buildAndRenderIfaceView(host: HTMLElement, device: string, data: unknown): Promise<void> {
+  host.textContent = "";
+  host.appendChild(el("p", { className: "iface-view-loading" }, "Building interface view…"));
 
-  if (items.length === 0) {
-    container.appendChild(el("p", { className: "topology-empty" }, "No interfaces found"));
+  const live = Array.isArray(data) ? data as LiveIface[]
+    : data && typeof data === "object" ? [data as LiveIface] : [];
+
+  let inventory: PlatformPort[] = [];
+  let topoPorts: Record<string, Record<string, unknown>> = {};
+  let bindings = new Map<string, IfaceBinding>();
+  let links = new Map<string, string>();
+  try {
+    const [profile, topo] = await Promise.all([
+      fetchSpecDetail("profiles", device).catch(() => null),
+      fetchTopology().catch(() => null),
+    ]);
+    const platform = (profile as { platform?: string } | null)?.platform ?? "";
+    const devEntry = ((topo as { devices?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.devices ?? {})[device] ?? {};
+    topoPorts = devEntry.ports ?? {};
+    bindings = deriveDeviceBindings(devEntry);
+    links = linksForDevice((topo as { links?: unknown } | null)?.links, device);
+    if (platform) {
+      const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
+      const ports = (plat as { ports?: PlatformPort[] } | null)?.ports;
+      if (Array.isArray(ports)) inventory = ports;
+    }
+  } catch { /* best-effort join — fall back to live-only below */ }
+
+  const rows = buildDeviceInterfaceView({ inventory, topoPorts, live, bindings, links });
+  if (rows.length === 0) {
+    host.textContent = "";
+    host.appendChild(el("p", { className: "topology-empty" }, "No interfaces found for this device."));
     return;
   }
+  renderIfaceTable(host, device, rows, () => { void buildAndRenderIfaceView(host, device, data); });
+}
 
-  const list = el("ul", { className: "iface-list" });
+const IFACE_FILTERS: { id: import("./device-interfaces.js").ViewFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "configured", label: "Configured" },
+  { id: "available", label: "Available" },
+  { id: "up", label: "Up" },
+];
 
-  for (const raw of items) {
-    const iface = raw as Record<string, unknown>;
-    const name = String(iface.name ?? iface.interface_name ?? iface.ifname ?? "—");
-    const operStatus = String(iface.oper_status ?? iface.oper_state ?? "");
+function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[], reload: () => void): void {
+  host.textContent = "";
+  const counts = countView(rows);
 
-    const itemRow = el("li", { className: "iface-item", tabIndex: 0 });
-    itemRow.appendChild(el("span", { className: "iface-name" }, name));
-    if (operStatus) {
-      itemRow.appendChild(el("span", {}, operStatus));
-    }
+  // Header: port-utilization summary.
+  host.appendChild(el("p", { className: "iface-view-counts" },
+    `${counts.total} ports · ${counts.configured} configured · ${counts.up} up · ${counts.available} available`));
 
-    // Expand/collapse detail inline.
-    const detailContainer = el("div", { className: "iface-detail" });
-    detailContainer.hidden = true;
+  // Controls: segmented filter + text search.
+  let filter: import("./device-interfaces.js").ViewFilter = "all";
+  let query = "";
+  const controls = el("div", { className: "iface-view-controls" });
+  const seg = el("div", { className: "iface-seg" });
+  const segBtns = new Map<string, HTMLButtonElement>();
+  for (const f of IFACE_FILTERS) {
+    const b = el("button", { type: "button", className: "iface-seg-btn" + (f.id === filter ? " iface-seg-btn--active" : "") }, f.label) as HTMLButtonElement;
+    b.addEventListener("click", () => { filter = f.id; for (const [id, btn] of segBtns) btn.classList.toggle("iface-seg-btn--active", id === f.id); renderRows(); });
+    seg.appendChild(b);
+    segBtns.set(f.id, b);
+  }
+  controls.appendChild(seg);
+  const search = el("input", { type: "search", className: "iface-search form-control", placeholder: "Filter ports…" }) as HTMLInputElement;
+  search.addEventListener("input", () => { query = search.value; renderRows(); });
+  controls.appendChild(search);
+  host.appendChild(controls);
 
-    let loaded = false;
+  // Table.
+  const table = el("table", { className: "iface-table" });
+  const thead = el("thead");
+  const hr = el("tr");
+  for (const h of ["Port", "Role", "Speed/MTU", "VLAN / VRF / IP", "Service", "Link"]) hr.appendChild(el("th", {}, h));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  table.appendChild(tbody);
+  host.appendChild(table);
 
-    // refreshIfaceDetail re-fetches and re-renders the detail panel.
-    const refreshIfaceDetail = (): void => {
-      loaded = false;
-      if (!detailContainer.hidden) {
-        renderLoadingInto(detailContainer);
-        loadIfaceDetail();
-      }
-    };
+  const empty = el("p", { className: "iface-table-empty" }, "No ports match this filter.");
+  empty.hidden = true;
+  host.appendChild(empty);
 
-    const loadIfaceDetail = (): void => {
-      if (loaded) return;
-      loaded = true;
-      renderLoadingInto(detailContainer);
-      Promise.all([
-        fetchNodeInterface(device, name),
-        fetchNodeInterfaceBinding(device, name),
-      ])
-        .then(([detail, binding]) => {
-          detailContainer.textContent = "";
-          detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Interface detail"));
-          detailContainer.appendChild(renderValue(detail));
-          detailContainer.appendChild(el("p", { className: "drawer-kind" }, "Service binding"));
-          detailContainer.appendChild(renderValue(binding));
+  const renderRows = (): void => {
+    tbody.textContent = "";
+    const shown = applyIfaceFilter(rows, filter, query);
+    empty.hidden = shown.length > 0;
+    for (const row of shown) renderIfaceRow(tbody, device, row, reload);
+  };
+  renderRows();
+}
 
-          // Service binding actions.
-          const actionsRow = el("div", { className: "iface-actions" });
-          const bindingData = binding as Record<string, unknown> | null;
-          const hasBoundService = bindingData !== null &&
-            typeof bindingData === "object" &&
-            (bindingData["service"] != null);
+function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, reload: () => void): void {
+  const tr = el("tr", { className: "iface-row" + (row.available ? " iface-row--available" : ""), tabIndex: 0 });
 
-          if (!hasBoundService) {
-            // No service bound — show "Bind service" button.
-            const bindBtn = el("button", { type: "button", className: "iface-action-btn" }, "Bind service");
-            bindBtn.addEventListener("click", () => {
-              // Fetch service names for the dropdown, then open the drawer.
-              fetch(apiPath("services"), { cache: "no-store" })
-                .then((r) => (r.ok ? r.json() : { services: [] }))
-                .then((d: unknown) => {
-                  const body = d as { services?: { name: string }[] };
-                  const names = Array.isArray(body.services)
-                    ? body.services.map((s) => s.name)
-                    : [];
-                  openBindServiceDrawer(device, name, names, refreshIfaceDetail);
-                })
-                .catch(() => openBindServiceDrawer(device, name, [], refreshIfaceDetail));
-            });
-            actionsRow.appendChild(bindBtn);
-          } else {
-            // Service is bound — show Refresh and Unbind.
-            const refreshBtn = el("button", { type: "button", className: "iface-action-btn" }, "Refresh");
-            refreshBtn.addEventListener("click", async () => {
-              refreshBtn.disabled = true;
-              refreshBtn.textContent = "Refreshing…";
-              try {
-                await postRefreshService(device, name);
-                refreshIfaceDetail();
-              } catch (err) {
-                refreshBtn.disabled = false;
-                refreshBtn.textContent = "Refresh";
-                const msg = err instanceof ApiError
-                  ? translateErrorKind(err.kind) + ": " + err.message
-                  : String(err);
-                showToast({ kind: "error", title: "Refresh failed", body: msg });
-              }
-            });
-            actionsRow.appendChild(refreshBtn);
+  // Port cell: status dot + name.
+  const portCell = el("td", { className: "iface-cell-port" });
+  portCell.appendChild(el("span", { className: `iface-dot iface-dot--${row.status}`, title: statusTitle(row) }));
+  portCell.appendChild(el("span", { className: "iface-name" }, row.name));
+  tr.appendChild(portCell);
 
-            const unbindBtn = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Unbind service");
-            unbindBtn.addEventListener("click", async () => {
-              const ok = await confirmInline({
-                title: `Unbind service from ${name}?`,
-                body: "This cannot be undone.",
-                danger: true,
-                confirmLabel: "Unbind",
-              });
-              if (!ok) return;
-              unbindBtn.disabled = true;
-              unbindBtn.textContent = "Unbinding…";
-              try {
-                await postUnbindService(device, name);
-                refreshIfaceDetail();
-              } catch (err) {
-                unbindBtn.disabled = false;
-                unbindBtn.textContent = "Unbind service";
-                const msg = err instanceof ApiError
-                  ? translateErrorKind(err.kind) + ": " + err.message
-                  : String(err);
-                showToast({ kind: "error", title: "Unbind failed", body: msg });
-              }
-            });
-            actionsRow.appendChild(unbindBtn);
-          }
+  tr.appendChild(el("td", {}, el("span", { className: `iface-role iface-role--${row.role}` }, roleLabel(row.role))));
+  tr.appendChild(el("td", { className: "iface-cell-mono" }, [row.speed, row.mtu !== undefined ? String(row.mtu) : ""].filter(Boolean).join(" / ") || "—"));
+  tr.appendChild(el("td", { className: "iface-cell-l2l3" }, row.l2l3 || "—"));
 
-          // Link removal: offered when the interface may be a link endpoint.
-          // Newtron's DeleteTopologyLink resolves the link from a single endpoint;
-          // if the interface is not a link endpoint it returns 404, which is surfaced.
-          const removeLinkBtn = el("button", { type: "button", className: "iface-action-btn" }, "Remove link");
-          removeLinkBtn.title = "Remove the topology link that uses this interface as an endpoint";
-          removeLinkBtn.addEventListener("click", async () => {
-            const ok = await confirmInline({
-              title: `Remove the link on ${name}?`,
-              danger: true,
-              confirmLabel: "Remove link",
-            });
-            if (!ok) return;
-            removeLinkBtn.disabled = true;
-            removeLinkBtn.textContent = "Removing…";
-            deleteTopologyLink(device, name)
-              .then(() => {
-                removeLinkBtn.replaceWith(el("span", { className: "form-success" }, "Link removed."));
-              })
-              .catch((err) => {
-                removeLinkBtn.disabled = false;
-                removeLinkBtn.textContent = "Remove link";
-                const msg = err instanceof ApiError
-                  ? translateErrorKind(err.kind) + ": " + err.message
-                  : String(err);
-                showToast({ kind: "error", title: "Remove link failed", body: msg });
-              });
-          });
-          actionsRow.appendChild(removeLinkBtn);
+  // Service cell: chip if bound, else an inline "+ Apply" CTA on serviceless ports.
+  const svcCell = el("td", { className: "iface-cell-svc" });
+  if (row.service) {
+    svcCell.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+  } else {
+    const apply = el("button", { type: "button", className: "iface-apply-cta" }, "+ Apply");
+    apply.addEventListener("click", (e) => { e.stopPropagation(); openApplyServiceFor(device, row.name, reload); });
+    svcCell.appendChild(apply);
+  }
+  tr.appendChild(svcCell);
 
-          detailContainer.appendChild(actionsRow);
-        })
-        .catch((err) => renderErrorInto(detailContainer, err));
-    };
+  tr.appendChild(el("td", { className: "iface-cell-link" }, row.link || "—"));
+  tbody.appendChild(tr);
 
-    const toggle = (): void => {
-      if (detailContainer.hidden) {
-        detailContainer.hidden = false;
-        loadIfaceDetail();
-      } else {
-        detailContainer.hidden = true;
-      }
-    };
+  // Expand-in-place detail row.
+  const detailTr = el("tr", { className: "iface-detail-row" });
+  const detailTd = el("td", { className: "iface-detail-cell" });
+  detailTd.setAttribute("colspan", "6");
+  detailTr.appendChild(detailTd);
+  detailTr.hidden = true;
+  tbody.appendChild(detailTr);
 
-    itemRow.addEventListener("click", toggle);
-    itemRow.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        toggle();
-      }
-    });
+  let built = false;
+  const toggle = (): void => {
+    detailTr.hidden = !detailTr.hidden;
+    tr.classList.toggle("iface-row--expanded", !detailTr.hidden);
+    if (!detailTr.hidden && !built) { built = true; renderIfaceDetail(detailTd, device, row, reload); }
+  };
+  tr.addEventListener("click", toggle);
+  tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+}
 
-    list.appendChild(itemRow);
-    list.appendChild(el("li", {}, detailContainer));
+function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow, reload: () => void): void {
+  host.textContent = "";
+
+  // Properties (tailored, not a JSON dump).
+  const props: Array<[string, string]> = [
+    ["Admin", row.adminStatus ?? "—"],
+    ["Oper", row.operStatus || "—"],
+    ["Speed", row.speed || "—"],
+    ["MTU", row.mtu !== undefined ? String(row.mtu) : "—"],
+    ["Role", roleLabel(row.role)],
+  ];
+  if (row.live?.pc_member === true) props.push(["Port-channel member", "yes"]);
+  if (row.link) props.push(["Link", row.link]);
+  const dl = el("dl", { className: "iface-prop-grid" });
+  for (const [k, v] of props) { dl.appendChild(el("dt", {}, k)); dl.appendChild(el("dd", {}, v)); }
+  host.appendChild(dl);
+
+  // Service binding.
+  if (row.service) {
+    const svc = el("div", { className: "iface-detail-svc" });
+    svc.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+    if (row.l2l3) svc.appendChild(el("span", { className: "iface-detail-svc-meta" }, row.l2l3));
+    host.appendChild(svc);
   }
 
-  container.appendChild(list);
+  // Actions.
+  const actions = el("div", { className: "iface-actions" });
+  if (row.canApplyService) {
+    const bind = el("button", { type: "button", className: "iface-action-btn" }, "Apply service");
+    bind.addEventListener("click", () => openApplyServiceFor(device, row.name, reload));
+    actions.appendChild(bind);
+  } else {
+    const refresh = el("button", { type: "button", className: "iface-action-btn" }, "Refresh");
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true; refresh.textContent = "Refreshing…";
+      try { await postRefreshService(device, row.name); reload(); }
+      catch (err) { refresh.disabled = false; refresh.textContent = "Refresh"; showToast({ kind: "error", title: "Refresh failed", body: errMsg(err) }); }
+    });
+    actions.appendChild(refresh);
+    const unbind = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Unbind service");
+    unbind.addEventListener("click", async () => {
+      if (!await confirmInline({ title: `Unbind service from ${row.name}?`, body: "This cannot be undone.", danger: true, confirmLabel: "Unbind" })) return;
+      try { await postUnbindService(device, row.name); reload(); }
+      catch (err) { showToast({ kind: "error", title: "Unbind failed", body: errMsg(err) }); }
+    });
+    actions.appendChild(unbind);
+  }
+  if (row.link) {
+    const rmLink = el("button", { type: "button", className: "iface-action-btn" }, "Remove link");
+    rmLink.addEventListener("click", async () => {
+      if (!await confirmInline({ title: `Remove the link on ${row.name}?`, danger: true, confirmLabel: "Remove link" })) return;
+      try { await deleteTopologyLink(device, row.name); reload(); }
+      catch (err) { showToast({ kind: "error", title: "Remove link failed", body: errMsg(err) }); }
+    });
+    actions.appendChild(rmLink);
+  }
+  host.appendChild(actions);
+
+  // Raw, tucked for power users (replaces the old always-on JSON dump).
+  if (row.live) {
+    const raw = el("details", { className: "iface-detail-raw" });
+    raw.appendChild(el("summary", {}, "Raw"));
+    raw.appendChild(renderValue(row.live));
+    host.appendChild(raw);
+  }
+}
+
+// openApplyServiceFor fetches service names then opens the bind-service drawer
+// for an interface (reuses the existing flow), refreshing the view on success.
+function openApplyServiceFor(device: string, iface: string, reload: () => void): void {
+  fetch(apiPath("services"), { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : { services: [] }))
+    .then((d: unknown) => {
+      const names = Array.isArray((d as { services?: { name: string }[] }).services)
+        ? (d as { services: { name: string }[] }).services.map((s) => s.name) : [];
+      openBindServiceDrawer(device, iface, names, reload);
+    })
+    .catch(() => openBindServiceDrawer(device, iface, [], reload));
+}
+
+function statusTitle(row: InterfaceRow): string {
+  return `admin ${row.adminStatus ?? "?"} · oper ${row.operStatus || "?"}`;
+}
+function roleLabel(role: InterfaceRow["role"]): string {
+  switch (role) {
+    case "lag-member": return "LAG member";
+    case "available": return "Available";
+    default: return role.charAt(0).toUpperCase() + role.slice(1);
+  }
+}
+function errMsg(err: unknown): string {
+  return err instanceof ApiError ? translateErrorKind(err.kind) + ": " + err.message : String(err);
 }
 
 // renderConfigDBTab renders the CONFIG_DB sub-tab with 3-level navigation.
@@ -3995,45 +4141,61 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       void renderStateTab(container, device);
       break;
 
-    case "spec":
-      // The profile spec is the device's static identity (mgmt_ip,
-      // loopback_ip, zone, platform). Unified-substrate convention
-      // (PR #148) creates profiles with the same name as the device,
-      // so a per-device fetch is just fetchSpecDetail("profiles",
-      // device). Renders with the schema-driven labeled-row layout
-      // (PR #226+); falls back to specForms / generic tree.
-      fetchSpecDetail("profiles", device)
+    case "spec": {
+      // A device's declared intent lives in TWO places in the network spec:
+      //   - the device profile — static identity (mgmt_ip, loopback_ip, zone,
+      //     platform, service bindings). Unified-substrate convention (PR #148)
+      //     names the profile after the device → fetchSpecDetail("profiles", …).
+      //   - the topology.json device entry — provisioning steps + per-port
+      //     config, i.e. the intents provisioning actually replays.
+      // The Spec tab shows both so "declared intent" is complete.
+      container.textContent = "";
+      container.appendChild(el("p", { className: "node-spec-intro" },
+        "Declared intent for this device — profile + topology.json. To inspect actuated reality, switch tabs."));
+
+      const profSection = el("div", { className: "node-spec-section" });
+      profSection.appendChild(el("h4", { className: "node-spec-section-title" }, "Device profile"));
+      const profBody = el("div", { className: "node-spec-body" });
+      profBody.appendChild(el("p", { className: "spec-detail-empty-state" }, "Loading…"));
+      profSection.appendChild(profBody);
+      container.appendChild(profSection);
+
+      const topoSection = el("div", { className: "node-spec-section" });
+      topoSection.appendChild(el("h4", { className: "node-spec-section-title" }, "Topology intent"));
+      const topoBody = el("div", { className: "node-spec-body" });
+      topoBody.appendChild(el("p", { className: "spec-detail-empty-state" }, "Loading…"));
+      topoSection.appendChild(topoBody);
+      container.appendChild(topoSection);
+
+      void fetchSpecDetail("profiles", device)
         .then(async (data) => {
-          container.textContent = "";
-          container.appendChild(el("p", { className: "node-spec-intro" },
-            "Declared intent for this device. To inspect actuated reality, switch tabs."));
           const schemaKindForDetail = await resolveSlugToKind("profiles").catch(() => null);
           const schemaForDetail = schemaKindForDetail
             ? await fetchSchema(schemaKindForDetail).catch(() => null)
             : null;
-          const body = el("div", { className: "node-spec-body" });
+          profBody.textContent = "";
           if (schemaForDetail) {
-            renderSpecDetailInto(
-              body,
-              schemaForDetail.fields.map(toSpecField),
-              data,
-              ["name"],
-            );
+            renderSpecDetailInto(profBody, schemaForDetail.fields.map(toSpecField), data, ["name"]);
           } else {
             const fields = displaySchemaFor("profiles");
-            if (fields) renderSpecDetailInto(body, fields, data, ["name"]);
-            else renderValueInto(body, data);
+            if (fields) renderSpecDetailInto(profBody, fields, data, ["name"]);
+            else renderValueInto(profBody, data);
           }
-          container.appendChild(body);
         })
         .catch((err) => {
-          if (err instanceof ApiError && err.status === 404) {
-            renderProfileNotFound(container, device);
-            return;
-          }
-          renderErrorInto(container, err);
+          profBody.textContent = "";
+          if (err instanceof ApiError && err.status === 404) renderProfileNotFound(profBody, device);
+          else renderErrorInto(profBody, err);
         });
+
+      void fetchTopology()
+        .then((topo) => {
+          const devices = (topo as { devices?: Record<string, unknown> } | null)?.devices ?? {};
+          renderTopologyIntentInto(topoBody, devices[device] ?? null);
+        })
+        .catch((err) => { topoBody.textContent = ""; renderErrorInto(topoBody, err); });
       break;
+    }
 
     case "drift":
       fetchNodeDrift(device)
