@@ -37,6 +37,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address for newtcon-server")
 	newtronURL := flag.String("newtron-url", "", "newtron-server base URL (e.g., http://127.0.0.1:9090 or https://newtron.example.com)")
 	newtronTimeout := flag.Duration("newtron-timeout", 10*time.Second, "per-request timeout for newtron-server calls")
+	newtronProvisionTimeout := flag.Duration("newtron-provision-timeout", 10*time.Minute, "timeout for long synchronous lab operations (provision)")
 	newtronCACert := flag.String("newtron-ca-cert", "", "PEM file with CA roots to verify newtron-server's TLS cert (default: system roots). Only consulted when --newtron-url uses https://. Env: NEWTRON_TLS_CA.")
 	newtronClientCert := flag.String("newtron-client-cert", "", "PEM file with newtcon-server's client cert for outbound mTLS to newtron-server (newtron's --tls-ca path). Must be set together with --newtron-client-key. Env: NEWTRON_TLS_CERT.")
 	newtronClientKey := flag.String("newtron-client-key", "", "PEM file with the matching private key for --newtron-client-cert. Env: NEWTRON_TLS_KEY.")
@@ -111,7 +112,10 @@ func main() {
 		log.Printf("WARNING: --newtron-skip-tls-verify is on; outbound TLS cert verification is disabled. Development use only.")
 	}
 
-	ncOpts := []newtronc.Option{newtronc.WithTimeout(*newtronTimeout)}
+	ncOpts := []newtronc.Option{
+		newtronc.WithTimeout(*newtronTimeout),
+		newtronc.WithProvisionTimeout(*newtronProvisionTimeout),
+	}
 	if tlsCfg != nil {
 		ncOpts = append(ncOpts, newtronc.WithTLSConfig(tlsCfg))
 	}

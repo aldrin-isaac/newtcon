@@ -125,6 +125,7 @@ import { NODE_ACTIONS } from "./topology-actions.js";
 import { showContextMenu } from "./topology-actions-ui.js";
 import { iconSVG } from "./icons.js";
 import { renderActionPanel } from "./topology-action-panel.js";
+import { comparePorts } from "./port-config.js";
 import {
   enqueueSpecCreate,
   enqueueSpecDelete,
@@ -5479,7 +5480,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       }
     }
     for (const [name, dev] of Object.entries(rawDevices)) {
-      interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort());
+      interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort(comparePorts));
     }
     const deviceTypeOf = (name: string): string => {
       const steps = (rawDevices[name] as { steps?: Array<{ params?: { fields?: { type?: string } } }> })?.steps ?? [];
