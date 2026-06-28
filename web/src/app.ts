@@ -2954,14 +2954,14 @@ function renderErrorInto(container: HTMLElement, err: unknown): void {
 // silently violated by the UI.
 function renderProfileNotFound(container: HTMLElement, device: string): void {
   container.textContent = "";
-  container.appendChild(el("p", { className: "panel-error" }, "No profile found"));
+  container.appendChild(el("p", { className: "panel-error" }, "No node found"));
   container.appendChild(el(
     "p",
     { className: "panel-error-detail" },
     `No profile spec named "${device}" exists for this device. ` +
-    "Profiles and device names are conventionally identical (created together " +
-    "from the Topology view). If this device's profile uses a different name, " +
-    "find it under the Specs view → Device profiles."
+    "Nodes and device names are conventionally identical (created together " +
+    "from the Topology view). If this device's node uses a different name, " +
+    "find it under the Specs view → Nodes."
   ));
 }
 
@@ -3185,7 +3185,7 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
   // services. So the live read can fail and we still render every platform port.
   let liveUnavailable = false;
   const [profile, topo, liveRaw] = await Promise.all([
-    fetchSpecDetail("profiles", device).catch(() => null),
+    fetchSpecDetail("nodes", device).catch(() => null),
     fetchTopology().catch(() => null),
     fetchNodeInterfaces(device).catch(() => { liveUnavailable = true; return null; }),
   ]);
@@ -3207,7 +3207,7 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
   if (rows.length === 0) {
     host.textContent = "";
     host.appendChild(el("p", { className: "topology-empty" },
-      "No interfaces — this device's profile has no platform (no port inventory) and no configured ports."));
+      "No interfaces — this node has no platform (no port inventory) and no configured ports."));
     return;
   }
   renderIfaceTable(host, device, rows, liveUnavailable, () => { void buildAndRenderIfaceView(host, device); });
@@ -4275,16 +4275,16 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       // A device's declared intent lives in TWO places in the network spec:
       //   - the device profile — static identity (mgmt_ip, loopback_ip, zone,
       //     platform, service bindings). Unified-substrate convention (PR #148)
-      //     names the profile after the device → fetchSpecDetail("profiles", …).
+      //     names the profile after the device → fetchSpecDetail("nodes", …).
       //   - the topology.json device entry — provisioning steps + per-port
       //     config, i.e. the intents provisioning actually replays.
       // The Spec tab shows both so "declared intent" is complete.
       container.textContent = "";
       container.appendChild(el("p", { className: "node-spec-intro" },
-        "Declared intent for this device — profile + topology.json. To inspect actuated reality, switch tabs."));
+        "Declared intent for this device — node + topology.json. To inspect actuated reality, switch tabs."));
 
       const profSection = el("div", { className: "node-spec-section" });
-      profSection.appendChild(el("h4", { className: "node-spec-section-title" }, "Device profile"));
+      profSection.appendChild(el("h4", { className: "node-spec-section-title" }, "Node"));
       const profBody = el("div", { className: "node-spec-body" });
       profBody.appendChild(el("p", { className: "spec-detail-empty-state" }, "Loading…"));
       profSection.appendChild(profBody);
@@ -4297,9 +4297,9 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
       topoSection.appendChild(topoBody);
       container.appendChild(topoSection);
 
-      void fetchSpecDetail("profiles", device)
+      void fetchSpecDetail("nodes", device)
         .then(async (data) => {
-          const schemaKindForDetail = await resolveSlugToKind("profiles").catch(() => null);
+          const schemaKindForDetail = await resolveSlugToKind("nodes").catch(() => null);
           const schemaForDetail = schemaKindForDetail
             ? await fetchSchema(schemaKindForDetail).catch(() => null)
             : null;
@@ -4307,7 +4307,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
           if (schemaForDetail) {
             renderSpecDetailInto(profBody, schemaForDetail.fields.map(toSpecField), data, ["name"]);
           } else {
-            const fields = displaySchemaFor("profiles");
+            const fields = displaySchemaFor("nodes");
             if (fields) renderSpecDetailInto(profBody, fields, data, ["name"]);
             else renderValueInto(profBody, data);
           }
@@ -4870,7 +4870,7 @@ function showCanvasContextMenu(x: number, y: number, onCreated: () => void): voi
 // (mgmt_ip + loopback_ip + zone, plus optional platform/ssh_user). The
 // drawer stages BOTH writes so every node always has a spec — newtron
 // matches them by name. The staging queue's apply order already runs spec
-// creates before topology adds, so the node spec lands first.
+// creates before topology adds, so the node lands first.
 //
 // Zone is a required dropdown — newtron's NodeSpec.Zone must reference
 // an existing entry in network.json zones; freeform input would let the
@@ -4893,9 +4893,9 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   // topology by name — no need to re-author the profile (which would
   // collide). Stages only the topology entry.
   const existing = el("section", { className: "create-node-section" });
-  existing.appendChild(el("h3", { className: "create-node-section-title" }, "Add an existing profile"));
+  existing.appendChild(el("h3", { className: "create-node-section-title" }, "Add an existing node"));
   existing.appendChild(el("p", { className: "drawer-hint" },
-    "Device profiles that exist but aren't placed in the topology yet."));
+    "Nodes that exist but aren't placed in the topology yet."));
   const existingRow = el("div", { className: "create-node-existing-row" });
   const profileSelect = el("select", { className: "form-control" }) as HTMLSelectElement;
   profileSelect.appendChild(new Option("Loading…", ""));
@@ -4919,7 +4919,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     addExistingBtn.disabled = true;
     // Scaffold the setup-device step from the existing profile (platform→hwsku,
     // underlay_asn) so the dropped-in node is service-ready like a new one (#283).
-    const prof = await fetchSpecDetail("profiles", name).catch(() => null);
+    const prof = await fetchSpecDetail("nodes", name).catch(() => null);
     const platform = (prof as { platform?: string } | null)?.platform ?? "";
     const underlayAsn = (prof as { underlay_asn?: number } | null)?.underlay_asn;
     let hwsku = "";
@@ -4940,7 +4940,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   // the operator can still create a new node below.
   void (async () => {
     try {
-      const [profiles, topo] = await Promise.all([fetchSpecList("profiles"), fetchTopology()]);
+      const [profiles, topo] = await Promise.all([fetchSpecList("nodes"), fetchTopology()]);
       const placed = new Set<string>();
       const nodes = adaptTopology(topo).nodes;
       for (const n of Array.isArray(nodes) ? nodes : []) {
@@ -4950,17 +4950,17 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
       const unplaced = profiles.filter((p) => !placed.has(p));
       profileSelect.textContent = "";
       if (unplaced.length === 0) {
-        profileSelect.appendChild(new Option("(every profile is already in the topology)", ""));
+        profileSelect.appendChild(new Option("(every node is already in the topology)", ""));
         profileSelect.disabled = true;
         addExistingBtn.disabled = true;
       } else {
-        profileSelect.appendChild(new Option("Select a profile…", ""));
+        profileSelect.appendChild(new Option("Select a node…", ""));
         for (const p of unplaced) profileSelect.appendChild(new Option(p, p));
         profileSelect.disabled = false;
       }
     } catch {
       profileSelect.textContent = "";
-      profileSelect.appendChild(new Option("(couldn't load profiles)", ""));
+      profileSelect.appendChild(new Option("(couldn't load nodes)", ""));
       profileSelect.disabled = true;
     }
   })();
@@ -4968,7 +4968,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   content.appendChild(el("p", { className: "create-node-divider" }, "or create a new node"));
 
   content.appendChild(el("p", { className: "drawer-hint" },
-    "Stages two writes: a profile (identity) and a topology entry (steps + ports). " +
+    "Stages two writes: a node (identity) and a topology entry (steps + ports). " +
     "Both land on Save. Disconnected nodes are fine — links are added separately."));
 
   // Build the form first; populate zone/platform dropdowns asynchronously so
@@ -5069,7 +5069,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
       // Stage profile first (apply order runs spec creates before topology
       // adds, so the profile lands before the topology entry references it
       // by name).
-      enqueueSpecCreate("profiles", name, profileBody);
+      enqueueSpecCreate("nodes", name, profileBody);
       enqueueTopologyAddDevice(name, device as unknown as Record<string, unknown>);
 
       submitBtn.disabled = true;
@@ -5644,9 +5644,9 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const deviceMetadata = new Map<string, DeviceMetadata>();
     let filterState: TopologyFilter = emptyFilter();
     try {
-      const profileNames = await fetchSpecList("profiles");
+      const profileNames = await fetchSpecList("nodes");
       const profileDetails = await Promise.all(
-        profileNames.map((n) => fetchSpecDetail("profiles", n).catch(() => null)),
+        profileNames.map((n) => fetchSpecDetail("nodes", n).catch(() => null)),
       );
       for (let i = 0; i < profileNames.length; i++) {
         const d = profileDetails[i];
@@ -6187,7 +6187,7 @@ const SPEC_GROUPS: { id: string; label: string; kinds: SpecKind[] }[] = [
   // Services.
   { id: "vpns",      label: "Virtual Networks", kinds: ["ipvpns", "macvpns"] },
   { id: "policies",  label: "Policies",         kinds: ["qos-policies", "filters", "route-policies", "prefix-lists"] },
-  { id: "inventory", label: "Inventory",        kinds: ["profiles", "platforms", "zones"] },
+  { id: "inventory", label: "Inventory",        kinds: ["nodes", "platforms", "zones"] },
 ];
 
 // resolveGroupings returns the SPEC_GROUPS list extended with an

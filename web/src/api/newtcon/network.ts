@@ -23,7 +23,7 @@ export type SpecKind =
   | "filters"
   | "prefix-lists"
   | "route-policies"
-  | "profiles"
+  | "nodes"
   | "zones"
   | "platforms";
 

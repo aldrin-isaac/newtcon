@@ -99,9 +99,9 @@ func (c *Client) ListRoutePolicies(ctx context.Context, network string) ([]strin
 func (c *Client) ListProfiles(ctx context.Context, network string) ([]string, error) {
 	// Newtron PR #206 (2026-06-17) renamed the route from /profiles to /nodes;
 	// PR #320 then renamed the type DeviceProfile→NodeSpec and the write verbs
-	// to create-/update-/delete-node. A node's spec lives under nodes/.
-	// Newtcon-internal callers still use "profiles" as the spec-kind label; only
-	// the upstream URL + verbs changed.
+	// to create-/update-/delete-node. A node's spec lives under nodes/. newtcon
+	// now uses "nodes" as the spec-kind slug throughout (operator-vocabulary
+	// alignment) — the method name ListProfiles is retained internally only.
 	return c.listNames(ctx, network, "nodes")
 }
 

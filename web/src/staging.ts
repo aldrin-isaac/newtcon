@@ -23,7 +23,7 @@ import { mergePort } from "./port-config.js";
 
 export type SpecKind =
   | "services" | "ipvpns" | "macvpns" | "qos-policies" | "filters"
-  | "route-policies" | "prefix-lists" | "profiles" | "zones";
+  | "route-policies" | "prefix-lists" | "nodes" | "zones";
 
 // The holistic thread: every spec / sub-rule / override change is one flat
 // HTTP mutation — a method + resource path + body. The queue holds these

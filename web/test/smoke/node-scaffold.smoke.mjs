@@ -56,12 +56,12 @@ try {
   expect(!!setup, "topology device has a setup-device step");
   expect(setup && setup.params?.fields?.hwsku === "Force10-S6000", `setup-device carries hwsku (${setup?.params?.fields?.hwsku})`);
   expect(setup && setup.params?.fields?.bgp_asn === "65004", `setup-device carries bgp_asn (${setup?.params?.fields?.bgp_asn})`);
-  const prof = await (await fetch(api(`profiles/${DEV}`))).json();
+  const prof = await (await fetch(api(`nodes/${DEV}`))).json();
   expect(prof && prof.underlay_asn === 65004, `profile has underlay_asn (${prof?.underlay_asn})`);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
 } catch (e) { console.error("threw:", e.message); process.exitCode = 1; } finally {
-  try { await fetch(api(`topology/nodes/${DEV}?force=true`), { method: "DELETE" }); await fetch(api(`profiles/${DEV}`), { method: "DELETE" }); } catch { /* */ }
+  try { await fetch(api(`topology/nodes/${DEV}?force=true`), { method: "DELETE" }); await fetch(api(`nodes/${DEV}`), { method: "DELETE" }); } catch { /* */ }
   await browser.close();
 }

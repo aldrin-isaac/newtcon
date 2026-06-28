@@ -57,7 +57,7 @@ internal/handlers/            → one file per resource family
   audit.go                    → /api/networks/{netID}/audit/{events,integrity} (forwards newtron's audit endpoints; slice #175.B)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
-  network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,profiles,zones,platforms} (list+detail+create+delete+sub-rules)
+  network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,nodes,zones,platforms} (list+detail+create+delete+sub-rules; "nodes" = newtron NodeSpec, formerly "profiles")
   nodes.go                    → /api/networks/{netID}/topology + /api/networks/{netID}/nodes/{device}/...
   lab.go                      → /api/labs (newtlab lifecycle: list / status / deploy / destroy / provision / events / per-node start/stop)
 internal/newtronc/            → THE ONLY HTTP client of newtron-server

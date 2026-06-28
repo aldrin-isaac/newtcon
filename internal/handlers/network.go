@@ -68,7 +68,7 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 	register("filters", c.ListFilters)
 	register("prefix-lists", c.ListPrefixLists)
 	register("route-policies", c.ListRoutePolicies)
-	register("profiles", c.ListProfiles)
+	register("nodes", c.ListProfiles)
 	register("zones", c.ListZones)
 	register("platforms", c.ListPlatforms)
 
@@ -105,7 +105,7 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 		{"filters", "filter", "filters"},
 		{"prefix-lists", "prefix-list", "prefix-lists"},
 		{"route-policies", "route-policy", "route-policies"},
-		{"profiles", "node", "nodes"},
+		{"nodes", "node", "nodes"},
 		{"zones", "zone", "zones"},
 		{"platforms", "platform", "platforms"},
 	} {
