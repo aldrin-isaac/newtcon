@@ -37,7 +37,7 @@ export function deriveServiceBindings(topology: unknown, serviceName: string): S
   const out: ServiceBinding[] = [];
 
   const devices = (topology && typeof topology === "object")
-    ? (topology as { devices?: unknown }).devices
+    ? (topology as { nodes?: unknown }).nodes
     : undefined;
   if (!devices || typeof devices !== "object") return out;
 

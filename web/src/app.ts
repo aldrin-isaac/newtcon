@@ -2289,10 +2289,12 @@ interface TopologyData {
 // Adapt before rendering so the renderer stays simple.
 function adaptTopology(raw: unknown): TopologyData {
   const r = (raw ?? {}) as Record<string, unknown>;
-  // If it's already in the renderer shape, pass through.
+  // If it's already in the renderer shape (nodes as an array), pass through;
+  // newtron's raw topology has nodes as a map (newtron #320 key rename), which
+  // we adapt below.
   if (Array.isArray((r as { nodes?: unknown }).nodes)) return r as TopologyData;
 
-  const devices = (r.devices ?? {}) as Record<string, Record<string, unknown>>;
+  const devices = (r.nodes ?? {}) as Record<string, Record<string, unknown>>;
   const nodes: TopoNode[] = Object.entries(devices).map(([name, def]) => {
     // Infer node type from common patterns: host* prefix → "host"; presence of steps → "switch".
     const lower = name.toLowerCase();
@@ -3188,7 +3190,7 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
     fetchNodeInterfaces(device).catch(() => { liveUnavailable = true; return null; }),
   ]);
   const platform = (profile as { platform?: string } | null)?.platform ?? "";
-  const devEntry = ((topo as { devices?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.devices ?? {})[device] ?? {};
+  const devEntry = ((topo as { nodes?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.nodes ?? {})[device] ?? {};
   const topoPorts = devEntry.ports ?? {};
   const bindings = deriveDeviceBindings(devEntry);
   const links = linksForDevice((topo as { links?: unknown } | null)?.links, device);
@@ -4318,7 +4320,7 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
 
       void fetchTopology()
         .then((topo) => {
-          const devices = (topo as { devices?: Record<string, unknown> } | null)?.devices ?? {};
+          const devices = (topo as { nodes?: Record<string, unknown> } | null)?.nodes ?? {};
           renderTopologyIntentInto(topoBody, devices[device] ?? null);
         })
         .catch((err) => { topoBody.textContent = ""; renderErrorInto(topoBody, err); });
@@ -4408,7 +4410,7 @@ function renderServicesDisclosure(device: string): HTMLElement {
 
   void fetchTopology()
     .then((topo) => {
-      const entry = ((topo as { devices?: Record<string, unknown> } | null)?.devices ?? {})[device] ?? null;
+      const entry = ((topo as { nodes?: Record<string, unknown> } | null)?.nodes ?? {})[device] ?? null;
       const usage = deviceServiceUsage(entry);
       const n = countServiceInstances(usage);
       badge.textContent = n === 0 ? "—" : `${n}`;
@@ -4863,14 +4865,14 @@ function showCanvasContextMenu(x: number, y: number, onCreated: () => void): voi
 // openCreateNodeDrawer opens the detail drawer with a form to create a node.
 //
 // A node is a single operator-domain concept that newtron stores in two
-// places: (a) `topology.json` as a TopologyDevice entry (steps + ports —
-// initially empty) and (b) `profiles/{name}.json` as a DeviceProfile
+// places: (a) `topology.json` as a topology node entry (steps + ports —
+// initially empty) and (b) `nodes/{name}.json` as a NodeSpec
 // (mgmt_ip + loopback_ip + zone, plus optional platform/ssh_user). The
-// drawer stages BOTH writes so every node always has a profile — newtron
+// drawer stages BOTH writes so every node always has a spec — newtron
 // matches them by name. The staging queue's apply order already runs spec
-// creates before topology adds, so the profile lands first.
+// creates before topology adds, so the node spec lands first.
 //
-// Zone is a required dropdown — newtron's DeviceProfile.Zone must reference
+// Zone is a required dropdown — newtron's NodeSpec.Zone must reference
 // an existing entry in network.json zones; freeform input would let the
 // operator queue an invalid profile that fails on Save.
 function openCreateNodeDrawer(onSuccess: () => void): void {
@@ -5793,8 +5795,8 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Interface lists pulled from the topology declaration (works offline);
     // live-fetched lists merge in via the panel module's source cache.
     const interfacesByDevice: Map<string, string[]> = new Map();
-    const rawData = (data ?? {}) as { devices?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
-    const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.devices ?? {}) };
+    const rawData = (data ?? {}) as { nodes?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
+    const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.nodes ?? {}) };
     // Overlay pending topology additions so the diagram shows them in green.
     const pendingDeviceAdds = pendingTopologyDeviceAdds();
     for (const p of pendingDeviceAdds) {

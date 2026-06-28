@@ -64,7 +64,7 @@ var legacySpecKindMap = map[string]string{
 	"filters":        "filter",
 	"prefix-lists":   "prefix-list",
 	"route-policies": "route-policy",
-	"profiles":       "profile",
+	"profiles":       "node", // newtron #320: DeviceProfile→NodeSpec; verbs are create-/update-/delete-node
 	"zones":          "zone",
 }
 

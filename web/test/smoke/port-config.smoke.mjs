@@ -23,7 +23,7 @@ async function fetchTopoPort() {
   const r = await fetch(`${NEWTRON}/newtron/v1/networks/${NET}/topology`);
   if (!r.ok) return { _error: r.status };
   const body = await r.json();
-  const dev = (body.data ?? body).devices?.[DEVICE] ?? {};
+  const dev = (body.data ?? body).nodes?.[DEVICE] ?? {};
   return dev.ports?.[PORT] ?? null;
 }
 
@@ -128,7 +128,7 @@ try {
   // Cleanup: restore the port to its pre-smoke state.
   console.log("→ cleanup (restore port)");
   const topo = await (await fetch(`${NEWTRON}/newtron/v1/networks/${NET}/topology`)).json();
-  const dev = (topo.data ?? topo).devices[DEVICE];
+  const dev = (topo.data ?? topo).nodes[DEVICE];
   dev.ports[PORT] = { admin_status: "up", mtu: 9100 };
   await fetch(`${BASE}/api/networks/${NET}/topology/nodes/${DEVICE}`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dev),

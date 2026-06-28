@@ -481,7 +481,7 @@ async function loadPortConfig(device: string, body: HTMLElement, deps: PanelDeps
       fetchTopology(),
     ]);
     const platform = (profile as { platform?: string } | null)?.platform ?? "";
-    const devices = (topo as { devices?: Record<string, Record<string, unknown>> } | null)?.devices ?? {};
+    const devices = (topo as { nodes?: Record<string, Record<string, unknown>> } | null)?.nodes ?? {};
     currentDevice = devices[device] ?? {};
     if (!platform) {
       body.textContent = "";
