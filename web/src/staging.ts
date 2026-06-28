@@ -42,7 +42,8 @@ export type SpecKind =
 export type PendingInverse =
   | { group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
       effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
-      sub?: { endpoint: string; key?: string | number }; title: string; body?: Record<string, unknown>; }
+      sub?: { endpoint: string; key?: string | number }; title: string; body?: Record<string, unknown>;
+      scope?: string; scopeInstance?: string; }
   | { group: "topology";  op: "add-device";    name: string; body?: Record<string, unknown>; }
   | { group: "topology";  op: "remove-device"; name: string; }
   | { group: "topology";  op: "update-device"; name: string; body: Record<string, unknown>; }
@@ -56,6 +57,10 @@ export type Pending =
       effect: "create" | "update" | "delete"; kind: SpecKind; name: string;
       sub?: { endpoint: string; key?: string | number }; title: string;
       body?: Record<string, unknown>;
+      // Scope selector for a zone/node override (absent = network base). On a
+      // delete it targets the override; on the inverse recreate it's merged
+      // into the create body so undo lands on the same scope.
+      scope?: string; scopeInstance?: string;
       // Prior server state (display + spec-delete inverse backfill). Captured
       // from the UI at stage time, or fetched at apply for a bare ×.
       preBody?: Record<string, unknown>;
@@ -103,7 +108,9 @@ function mutationIdentity(p: Extract<Pending, { group: "mutation" }>): string {
       ? `sub-add:${p.id}`
       : `${p.kind}/${p.name}/${p.sub.endpoint}/${p.sub.key}`;
   }
-  return `${p.kind}/${p.name}`;
+  // Scoped overrides share the base's name; the scope distinguishes them so a
+  // base delete and a zone/node override delete don't fold together.
+  return p.scope ? `${p.kind}/${p.name}@${p.scope}:${p.scopeInstance ?? ""}` : `${p.kind}/${p.name}`;
 }
 
 function findMutation(identity: string, effect?: "create" | "update" | "delete"): number {
@@ -157,18 +164,29 @@ export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<str
   return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
 
-export function enqueueSpecDelete(kind: SpecKind, name: string): Pending | null {
-  const identity = `${kind}/${name}`;
+export function enqueueSpecDelete(kind: SpecKind, name: string, scope?: string, scopeInstance?: string): Pending | null {
+  // A real override has a non-network scope; treat network/empty as the base.
+  const scoped = !!scope && scope !== "network";
+  const sc = scoped ? scope : undefined;
+  const si = scoped ? (scopeInstance ?? "") : "";
+  const identity = sc ? `${kind}/${name}@${sc}:${si}` : `${kind}/${name}`;
+  // Toggle: a second × on an already-queued delete cancels it (the ↺ affordance).
+  const di = findMutation(identity, "delete");
+  if (di >= 0) { queue.splice(di, 1); notify(); return null; }
   // Deleting a spec that's only pending-create just cancels the create.
   const ci = findMutation(identity, "create");
   if (ci >= 0) { queue.splice(ci, 1); notify(); return null; }
   // A pending edit of a spec being deleted is moot.
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
+  // Scoped delete carries the scope on the wire as a query (?scope&scope_instance);
+  // the backend forwards it to newtron's delete-<kind> selector.
+  const q = sc ? `?scope=${enc(sc)}&scope_instance=${enc(si ?? "")}` : "";
   // The × hasn't read the spec, so the inverse's body is backfilled at apply
-  // (capturePreApplyBodies) — the structure is known here.
-  const inverse: PendingInverse = { group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name };
-  return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name), effect: "delete", kind, name, title: name, inverse });
+  // (capturePreApplyBodies); the inverse carries the scope so undo recreates the
+  // override on the same scope (applyOne merges it into the create body).
+  const inverse: PendingInverse = { group: "mutation", method: "POST", path: specPath(kind), effect: "create", kind, name, title: name, ...(sc ? { scope: sc, scopeInstance: si } : {}) };
+  return pushMutation({ group: "mutation", method: "DELETE", path: specPath(kind, name) + q, effect: "delete", kind, name, title: name, ...(sc ? { scope: sc, scopeInstance: si } : {}), inverse });
 }
 
 // ---- Sub-rule add / update / remove (flat mutations) ---------------------
@@ -439,8 +457,10 @@ export function pendingSpecCreateItems(kind: SpecKind): { name: string; body: Re
     .map((p) => ({ name: p.name, body: p.body ?? {} }));
 }
 
-export function isSpecPendingDelete(kind: SpecKind, name: string): boolean {
-  return queue.some((p) => p.group === "mutation" && !p.sub && p.kind === kind && p.effect === "delete" && p.name === name);
+export function isSpecPendingDelete(kind: SpecKind, name: string, scope?: string, scopeInstance?: string): boolean {
+  const scoped = !!scope && scope !== "network";
+  return queue.some((p) => p.group === "mutation" && !p.sub && p.kind === kind && p.effect === "delete" && p.name === name
+    && (scoped ? (p.scope === scope && (p.scopeInstance ?? "") === (scopeInstance ?? "")) : !p.scope));
 }
 
 export function isSpecPendingUpdate(kind: SpecKind, name: string): boolean {
@@ -570,7 +590,15 @@ async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void>
   const modeQS = mode === "topology" ? "?mode=topology" : "";
   // The flat thread: a mutation is just its HTTP verb replayed on its path.
   if (p.group === "mutation") {
-    if (p.method === "POST") { await postJSON(apiPath(p.path), p.body ?? {}); return; }
+    if (p.method === "POST") {
+      // A scoped recreate (undo of a scoped delete) carries its scope on the
+      // Pending, not in the captured body — merge it into the create body so it
+      // lands on the override scope. (Forward override creates already carry
+      // scope in the body and leave p.scope unset.)
+      const body = p.scope ? { ...(p.body ?? {}), scope: p.scope, scope_instance: p.scopeInstance ?? "" } : (p.body ?? {});
+      await postJSON(apiPath(p.path), body);
+      return;
+    }
     if (p.method === "PUT") { await put(apiPath(p.path), p.body ?? {}); return; }
     await del(apiPath(p.path));
     return;

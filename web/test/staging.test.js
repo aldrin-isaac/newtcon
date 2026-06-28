@@ -24,9 +24,51 @@ import {
   pendingPortConfigs,
   deviceQueue,
   isSpecPendingUpdate,
+  isSpecPendingDelete,
   getQueue,
   discardAll,
 } from "../dist/staging.js";
+
+describe("enqueueSpecDelete() — scoped override deletes", () => {
+  beforeEach(() => discardAll());
+
+  test("scoped delete carries scope in the path + on the Pending", () => {
+    enqueueSpecDelete("ipvpns", "IPVPN", "zone", "myzone");
+    const [p] = getQueue();
+    assert.equal(p.method, "DELETE");
+    assert.equal(p.path, "ipvpns/IPVPN?scope=zone&scope_instance=myzone");
+    assert.equal(p.scope, "zone");
+    assert.equal(p.scopeInstance, "myzone");
+    // inverse recreates on the same scope
+    assert.equal(p.inverse.scope, "zone");
+    assert.equal(p.inverse.scopeInstance, "myzone");
+  });
+
+  test("base and scoped deletes of the same name coexist (distinct identity)", () => {
+    enqueueSpecDelete("ipvpns", "IPVPN");                 // base
+    enqueueSpecDelete("ipvpns", "IPVPN", "zone", "myzone"); // override
+    assert.equal(getQueue().length, 2);
+  });
+
+  test("a second scoped × toggles (cancels) the queued delete", () => {
+    enqueueSpecDelete("ipvpns", "IPVPN", "zone", "myzone");
+    assert.equal(getQueue().length, 1);
+    const r = enqueueSpecDelete("ipvpns", "IPVPN", "zone", "myzone");
+    assert.equal(r, null);
+    assert.equal(getQueue().length, 0);
+  });
+
+  test("network base delete is unaffected by a scoped delete (path has no query)", () => {
+    enqueueSpecDelete("ipvpns", "IPVPN");
+    assert.equal(getQueue()[0].path, "ipvpns/IPVPN");
+  });
+
+  test("isSpecPendingDelete is scope-aware", () => {
+    enqueueSpecDelete("ipvpns", "IPVPN", "zone", "myzone");
+    assert.equal(isSpecPendingDelete("ipvpns", "IPVPN", "zone", "myzone"), true);
+    assert.equal(isSpecPendingDelete("ipvpns", "IPVPN"), false); // base not pending-deleted
+  });
+});
 
 describe("enqueueSpecUpdate() — edits queue like create/delete", () => {
   beforeEach(() => discardAll());

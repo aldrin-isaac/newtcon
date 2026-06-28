@@ -100,7 +100,7 @@ func TestDeleteSpec_Success(t *testing.T) {
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	if err := c.DeleteSpec(context.Background(), "default", "service", "transit"); err != nil {
+	if err := c.DeleteSpec(context.Background(), "default", "service", "transit", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -113,7 +113,7 @@ func TestDeleteSpec_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	c := newtronc.New(srv.URL)
-	err := c.DeleteSpec(context.Background(), "default", "service", "nonexistent")
+	err := c.DeleteSpec(context.Background(), "default", "service", "nonexistent", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

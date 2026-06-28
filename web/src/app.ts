@@ -1240,9 +1240,12 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
       // needs scope on the wire (not built); clicking opens detail (the base,
       // until per-scope override detail lands).
       const buildOverrideRow = (r: Row): HTMLElement => {
+        const isPendingCreate = r.pending === "create";
+        const isPendingDelete = isSpecPendingDelete(panel.kind as StagingSpecKind, r.name, r.scope, r.scope_instance);
         const row = el("li", {
           className: "panel-list-row panel-list-row--override"
-            + (r.pending === "create" ? " panel-list-row--pending-add" : ""),
+            + (isPendingCreate ? " panel-list-row--pending-add" : "")
+            + (isPendingDelete ? " panel-list-row--pending-del" : ""),
         });
         row.appendChild(el("span", { className: "panel-override-marker", ariaHidden: "true" }, "↳"));
         row.appendChild(el("span", {
@@ -1258,6 +1261,25 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
           }
         });
         row.appendChild(item);
+
+        // Scoped delete (newtron #319): remove just this zone/node override. A
+        // scoped delete falls back to the network base, so it's safe — no
+        // binding guard to trip, no confirm needed (staged + reversible).
+        if (panel.canDelete) {
+          const label = `${r.scope} override (${r.scope_instance || "—"}) of ${r.name}`;
+          const delBtn = el("button", {
+            type: "button",
+            className: "panel-delete-btn",
+            title: isPendingDelete ? "Cancel delete" : (isPendingCreate ? "Cancel add" : "Delete " + label),
+            ariaLabel: isPendingDelete ? "Cancel delete of " + label : "Delete " + label,
+          }, isPendingDelete ? "↺" : "×");
+          delBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            enqueueSpecDelete(panel.kind as StagingSpecKind, r.name, r.scope, r.scope_instance);
+            refreshPanel(panel, container);
+          });
+          row.appendChild(delBtn);
+        }
         return row;
       };
 
