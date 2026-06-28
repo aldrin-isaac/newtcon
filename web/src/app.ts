@@ -1204,8 +1204,30 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
           } else {
             delBtn.addEventListener("click", (e) => {
               e.stopPropagation();
-              enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
-              refreshPanel(panel, container);
+              void (async () => {
+                // Defense-in-depth: deleting a service that is still applied
+                // orphans its topology bindings — newtron does not block this
+                // (the delete-guard gap). Warn with the binding list before
+                // staging the delete. (spec→spec refs are guarded engine-side,
+                // so only services — applied via apply-service steps — need it.)
+                if (panel.kind === "services") {
+                  const topo = await fetchTopology().catch(() => null);
+                  const bindings = deriveServiceBindings(topo, r.name);
+                  if (bindings.length > 0) {
+                    const where = bindings.slice(0, 6).map((b) => `${b.device}:${b.iface}`).join(", ");
+                    const more = bindings.length > 6 ? `, +${bindings.length - 6} more` : "";
+                    const ok = await confirmInline({
+                      title: `Delete service "${r.name}"?`,
+                      body: `It's applied on ${bindings.length} interface${bindings.length === 1 ? "" : "s"} (${where}${more}). Deleting it leaves those bindings orphaned — remove them first, or delete anyway.`,
+                      danger: true,
+                      confirmLabel: "Delete anyway",
+                    });
+                    if (!ok) return;
+                  }
+                }
+                enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
+                refreshPanel(panel, container);
+              })();
             });
           }
           row.appendChild(delBtn);
