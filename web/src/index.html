@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>newtcon</title>
+    <title>Newtron Console</title>
     <link rel="stylesheet" href="design-system/color.css" />
     <link rel="stylesheet" href="design-system/typography.css" />
     <link rel="stylesheet" href="design-system/spacing.css" />
@@ -18,7 +18,7 @@
       <aside class="app-sidebar" aria-label="Primary">
         <div class="brand">
           <span class="brand-mark">N</span>
-          <span class="brand-name">newtcon</span>
+          <span class="brand-name">Newtron Console</span>
         </div>
         <nav class="nav" role="navigation" aria-label="Workspaces">
           <button type="button" id="tab-specs" class="nav-item nav-item--active" role="tab" aria-selected="true">
@@ -89,7 +89,7 @@
                  surfaces at a time. Shown when newtcon-server runs
                  without --auth-required. -->
             <div class="anon-pill-wrap" id="anon-pill-wrap" hidden>
-              <button type="button" class="anon-pill" id="anon-pill-trigger" title="newtcon-server is running without authentication">
+              <button type="button" class="anon-pill" id="anon-pill-trigger" title="Newtron Console is running without authentication">
                 <span class="anon-pill-dot" aria-hidden="true"></span>
                 <span class="anon-pill-label">Anonymous</span>
                 <span class="anon-pill-chevron" data-icon="chevron-down"></span>
@@ -160,9 +160,9 @@
       <!-- Auth overlay (hydrated by auth-gate.ts). Hidden by default; shown when
            /api/auth/whoami returns 401 at boot or when any /api/* call returns
            401 mid-session. -->
-      <div id="auth-overlay" class="auth-overlay" hidden role="dialog" aria-modal="true" aria-label="Sign in to newtcon">
+      <div id="auth-overlay" class="auth-overlay" hidden role="dialog" aria-modal="true" aria-label="Sign in to Newtron Console">
         <form id="auth-form" class="auth-card">
-          <h2 class="auth-card-title">Sign in to newtcon</h2>
+          <h2 class="auth-card-title">Sign in to Newtron Console</h2>
           <p class="auth-card-subtitle">Use your operator account credentials.</p>
           <div id="auth-error" class="auth-error" hidden></div>
           <label class="auth-field">
