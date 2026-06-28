@@ -219,40 +219,41 @@ function setupPalette(): void {
     renderPaletteResults(input.value);
   });
 
+  const firstText = (el: Element): string =>
+    (Array.from(el.childNodes).find((n) => n.nodeType === Node.TEXT_NODE)?.textContent ?? el.textContent ?? "").trim();
+
   function rebuildPaletteItems(): void {
     paletteItems = [];
-    paletteItems.push(
-      { label: "Go to Specs", kind: "View", action: () => document.getElementById("tab-specs")?.click() },
-      { label: "Go to Topology", kind: "View", action: () => document.getElementById("tab-topology")?.click() },
-    );
-    document.querySelectorAll<HTMLElement>(".spec-row-name").forEach((row) => {
-      const text = row.textContent?.trim() ?? "";
-      const parentRow = row.closest<HTMLElement>(".spec-row");
-      if (text && parentRow) {
-        const kind = parentRow.closest<HTMLElement>(".spec-panel")?.dataset.kindTitle ?? "Spec";
-        paletteItems.push({
-          label: text,
-          kind,
-          action: () => {
-            close();
-            parentRow.click();
-          },
-        });
-      }
+    // Tabs — always available, every view (was only Specs + Topology).
+    for (const [id, label] of [
+      ["tab-specs", "Specs"], ["tab-topology", "Topology"],
+      ["tab-permissions", "Permissions"], ["tab-history", "Changes"], ["tab-audit", "Audit"],
+    ] as Array<[string, string]>) {
+      paletteItems.push({ label: `Go to ${label}`, kind: "View", action: () => document.getElementById(id)?.click() });
+    }
+    // Spec facets (rendered while the Specs view is open) — jump straight to one.
+    document.querySelectorAll<HTMLElement>(".specs-subnav-item").forEach((btn) => {
+      const label = firstText(btn);
+      if (label) paletteItems.push({
+        label, kind: "Facet",
+        action: () => { close(); document.getElementById("tab-specs")?.click(); setTimeout(() => btn.click(), 60); },
+      });
     });
+    // Spec rows in the active facet — open the detail. (Base rows only; an
+    // override row's label is its scope instance, not the spec name.)
+    const activeFacet = document.querySelector<HTMLElement>(".specs-subnav-item--active");
+    const facetKind = activeFacet ? firstText(activeFacet) : "Spec";
+    document.querySelectorAll<HTMLElement>(".panel-list-item:not(.panel-list-item--override)").forEach((row) => {
+      const text = row.textContent?.trim() ?? "";
+      if (text) paletteItems.push({ label: text, kind: facetKind, action: () => { close(); row.click(); } });
+    });
+    // Topology nodes (rendered while the Topology view is open).
     document.querySelectorAll<SVGGElement>(".topo-node").forEach((node) => {
       const name = node.getAttribute("aria-label")?.replace(/^Device /, "") ?? "";
-      if (name) {
-        paletteItems.push({
-          label: name,
-          kind: "Device",
-          action: () => {
-            close();
-            document.getElementById("tab-topology")?.click();
-            setTimeout(() => (node as unknown as HTMLElement).dispatchEvent(new MouseEvent("click")), 80);
-          },
-        });
-      }
+      if (name) paletteItems.push({
+        label: name, kind: "Node",
+        action: () => { close(); document.getElementById("tab-topology")?.click(); setTimeout(() => (node as unknown as HTMLElement).dispatchEvent(new MouseEvent("click")), 80); },
+      });
     });
   }
 
