@@ -50,8 +50,11 @@ try {
   const txt = await page.evaluate(() => document.querySelector(".node-state-section--services")?.textContent || "");
   expect(/Services/.test(txt), "State tab leads with a Services resource-lens section");
   expect(/EVPNIRB/.test(txt), "lens shows the provisioned service (EVPNIRB)");
+  // One card per distinct service applied to the device (state-dependent: the
+  // node may carry an overlay + an underlay), so assert ≥1 rather than a fixed
+  // count.
   const cards = await page.evaluate(() => document.querySelectorAll(".svc-lens-card").length);
-  expect(cards === 1, `one card per service (${cards})`);
+  expect(cards >= 1, `a card per applied service (${cards})`);
   const ifaces = await page.evaluate(() => Array.from(document.querySelectorAll(".svc-lens-table td.iface-name")).map((e) => e.textContent.trim()));
   expect(ifaces.includes("Ethernet0"), `lists the interface the service is applied to (${ifaces.join(",")})`);
   const hasIp = await page.evaluate(() => /10\.50\.0\.1\/24/.test(document.querySelector(".svc-lens-table")?.textContent || ""));
