@@ -51,7 +51,7 @@ try {
 
   // Verify persisted scaffold via the API.
   const topo = await (await fetch(api("topology"))).json();
-  const entry = (topo.devices ?? {})[DEV] ?? {};
+  const entry = (topo.nodes ?? {})[DEV] ?? {};
   const setup = (entry.steps ?? []).find((s) => (s.url || "") === "/setup-device");
   expect(!!setup, "topology device has a setup-device step");
   expect(setup && setup.params?.fields?.hwsku === "Force10-S6000", `setup-device carries hwsku (${setup?.params?.fields?.hwsku})`);

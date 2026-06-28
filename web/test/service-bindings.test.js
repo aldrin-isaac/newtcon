@@ -14,7 +14,7 @@ import { deriveServiceBindings } from "../dist/service-bindings.js";
 // Mirrors the real GET /topology shape post-#282: each step carries
 // spec_kind/spec_name; primitives omit them.
 const TOPO = {
-  devices: {
+  nodes: {
     switch1: {
       steps: [
         { url: "/setup-device", params: { fields: {} } }, // primitive, no spec_kind
@@ -75,11 +75,11 @@ describe("deriveServiceBindings()", () => {
   test("tolerates odd shapes", () => {
     assert.deepEqual(deriveServiceBindings({}, "x"), []);
     assert.deepEqual(deriveServiceBindings(null, "x"), []);
-    assert.deepEqual(deriveServiceBindings({ devices: { d: { steps: "nope" } } }, "x"), []);
+    assert.deepEqual(deriveServiceBindings({ nodes: { d: { steps: "nope" } } }, "x"), []);
   });
 
   test("results sorted by device then interface", () => {
-    const topo = { devices: {
+    const topo = { nodes: {
       b: { steps: [{ url: "/interfaces/Eth2/apply-service", spec_kind: "service", spec_name: "s" }] },
       a: { steps: [
         { url: "/interfaces/Eth2/apply-service", spec_kind: "service", spec_name: "s" },
