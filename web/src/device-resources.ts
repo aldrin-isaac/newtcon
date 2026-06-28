@@ -73,7 +73,14 @@ export function countServiceInstances(usage: readonly ServiceUsage[]): number {
 // ordered column set per resource so the tables are scannable. Empty/absent
 // cells render as "—"; numeric 0 stays "0" (a real count, not "missing").
 
-export interface ResourceColumn { key: string; label: string }
+export interface ResourceColumn {
+  key: string;
+  label: string;
+  /** Render this cell as a colored status pill (up/ok→ok, warn→warn, else down). */
+  status?: boolean;
+  /** Derive the cell from the whole row (for computed cells like member counts). */
+  derive?: (row: Record<string, unknown>) => string;
+}
 
 export interface ResourceTable { headers: string[]; rows: string[][] }
 
@@ -83,16 +90,18 @@ export function shapeResourceRows(data: unknown, columns: readonly ResourceColum
   const rows = list
     .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
     .map((r) => columns.map((c) => {
-      const v = r[c.key];
+      const v = c.derive ? c.derive(r) : r[c.key];
       return v === undefined || v === null || v === "" ? "—" : String(v);
     }));
   return { headers, rows };
 }
 
+const len = (v: unknown): number => (Array.isArray(v) ? v.length : 0);
+
 // Curated columns per resource (keys match newtron's list shapes).
 export const VRF_COLUMNS: ResourceColumn[] = [
   { key: "name", label: "VRF" },
-  { key: "state", label: "State" },
+  { key: "state", label: "State", status: true },
   { key: "interfaces", label: "Interfaces" },
 ];
 export const VLAN_COLUMNS: ResourceColumn[] = [
@@ -107,3 +116,33 @@ export const ACL_COLUMNS: ResourceColumn[] = [
   { key: "rule_count", label: "Rules" },
   { key: "interfaces", label: "Interfaces" },
 ];
+export const LAG_COLUMNS: ResourceColumn[] = [
+  { key: "name", label: "LAG" },
+  { key: "admin_status", label: "Admin", status: true },
+  { key: "oper_status", label: "Oper", status: true },
+  { key: "members", label: "Members", derive: (r) => `${len(r.active_members)}/${len(r.members)}` },
+  { key: "mtu", label: "MTU" },
+];
+// /neighbors returns device health-checks ({check, status, message}); status
+// drives a colored pill.
+export const HEALTH_COLUMNS: ResourceColumn[] = [
+  { key: "status", label: "Status", status: true },
+  { key: "check", label: "Check" },
+  { key: "message", label: "Message" },
+];
+// BGP /status neighbors sub-table; address key varies (address | neighbor_ip).
+export const BGP_NEIGHBOR_COLUMNS: ResourceColumn[] = [
+  { key: "address", label: "Neighbor", derive: (r) => String(r.address ?? r.neighbor_ip ?? "") },
+  { key: "vrf", label: "VRF" },
+  { key: "type", label: "Type" },
+  { key: "remote_as", label: "Remote AS" },
+  { key: "admin_status", label: "Admin", status: true },
+];
+
+/** isHealthCheckList — true when the array looks like newtron's health-check
+ *  shape (check + status), so the neighbors section can pick the right renderer. */
+export function isHealthCheckList(data: unknown): boolean {
+  return Array.isArray(data) && data.length > 0 && data.every(
+    (r) => r && typeof r === "object" && "check" in r && "status" in r,
+  );
+}

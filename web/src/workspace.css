@@ -1233,6 +1233,10 @@
 .resource-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
 .resource-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
 .resource-table td { padding: 2px 8px; border-bottom: 1px solid var(--color-border-subtle); font-family: var(--font-mono); }
+.resource-pill { display: inline-block; padding: 0 6px; border-radius: var(--radius-full); font-size: var(--text-2xs); }
+.resource-pill--ok { background: var(--color-success-bg); color: var(--color-success); }
+.resource-pill--warn { background: var(--color-warning-bg); color: var(--color-warning); }
+.resource-pill--down { background: var(--color-danger-bg); color: var(--color-danger); }
 
 /* Resource lens — services provisioned on the device → interfaces. */
 .node-state-section--services .node-state-section-title { font-weight: var(--weight-semibold); }
