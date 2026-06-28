@@ -1293,8 +1293,38 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
             baseOpts.onAddOverride = () =>
               openOverrideDrawer(panel.kind, panel.title, name, () => refreshPanel(panel, container));
           }
-          list.appendChild(buildNameRow(base, baseOpts));
-          for (const ov of g.overrides) list.appendChild(buildOverrideRow(ov));
+          const baseRow = buildNameRow(base, baseOpts);
+          const ovRows = g.overrides.map((ov) => buildOverrideRow(ov));
+          if (ovRows.length > 0) {
+            // Collapsible override group: a disclosure caret on the base toggles
+            // its nested overrides. Default collapsed — the override-count badge
+            // already signals there's content, keeping the facet compact.
+            let expanded = false;
+            const caret = el("button", {
+              type: "button",
+              className: "panel-override-toggle",
+              ariaLabel: `Show/hide ${ovRows.length} override${ovRows.length === 1 ? "" : "s"} of ${name}`,
+            }, "▸");
+            const apply = () => {
+              caret.textContent = expanded ? "▾" : "▸";
+              caret.setAttribute("aria-expanded", String(expanded));
+              for (const r of ovRows) r.hidden = !expanded;
+            };
+            const toggle = (e: Event) => { e.stopPropagation(); expanded = !expanded; apply(); };
+            caret.addEventListener("click", toggle);
+            baseRow.insertBefore(caret, baseRow.firstChild);
+            // The count badge doubles as a click target for the disclosure.
+            const countBadge = baseRow.querySelector(".panel-override-count");
+            if (countBadge) {
+              countBadge.classList.add("panel-override-count--toggle");
+              countBadge.addEventListener("click", toggle);
+            }
+            apply();
+            list.appendChild(baseRow);
+            for (const r of ovRows) list.appendChild(r);
+          } else {
+            list.appendChild(baseRow);
+          }
         }
       }
       container.appendChild(list);
