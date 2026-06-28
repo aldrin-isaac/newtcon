@@ -1349,6 +1349,12 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
             list.appendChild(baseRow);
             for (const r of ovRows) list.appendChild(r);
           } else {
+            // No overrides: reserve the caret's width so the name lines up with
+            // base rows that do carry a disclosure caret.
+            baseRow.insertBefore(
+              el("span", { className: "panel-override-toggle panel-override-toggle--placeholder", ariaHidden: "true" }, "▸"),
+              baseRow.firstChild,
+            );
             list.appendChild(baseRow);
           }
         }
