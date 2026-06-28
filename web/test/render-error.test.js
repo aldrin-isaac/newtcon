@@ -13,9 +13,37 @@ import assert from "node:assert/strict";
 import {
   translateErrorKind,
   formatAuthorizationDetails,
+  formatConflictDetails,
   formatErrorBrief,
 } from "../dist/render-error.js";
 import { ApiError } from "../dist/api/newtcon/services.js";
+
+describe("formatConflictDetails() — referential-integrity 409 (#319)", () => {
+  test("lists referencing endpoints + force hint", () => {
+    assert.equal(
+      formatConflictDetails({ references: ["switch1:Ethernet0", "switch2:Ethernet0"], force_available: true }),
+      "still in use on switch1:Ethernet0, switch2:Ethernet0 — force delete to also remove them",
+    );
+  });
+  test("no force hint when force unavailable; truncates long lists", () => {
+    const refs = Array.from({ length: 8 }, (_, i) => `sw:Eth${i}`);
+    assert.equal(formatConflictDetails({ references: refs, force_available: false }),
+      "still in use on sw:Eth0, sw:Eth1, sw:Eth2, sw:Eth3, sw:Eth4, sw:Eth5, +2 more");
+  });
+  test("null when there are no structured references (plain drift)", () => {
+    assert.equal(formatConflictDetails({}), null);
+    assert.equal(formatConflictDetails({ references: [] }), null);
+  });
+});
+
+describe("formatErrorBrief() — drift_refusal with references", () => {
+  test("uses the conflict phrase, not the 'drift detected' label", () => {
+    const e = new ApiError(409, { error: { kind: "drift_refusal", message: "x: conflict", details: { references: ["switch1:Ethernet0"], force_available: true } } });
+    const s = formatErrorBrief(e);
+    assert.match(s, /still in use on switch1:Ethernet0/);
+    assert.doesNotMatch(s, /drift detected/);
+  });
+});
 
 describe("translateErrorKind()", () => {
   test("known kinds map to operator-readable text", () => {

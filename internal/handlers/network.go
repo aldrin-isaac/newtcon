@@ -192,7 +192,8 @@ func registerWriteRoutes(mux *http.ServeMux, c *newtronc.Client, cid func(ctx co
 		// the network base (newtron #287 + #319 scoped delete).
 		scope := r.URL.Query().Get("scope")
 		scopeInstance := r.URL.Query().Get("scope_instance")
-		if err := c.DeleteSpec(ctx, netID, entry.newtronKind, name, scope, scopeInstance); err != nil {
+		force := r.URL.Query().Get("force") == "true"
+		if err := c.DeleteSpec(ctx, netID, entry.newtronKind, name, scope, scopeInstance, force); err != nil {
 			writeUpstreamError(w, cid(ctx), err, "DELETE /api/networks/"+netID+"/"+slug+"/"+name, nil)
 			return
 		}

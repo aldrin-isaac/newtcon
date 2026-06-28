@@ -26,9 +26,11 @@ try {
   await page.evaluate((s) => document.querySelector(`[aria-label="Delete ${s}"]`)?.click(), SVC);
   await page.waitForSelector(".confirm-modal", { timeout: 5000 });
   const body = await page.evaluate(() => document.querySelector(".confirm-modal-body")?.textContent || "");
+  const confirmLabel = await page.evaluate(() => document.querySelector(".confirm-modal-btn--confirm")?.textContent || "");
   expect(/applied on 6 interfaces/.test(body), `warns with binding count (“${body.slice(0, 70)}…”)`);
-  expect(/orphaned/.test(body), "explains bindings will be orphaned");
+  expect(/also removes those \d+ binding/.test(body), "explains force delete cascades the bindings");
   expect(/switch\d:Ethernet\d/.test(body), "lists the bound endpoints");
+  expect(confirmLabel === "Force delete", `confirm offers Force delete (got "${confirmLabel}")`);
 
   // Cancel → service must remain.
   await page.evaluate(() => document.querySelector(".confirm-modal-btn--cancel")?.click());

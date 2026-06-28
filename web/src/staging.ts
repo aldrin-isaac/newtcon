@@ -164,7 +164,7 @@ export function enqueueSpecUpdate(kind: SpecKind, name: string, body: Record<str
   return pushMutation({ group: "mutation", method: "PUT", path: specPath(kind, name), effect: "update", kind, name, title: name, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
 
-export function enqueueSpecDelete(kind: SpecKind, name: string, scope?: string, scopeInstance?: string): Pending | null {
+export function enqueueSpecDelete(kind: SpecKind, name: string, scope?: string, scopeInstance?: string, force?: boolean): Pending | null {
   // A real override has a non-network scope; treat network/empty as the base.
   const scoped = !!scope && scope !== "network";
   const sc = scoped ? scope : undefined;
@@ -180,8 +180,13 @@ export function enqueueSpecDelete(kind: SpecKind, name: string, scope?: string, 
   const ui = findMutation(identity, "update");
   if (ui >= 0) queue.splice(ui, 1);
   // Scoped delete carries the scope on the wire as a query (?scope&scope_instance);
-  // the backend forwards it to newtron's delete-<kind> selector.
-  const q = sc ? `?scope=${enc(sc)}&scope_instance=${enc(si ?? "")}` : "";
+  // force=true cascades active bindings (newtron #319). The backend forwards
+  // both to newtron's delete-<kind>.
+  const params = [
+    ...(sc ? [`scope=${enc(sc)}`, `scope_instance=${enc(si ?? "")}`] : []),
+    ...(force ? ["force=true"] : []),
+  ];
+  const q = params.length ? `?${params.join("&")}` : "";
   // The × hasn't read the spec, so the inverse's body is backfilled at apply
   // (capturePreApplyBodies); the inverse carries the scope so undo recreates the
   // override on the same scope (applyOne merges it into the create body).
