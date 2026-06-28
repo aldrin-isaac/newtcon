@@ -130,10 +130,10 @@ import {
   applyFilter as applyIfaceFilter,
   type InterfaceRow,
   type LiveIface,
-  type IfaceBinding,
   type PlatformPort,
 } from "./device-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
+import { buildDeviceScaffold } from "./device-scaffold.js";
 import {
   deviceServiceUsage, countServiceInstances, shapeResourceRows, isHealthCheckList,
   VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS, LAG_COLUMNS, HEALTH_COLUMNS, BGP_NEIGHBOR_COLUMNS,
@@ -3087,48 +3087,50 @@ function renderRefChip(refKind: string, name: string): HTMLElement {
 // in place to full per-port detail + actions. `data` is the live interface
 // list already fetched by the tab loader; the rest is fetched here and joined
 // via buildDeviceInterfaceView (pure).
-function renderInterfaceTab(container: HTMLElement, device: string, data: unknown): void {
+function renderInterfaceTab(container: HTMLElement, device: string): void {
   container.textContent = "";
   const host = el("div", { className: "iface-view" });
   container.appendChild(host);
-  void buildAndRenderIfaceView(host, device, data);
+  void buildAndRenderIfaceView(host, device);
 }
 
-async function buildAndRenderIfaceView(host: HTMLElement, device: string, data: unknown): Promise<void> {
+async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promise<void> {
   host.textContent = "";
   host.appendChild(el("p", { className: "iface-view-loading" }, "Building interface view…"));
 
-  const live = Array.isArray(data) ? data as LiveIface[]
-    : data && typeof data === "object" ? [data as LiveIface] : [];
-
+  // Inventory-first: the table is driven by the platform inventory + the
+  // declared topology — both known from the spec, WITHOUT the node running. The
+  // live interface read is a best-effort oper-status overlay; its absence (an
+  // un-deployed/unreachable node) must NOT hide the ports or block staging
+  // services. So the live read can fail and we still render every platform port.
+  let liveUnavailable = false;
+  const [profile, topo, liveRaw] = await Promise.all([
+    fetchSpecDetail("profiles", device).catch(() => null),
+    fetchTopology().catch(() => null),
+    fetchNodeInterfaces(device).catch(() => { liveUnavailable = true; return null; }),
+  ]);
+  const platform = (profile as { platform?: string } | null)?.platform ?? "";
+  const devEntry = ((topo as { devices?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.devices ?? {})[device] ?? {};
+  const topoPorts = devEntry.ports ?? {};
+  const bindings = deriveDeviceBindings(devEntry);
+  const links = linksForDevice((topo as { links?: unknown } | null)?.links, device);
   let inventory: PlatformPort[] = [];
-  let topoPorts: Record<string, Record<string, unknown>> = {};
-  let bindings = new Map<string, IfaceBinding>();
-  let links = new Map<string, string>();
-  try {
-    const [profile, topo] = await Promise.all([
-      fetchSpecDetail("profiles", device).catch(() => null),
-      fetchTopology().catch(() => null),
-    ]);
-    const platform = (profile as { platform?: string } | null)?.platform ?? "";
-    const devEntry = ((topo as { devices?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.devices ?? {})[device] ?? {};
-    topoPorts = devEntry.ports ?? {};
-    bindings = deriveDeviceBindings(devEntry);
-    links = linksForDevice((topo as { links?: unknown } | null)?.links, device);
-    if (platform) {
-      const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
-      const ports = (plat as { ports?: PlatformPort[] } | null)?.ports;
-      if (Array.isArray(ports)) inventory = ports;
-    }
-  } catch { /* best-effort join — fall back to live-only below */ }
+  if (platform) {
+    const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
+    const ports = (plat as { ports?: PlatformPort[] } | null)?.ports;
+    if (Array.isArray(ports)) inventory = ports;
+  }
+  const live = Array.isArray(liveRaw) ? liveRaw as LiveIface[]
+    : liveRaw && typeof liveRaw === "object" ? [liveRaw as LiveIface] : [];
 
   const rows = buildDeviceInterfaceView({ inventory, topoPorts, live, bindings, links });
   if (rows.length === 0) {
     host.textContent = "";
-    host.appendChild(el("p", { className: "topology-empty" }, "No interfaces found for this device."));
+    host.appendChild(el("p", { className: "topology-empty" },
+      "No interfaces — this device's profile has no platform (no port inventory) and no configured ports."));
     return;
   }
-  renderIfaceTable(host, device, rows, () => { void buildAndRenderIfaceView(host, device, data); });
+  renderIfaceTable(host, device, rows, liveUnavailable, () => { void buildAndRenderIfaceView(host, device); });
 }
 
 const IFACE_FILTERS: { id: import("./device-interfaces.js").ViewFilter; label: string }[] = [
@@ -3138,13 +3140,21 @@ const IFACE_FILTERS: { id: import("./device-interfaces.js").ViewFilter; label: s
   { id: "up", label: "Up" },
 ];
 
-function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[], reload: () => void): void {
+function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[], liveUnavailable: boolean, reload: () => void): void {
   host.textContent = "";
   const counts = countView(rows);
 
   // Header: port-utilization summary.
   host.appendChild(el("p", { className: "iface-view-counts" },
     `${counts.total} ports · ${counts.configured} configured · ${counts.up} up · ${counts.available} available`));
+
+  // Live-state overlay unavailable (un-deployed / unreachable device): the table
+  // still shows every platform port from the inventory + the declared topology,
+  // so ports can be configured and services staged before the node comes up.
+  if (liveUnavailable) {
+    host.appendChild(el("p", { className: "iface-view-offline-note" },
+      "Device not reachable — showing declared topology + platform inventory (live status unavailable). You can still configure ports and stage services; they apply on deploy."));
+  }
 
   // Controls: segmented filter + text search.
   let filter: import("./device-interfaces.js").ViewFilter = "all";
@@ -4172,9 +4182,9 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
 
   switch (id) {
     case "interfaces":
-      fetchNodeInterfaces(device)
-        .then((data) => renderInterfaceTab(container, device, data))
-        .catch((err) => renderErrorInto(container, err));
+      // Inventory-first; the live read is best-effort inside the builder, so an
+      // un-deployed/unreachable node still shows its full port inventory.
+      renderInterfaceTab(container, device);
       break;
 
     case "state":
@@ -4822,17 +4832,28 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
   profileSelect.addEventListener("change", () => {
     addExistingBtn.disabled = profileSelect.value === "";
   });
-  addExistingBtn.addEventListener("click", () => {
+  addExistingBtn.addEventListener("click", () => { void (async () => {
     const name = profileSelect.value;
     if (!name) return;
     existingError.textContent = "";
-    enqueueTopologyAddDevice(name, { steps: [], ports: {} });
     addExistingBtn.disabled = true;
+    // Scaffold the setup-device step from the existing profile (platform→hwsku,
+    // underlay_asn) so the dropped-in node is service-ready like a new one (#283).
+    const prof = await fetchSpecDetail("profiles", name).catch(() => null);
+    const platform = (prof as { platform?: string } | null)?.platform ?? "";
+    const underlayAsn = (prof as { underlay_asn?: number } | null)?.underlay_asn;
+    let hwsku = "";
+    if (platform) {
+      const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
+      hwsku = (plat as { hwsku?: string } | null)?.hwsku ?? "";
+    }
+    const device = buildDeviceScaffold({ hostname: name, type: "LeafRouter", hwsku, ...(underlayAsn !== undefined ? { bgpAsn: underlayAsn } : {}) });
+    enqueueTopologyAddDevice(name, device as unknown as Record<string, unknown>);
     existing.appendChild(el("p", { className: "form-success" },
-      `Node "${name}" staged (topology entry). Click Save in the header to apply.`));
+      `Node "${name}" staged (topology entry + setup-device). Click Save in the header to apply.`));
     onSuccess();
     setTimeout(() => { closeDetail(); }, 1000);
-  });
+  })(); });
 
   // Populate with profiles that have no topology entry (and aren't already
   // queued for one). Best-effort: failure leaves the picker disabled and
@@ -4879,6 +4900,10 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     { name: "loopback_ip",  label: "Loopback IP",       type: "text",   required: true, placeholder: "e.g. 10.0.0.1" },
     { name: "zone",         label: "Zone",              type: "select", required: true, options: ["Loading…"] },
     { name: "platform",     label: "Platform",          type: "select",                  options: [""] },
+    { name: "role",         label: "Device role",       type: "select", required: true, options: ["LeafRouter", "SpineRouter"],
+      help: "SONiC device role; drives the setup-device bring-up step so the node can host services." },
+    { name: "underlay_asn", label: "Underlay BGP ASN",  type: "number", required: true, min: 1, max: 4294967295, placeholder: "e.g. 65001",
+      help: "BGP ASN for the underlay fabric; required by the device's setup-device/configure-bgp step." },
     { name: "ssh_user",     label: "SSH user (opt)",    type: "text",   placeholder: "e.g. admin" },
   ];
   const { form, getValues, validate } = buildFormFields(fields);
@@ -4917,7 +4942,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     } catch { /* same — platform is optional */ }
   })();
 
-  submitBtn.addEventListener("click", () => {
+  submitBtn.addEventListener("click", () => { void (async () => {
     if (!validate()) return;
     errorOut.textContent = "";
     try {
@@ -4927,33 +4952,51 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
       const loopbackIP  = String(values["loopback_ip"] ?? "").trim();
       const zone        = String(values["zone"] ?? "").trim();
       const platform    = String(values["platform"] ?? "").trim();
+      const role        = String(values["role"] ?? "LeafRouter").trim() || "LeafRouter";
       const sshUser     = String(values["ssh_user"] ?? "").trim();
+      const asnRaw      = values["underlay_asn"];
+      const underlayAsn = typeof asnRaw === "number" ? asnRaw : parseInt(String(asnRaw ?? ""), 10);
 
       if (!name || !mgmtIP || !loopbackIP || !zone) {
         errorOut.appendChild(el("p", { className: "panel-error" },
           "Node name, management IP, loopback IP, and zone are all required."));
         return;
       }
+      if (!Number.isFinite(underlayAsn) || underlayAsn <= 0) {
+        errorOut.appendChild(el("p", { className: "panel-error" }, "Underlay BGP ASN is required."));
+        return;
+      }
 
       const profileBody: Record<string, unknown> = {
+        name,
         mgmt_ip: mgmtIP,
         loopback_ip: loopbackIP,
         zone,
+        underlay_asn: underlayAsn,
       };
       if (platform) profileBody["platform"] = platform;
       if (sshUser) profileBody["ssh_user"] = sshUser;
+
+      // hwsku from the chosen platform's inventory → the setup-device step, so
+      // the new node is provisionable + service-ready out of the box (#283).
+      let hwsku = "";
+      if (platform) {
+        const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
+        hwsku = (plat as { hwsku?: string } | null)?.hwsku ?? "";
+      }
+      const device = buildDeviceScaffold({ hostname: name, type: role, hwsku, bgpAsn: underlayAsn });
 
       // Stage profile first (apply order runs spec creates before topology
       // adds, so the profile lands before the topology entry references it
       // by name).
       enqueueSpecCreate("profiles", name, profileBody);
-      enqueueTopologyAddDevice(name, { steps: [], ports: {} });
+      enqueueTopologyAddDevice(name, device as unknown as Record<string, unknown>);
 
       submitBtn.disabled = true;
       submitBtn.textContent = "Staged";
       content.insertBefore(
         el("p", { className: "form-success" },
-          `Node "${name}" staged (profile + topology). Click Save in the header to apply.`),
+          `Node "${name}" staged (profile + setup-device + topology). Click Save in the header to apply.`),
         submitBtn,
       );
       onSuccess();
@@ -4964,7 +5007,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     } catch (err) {
       errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
     }
-  });
+  })(); });
 }
 
 // openAddLinkDrawer opens the detail drawer with a form to add a link.

@@ -1168,6 +1168,11 @@
 /* ── Unified device interface table ───────────────────────────────── */
 .iface-view-loading { color: var(--color-text-secondary); font-size: var(--text-sm); padding: var(--space-sm); }
 .iface-view-counts { color: var(--color-text-secondary); font-size: var(--text-xs); margin: 0 0 var(--space-sm); }
+.iface-view-offline-note {
+  font-size: var(--text-2xs); color: var(--color-warning);
+  background: var(--color-warning-bg); border-radius: var(--radius-sm);
+  padding: var(--space-2xs) var(--space-sm); margin: 0 0 var(--space-sm);
+}
 .iface-view-controls { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm); }
 .iface-seg { display: inline-flex; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); overflow: hidden; }
 .iface-seg-btn {
