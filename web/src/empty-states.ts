@@ -73,7 +73,7 @@ const COPY: Partial<Record<SpecKind, EmptyStateCopy>> = {
   platforms: {
     title: "No platforms defined yet",
     body: "A platform tells newtron how to drive a hardware model — driver name, port-naming convention.",
-    hint: "Platforms are declared in newtron's network.json; not editable from newtcon yet.",
+    hint: "Platforms are declared in newtron's network.json; not editable from Newtron Console yet.",
   },
 };
 
@@ -109,5 +109,5 @@ export const TOPOLOGY_EMPTY: EmptyStateCopy = {
 export const PERMISSIONS_EMPTY: EmptyStateCopy = {
   title: "No authorization grants in this network yet",
   body: "Permissions shows newtron's live grant table: super-users with every permission, user groups for reusable membership, and per-permission grants scoping who can do what. Newtron sources this from network.json — edit there and POST /reload upstream to populate it.",
-  hint: "newtcon is read-only for the grant table today; the editor surface waits on newtron exposing a grant-write API.",
+  hint: "Newtron Console is read-only for the grant table today; the editor surface waits on newtron exposing a grant-write API.",
 };

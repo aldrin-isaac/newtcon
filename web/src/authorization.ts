@@ -92,7 +92,7 @@ function renderAuthorization(root: HTMLElement, data: AuthorizationDetail): void
   // outside this table. Surface that honestly.
   if (isAnonymous()) {
     root.appendChild(el("p", { className: "view-note view-note--info" },
-      "newtcon is running in anonymous mode — requests reach newtron without an operator identity, so the grants below apply only to signed-in operators in other sessions."));
+      "Newtron Console is running in anonymous mode — requests reach newtron without an operator identity, so the grants below apply only to signed-in operators in other sessions."));
   }
 
   root.appendChild(renderLookup(data));

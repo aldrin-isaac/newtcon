@@ -91,7 +91,7 @@ async function refreshConnectionStatus(): Promise<void> {
     label.textContent = url;
   } catch {
     dot.className = "status-dot status-dot--error";
-    label.textContent = "newtcon unreachable";
+    label.textContent = "Newtron Console unreachable";
   }
 }
 
