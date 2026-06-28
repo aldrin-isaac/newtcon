@@ -293,9 +293,12 @@ function renderEventRow(e: AuditEvent): HTMLElement {
   row.appendChild(td);
 
   // Click → expand a detail row beneath with the request body + the
-  // CONFIG_DB change-set (newtron #276), fetched lazily on first open.
+  // CONFIG_DB change-set (newtron #276), fetched lazily on first open and
+  // cached. The detail row (and its cell) is destroyed on collapse, so re-open
+  // builds a fresh cell — it must render from the cache, not just guard the
+  // fetch (else the second open is stuck on "Loading…").
   let detailRow: HTMLElement | null = null;
-  let loaded = false;
+  let detail: AuditEvent | null = null;
   row.addEventListener("click", () => {
     if (detailRow) {
       detailRow.remove();
@@ -306,15 +309,18 @@ function renderEventRow(e: AuditEvent): HTMLElement {
     detailRow = el("tr", { className: "audit-detail-row" });
     const cell = el("td", { className: "audit-detail-cell" });
     cell.colSpan = 5;
-    cell.appendChild(el("p", { className: "audit-detail-loading" }, "Loading…"));
     detailRow.appendChild(cell);
     row.after(detailRow);
     row.classList.add("audit-row--open");
-    if (loaded) return;
-    loaded = true;
+    if (detail) {
+      renderEventDetail(cell, detail);
+      return;
+    }
+    cell.appendChild(el("p", { className: "audit-detail-loading" }, "Loading…"));
     void fetchAuditEvent(e.id)
-      .then((full) => { cell.textContent = ""; renderEventDetail(cell, full); })
+      .then((full) => { detail = full; cell.textContent = ""; renderEventDetail(cell, full); })
       .catch((err) => {
+        // Leave detail null so the next open retries the fetch.
         cell.textContent = "";
         cell.appendChild(el("p", { className: "audit-detail-error" }, renderEventsError(err)));
       });
