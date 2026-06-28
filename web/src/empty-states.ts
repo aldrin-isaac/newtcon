@@ -61,14 +61,14 @@ const COPY: Partial<Record<SpecKind, EmptyStateCopy>> = {
     body: "A route policy is an ordered list of permit / deny statements that filter BGP routes by prefix list or community.",
     hint: "You'll usually create a prefix list first if you want to match on prefixes.",
   },
-  profiles: {
-    title: "No device profiles defined yet",
-    body: "A profile carries a device's identity — management IP, loopback IP, zone, underlay ASN, platform — and applies when newtron registers the device.",
-    hint: "Required before a device appears in Topology.",
+  nodes: {
+    title: "No nodes defined yet",
+    body: "A node carries its identity — management IP, loopback IP, zone, underlay ASN, platform — and applies when newtron registers it.",
+    hint: "Required before a node appears in Topology.",
   },
   zones: {
     title: "No zones defined yet",
-    body: "A zone is an operator-defined region (e.g. amer, emea, dc1) that device profiles reference for grouping and filtering.",
+    body: "A zone is an operator-defined region (e.g. amer, emea, dc1) that nodes reference for grouping and filtering.",
   },
   platforms: {
     title: "No platforms defined yet",
@@ -103,7 +103,7 @@ export function hasEmptyState(kind: SpecKind): boolean {
 export const TOPOLOGY_EMPTY: EmptyStateCopy = {
   title: "No devices in this network's topology yet",
   body: "Topology shows the devices newtron knows about and the links between them. Add one with Create node, or deploy the whole network as a VM lab with the toolbar above.",
-  hint: "Each device needs a matching profile in Specs → Inventory → Profiles before it can be registered.",
+  hint: "Each device needs a matching node in Specs → Inventory → Nodes before it can be registered.",
 };
 
 export const PERMISSIONS_EMPTY: EmptyStateCopy = {

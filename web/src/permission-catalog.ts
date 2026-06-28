@@ -94,7 +94,7 @@ const DESCRIPTIONS: Record<string, PermissionDescription> = {
   // Spec authoring
   "spec.author": {
     title: "Author specs",
-    body: "Create or modify spec files (services, profiles, zones, VPNs) in network.json.",
+    body: "Create or modify spec files (services, nodes, zones, VPNs) in network.json.",
   },
 
   // Services

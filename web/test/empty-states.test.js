@@ -17,7 +17,7 @@ import {
 const CURATED_KINDS = [
   "services", "ipvpns", "macvpns",
   "qos-policies", "filters", "prefix-lists", "route-policies",
-  "profiles", "zones", "platforms",
+  "nodes", "zones", "platforms",
 ];
 
 describe("emptyStateFor() — curated kinds", () => {
@@ -35,7 +35,7 @@ describe("emptyStateFor() — curated kinds", () => {
   });
 
   test("profiles hint flags topology dependency", () => {
-    const c = emptyStateFor("profiles");
+    const c = emptyStateFor("nodes");
     assert.ok(c.hint && /Topology|topology/.test(c.hint));
   });
 
@@ -92,8 +92,8 @@ describe("TOPOLOGY_EMPTY (slice #169.B)", () => {
     assert.ok(/deploy|lab/.test(haystack), "should mention Deploy / lab");
   });
 
-  test("hint surfaces the profile prerequisite", () => {
-    assert.ok(TOPOLOGY_EMPTY.hint && /profile/i.test(TOPOLOGY_EMPTY.hint));
+  test("hint surfaces the node prerequisite (Inventory → Nodes)", () => {
+    assert.ok(TOPOLOGY_EMPTY.hint && /Inventory → Nodes/.test(TOPOLOGY_EMPTY.hint));
   });
 
   test("does not use 'spec' as bare jargon (operator-language lens)", () => {

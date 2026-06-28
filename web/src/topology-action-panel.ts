@@ -477,7 +477,7 @@ async function loadPortConfig(device: string, body: HTMLElement, deps: PanelDeps
   let currentDevice: Record<string, unknown>;
   try {
     const [profile, topo] = await Promise.all([
-      fetchSpecDetail("profiles", device),
+      fetchSpecDetail("nodes", device),
       fetchTopology(),
     ]);
     const platform = (profile as { platform?: string } | null)?.platform ?? "";
