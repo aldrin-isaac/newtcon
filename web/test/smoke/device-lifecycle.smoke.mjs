@@ -1,9 +1,9 @@
 // Headless smoke for phase 3 of the unified-substrate direction:
 //   - Lifecycle section in the device-inspector drawer
-//   - "Tear down" toolbar button in Lab view (mirror of "Bring up")
+//   - "Destroy" toolbar button in Lab view (mirror of "Deploy")
 //
 // Asserts structural presence + correct state-based content.  The full
-// transition (Stop / Start / Tear-down → device boots back up) depends on
+// transition (Stop / Start / Destroy → device boots back up) depends on
 // newtlab actually completing a deploy and isn't reliably timed in a smoke;
 // the wire-level interactions are what we pin here.
 
@@ -40,23 +40,23 @@ try {
   });
   await new Promise((r) => setTimeout(r, 300));
 
-  // ── 1. Tear-down toolbar button is present in Lab view ───────────────────
-  const tearDownText = await page.evaluate(() => {
+  // ── 1. Destroy toolbar button is present in Lab view ───────────────────
+  const destroyText = await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
-      .find((el) => el.textContent.trim() === "Tear down");
+      .find((el) => el.textContent.trim() === "Destroy");
     return b ? { text: b.textContent.trim(), classes: b.className } : null;
   });
-  expect(tearDownText !== null, `Lab view toolbar has "Tear down" button`);
+  expect(destroyText !== null, `Lab view toolbar has "Destroy" button`);
 
-  // ── 2. Tear-down click mounts the inline confirm modal ──────────────────
+  // ── 2. Destroy click mounts the inline confirm modal ──────────────────
   await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll(".topology-toolbar-btn"))
-      .find((el) => el.textContent.trim() === "Tear down");
+      .find((el) => el.textContent.trim() === "Destroy");
     b?.click();
   });
   await new Promise((r) => setTimeout(r, 200));
   const confirmModal = await page.$(".confirm-overlay");
-  expect(!!confirmModal, "tear-down click mounts the inline confirm modal");
+  expect(!!confirmModal, "destroy click mounts the inline confirm modal");
   // Cancel so the lab is not actually destroyed by the smoke run.
   await page.evaluate(() => {
     const cancel = document.querySelector(".confirm-modal-btn--cancel");

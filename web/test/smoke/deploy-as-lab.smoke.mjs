@@ -1,4 +1,4 @@
-// Headless smoke for the Topology-tab "Bring up as lab" button.
+// Headless smoke for the Topology-tab "Deploy as lab" button.
 // Verifies:
 //   1. Button renders in the topology toolbar with the right label
 //   2. Click fires the confirm dialog
@@ -57,16 +57,16 @@ try {
   // 1. Button is present.
   const btnText = await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll(".topology-toolbar-btn"));
-    const b = btns.find((el) => el.textContent.trim() === "Bring up");
+    const b = btns.find((el) => el.textContent.trim() === "Deploy");
     return b ? b.textContent.trim() : null;
   });
-  expect(btnText === "Bring up", `toolbar button labeled "${btnText}"`);
+  expect(btnText === "Deploy", `toolbar button labeled "${btnText}"`);
 
   // 2-3. Click the button → inline confirm modal mounts → click Confirm
   // → deploy modal opens.
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll(".topology-toolbar-btn"));
-    btns.find((el) => el.textContent.trim() === "Bring up")?.click();
+    btns.find((el) => el.textContent.trim() === "Deploy")?.click();
   });
   await new Promise((r) => setTimeout(r, 250));
   await page.evaluate(() => {
