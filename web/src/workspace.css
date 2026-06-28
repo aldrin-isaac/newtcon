@@ -807,6 +807,9 @@
   color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1;
 }
 .panel-override-toggle:hover { color: var(--color-text-secondary); }
+/* Invisible same-width stand-in so override-less base rows align with carried ones. */
+.panel-override-toggle--placeholder { visibility: hidden; cursor: default; pointer-events: none; }
+.panel-override-toggle--placeholder:hover { color: var(--color-text-muted); }
 .panel-list-row--override {
   padding-left: var(--space-2xl);
   background: var(--color-surface-sunken);
