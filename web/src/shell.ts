@@ -322,6 +322,22 @@ function setupPendingBar(): void {
   const saveBtn = document.getElementById("pending-bar-save");
   if (!bar || !list || !countEl || !toggle || !discardBtn || !saveBtn) return;
 
+  // Keyboard apply (operators are keyboard-first): ⌘↵ / Ctrl+↵ runs Save when
+  // there are staged changes. Skipped while the palette or a form field is
+  // focused, or the apply-preview is already open, to avoid surprise.
+  const modLabel = (navigator.platform || "").toLowerCase().includes("mac") ? "⌘↵" : "Ctrl+↵";
+  saveBtn.setAttribute("title", `Apply staged changes (${modLabel})`);
+  document.addEventListener("keydown", (e) => {
+    if (!((e.metaKey || e.ctrlKey) && e.key === "Enter")) return;
+    if (paletteOpen) return;
+    const t = e.target as HTMLElement | null;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (pendingCount() === 0 || saveBtn.hasAttribute("disabled")) return;
+    if (document.querySelector(".apply-preview-overlay")) return;
+    e.preventDefault();
+    saveBtn.click();
+  });
+
   const render = (): void => {
     const n = pendingCount();
     bar.hidden = n === 0;
