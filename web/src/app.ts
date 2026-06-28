@@ -3723,7 +3723,7 @@ function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unk
 //   - Lab VM running   → Stop button + SSH/console snippets
 //   - Lab VM stopped   → Start button
 //   - Lab VM booting   → state pill only (transition in progress)
-//   - Not realized     → guidance text pointing at "Bring up as lab"
+//   - Not realized     → guidance text pointing at "Deploy as lab"
 //   - Reachable via probe (not lab) → state pill only (start/stop n/a)
 //
 // Phase 4 may move this into a standalone module if the lifecycle surface
@@ -3793,7 +3793,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
 
   if (status.state === "unrealized") {
     body.appendChild(el("p", { className: "lifecycle-hint" },
-      `No substrate is realizing ${device} yet. Switch to the Lab view and click "Bring up" to deploy this network as VMs.`));
+      `No substrate is realizing ${device} yet. Switch to the Lab view and click "Deploy" to deploy this network as VMs.`));
     return;
   }
 
@@ -5434,7 +5434,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Toolbar — buttons gate by view mode (slice #210 polish): Spec
     // view is the only place that authors the topology spec (create
     // node / add link); Lab view exposes lab substrate lifecycle
-    // (bring up / provision / tear down) because those operate on the
+    // (deploy / provision / destroy) because those operate on the
     // lab, not the spec; Physical view is pure observation (no
     // mutation, no lifecycle).
     // Toolbar is created here but appended below the view-mode chip
@@ -5459,21 +5459,21 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         });
         toolbar.appendChild(addLinkBtn);
       } else if (viewMode === "spec-lab") {
-        // Lab substrate lifecycle: Bring up → Provision → Tear down.
-        // Blue (spec-only) devices become green via Bring up + Provision.
+        // Lab substrate lifecycle: Deploy → Provision → Destroy (newtlab's own
+        // verbs). Blue (spec-only) devices become green via Deploy + Provision.
         // Convention: lab name == active network ID (newtron#116 / PR #121).
-        const bringUpBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Bring up");
-        bringUpBtn.addEventListener("click", async () => {
+        const deployBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Deploy");
+        deployBtn.addEventListener("click", async () => {
           const network = activeNetwork();
           const ok = await confirmInline({
-            title: `Bring up "${network}" as a lab?`,
+            title: `Deploy "${network}" as a lab?`,
             body: "VMs will boot for each device in the topology.",
-            confirmLabel: "Bring up",
+            confirmLabel: "Deploy",
           });
           if (!ok) return;
           openDeployModal(network);
         });
-        toolbar.appendChild(bringUpBtn);
+        toolbar.appendChild(deployBtn);
 
         const provisionBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Provision");
         provisionBtn.addEventListener("click", async () => {
@@ -5500,34 +5500,34 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         });
         toolbar.appendChild(provisionBtn);
 
-        const tearDownBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Tear down");
-        tearDownBtn.addEventListener("click", async () => {
+        const destroyBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Destroy");
+        destroyBtn.addEventListener("click", async () => {
           const network = activeNetwork();
           const ok = await confirmInline({
-            title: `Tear down lab "${network}"?`,
+            title: `Destroy lab "${network}"?`,
             body: "All VMs and their state will be destroyed. The topology spec stays intact.",
             danger: true,
-            confirmLabel: "Tear down",
+            confirmLabel: "Destroy",
           });
           if (!ok) return;
-          tearDownBtn.setAttribute("disabled", "");
-          tearDownBtn.textContent = "Tearing down…";
+          destroyBtn.setAttribute("disabled", "");
+          destroyBtn.textContent = "Destroying…";
           postLabDestroy(network)
             .then(() => {
-              tearDownBtn.removeAttribute("disabled");
-              tearDownBtn.textContent = "Tear down";
+              destroyBtn.removeAttribute("disabled");
+              destroyBtn.textContent = "Destroy";
               mountTopologyTab(root);
             })
             .catch((err) => {
-              tearDownBtn.removeAttribute("disabled");
-              tearDownBtn.textContent = "Tear down";
+              destroyBtn.removeAttribute("disabled");
+              destroyBtn.textContent = "Destroy";
               const msg = err instanceof Error ? err.message : String(err);
-              showToast({ kind: "error", title: "Tear down failed", body: msg });
+              showToast({ kind: "error", title: "Destroy failed", body: msg });
             });
         });
-        toolbar.appendChild(tearDownBtn);
+        toolbar.appendChild(destroyBtn);
       } else {
-        // Physical substrate — only Provision (no bring-up / tear-down
+        // Physical substrate — only Provision (no deploy / destroy
         // because physical hardware isn't lifecycle-managed by newtcon).
         // Provision drives spec-only (blue) devices toward actuated-ok
         // (green) by pushing the spec projection at the substrate.

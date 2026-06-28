@@ -102,7 +102,7 @@ export function hasEmptyState(kind: SpecKind): boolean {
  */
 export const TOPOLOGY_EMPTY: EmptyStateCopy = {
   title: "No devices in this network's topology yet",
-  body: "Topology shows the devices newtron knows about and the links between them. Add one with Create node, or bring up the whole network as a VM lab with the toolbar above.",
+  body: "Topology shows the devices newtron knows about and the links between them. Add one with Create node, or deploy the whole network as a VM lab with the toolbar above.",
   hint: "Each device needs a matching profile in Specs → Inventory → Profiles before it can be registered.",
 };
 

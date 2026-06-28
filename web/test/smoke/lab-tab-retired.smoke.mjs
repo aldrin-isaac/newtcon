@@ -1,7 +1,7 @@
 // Headless smoke for phase 4 of the unified-substrate direction:
 //   - Lab tab retired (no #tab-lab / #panel-lab in DOM)
 //   - Provision button now lives in the Topology toolbar (alongside
-//     Bring up as lab + Tear down lab)
+//     Deploy as lab + Destroy lab)
 //   - Sidebar nav shrinks to Specs + Topology
 
 import puppeteer from "puppeteer-core";
@@ -53,9 +53,9 @@ try {
   const toolbarBtns = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".topology-toolbar-btn"))
       .map((b) => b.textContent?.trim()));
-  expect(toolbarBtns.includes("Bring up"),  `toolbar has Bring up: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Deploy"),  `toolbar has Deploy: ${JSON.stringify(toolbarBtns)}`);
   expect(toolbarBtns.includes("Provision"), `toolbar has Provision: ${JSON.stringify(toolbarBtns)}`);
-  expect(toolbarBtns.includes("Tear down"), `toolbar has Tear down: ${JSON.stringify(toolbarBtns)}`);
+  expect(toolbarBtns.includes("Destroy"), `toolbar has Destroy: ${JSON.stringify(toolbarBtns)}`);
 
   // ── 4. Provision click mounts inline confirm + POST on accept ───────────
   let provisionPostSeen = false;

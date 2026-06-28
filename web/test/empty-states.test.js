@@ -86,10 +86,10 @@ describe("TOPOLOGY_EMPTY (slice #169.B)", () => {
     assert.ok(TOPOLOGY_EMPTY.body && TOPOLOGY_EMPTY.body.length > 0);
   });
 
-  test("body mentions the toolbar's actions (Create node, Bring up)", () => {
+  test("body mentions the toolbar's actions (Create node, Deploy)", () => {
     const haystack = TOPOLOGY_EMPTY.body.toLowerCase();
     assert.ok(/create node/.test(haystack), "should mention Create node");
-    assert.ok(/bring up|lab/.test(haystack), "should mention Bring up / lab");
+    assert.ok(/deploy|lab/.test(haystack), "should mention Deploy / lab");
   });
 
   test("hint surfaces the profile prerequisite", () => {
