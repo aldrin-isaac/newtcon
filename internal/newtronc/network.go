@@ -214,7 +214,7 @@ func (c *Client) CreateSpec(ctx context.Context, network, kind string, body any)
 // A non-empty scope (+ scopeInstance) targets a zone/node override rather than
 // the network base — newtron's delete-<kind> takes the scope selector in the
 // body, mirroring create-<kind>.
-func (c *Client) DeleteSpec(ctx context.Context, network, kind, name, scope, scopeInstance string) error {
+func (c *Client) DeleteSpec(ctx context.Context, network, kind, name, scope, scopeInstance string, force bool) error {
 	body := map[string]string{"name": name}
 	if scope != "" {
 		body["scope"] = scope
@@ -222,7 +222,12 @@ func (c *Client) DeleteSpec(ctx context.Context, network, kind, name, scope, sco
 	if scopeInstance != "" {
 		body["scope_instance"] = scopeInstance
 	}
-	_, err := c.networkPost(ctx, network, "delete-"+kind, body)
+	// force cascades active topology bindings (newtron #319) — passed as a query.
+	verb := "delete-" + kind
+	if force {
+		verb += "?force=true"
+	}
+	_, err := c.networkPost(ctx, network, verb, body)
 	return err
 }
 

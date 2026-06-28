@@ -1205,27 +1205,31 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
             delBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               void (async () => {
-                // Defense-in-depth: deleting a service that is still applied
-                // orphans its topology bindings — newtron does not block this
-                // (the delete-guard gap). Warn with the binding list before
-                // staging the delete. (spec→spec refs are guarded engine-side,
-                // so only services — applied via apply-service steps — need it.)
+                // A service that's still applied can't be plain-deleted —
+                // newtron's #319 guard 409s. Detect the bindings client-side
+                // (instant feedback), and on confirm stage a FORCE delete so
+                // newtron cascades the binding steps. (spec→spec refs are
+                // guarded engine-side; only services — applied via apply-service
+                // steps — surface bindings here.)
+                let force = false;
                 if (panel.kind === "services") {
                   const topo = await fetchTopology().catch(() => null);
                   const bindings = deriveServiceBindings(topo, r.name);
                   if (bindings.length > 0) {
                     const where = bindings.slice(0, 6).map((b) => `${b.device}:${b.iface}`).join(", ");
                     const more = bindings.length > 6 ? `, +${bindings.length - 6} more` : "";
+                    const n = bindings.length, s = n === 1 ? "" : "s";
                     const ok = await confirmInline({
-                      title: `Delete service "${r.name}"?`,
-                      body: `It's applied on ${bindings.length} interface${bindings.length === 1 ? "" : "s"} (${where}${more}). Deleting it leaves those bindings orphaned — remove them first, or delete anyway.`,
+                      title: `Force-delete service "${r.name}"?`,
+                      body: `It's applied on ${n} interface${s} (${where}${more}). newtron won't delete an applied service; "Force delete" also removes those ${n} binding${s} from the topology. (On a deployed device, un-apply there first to avoid CONFIG_DB drift.)`,
                       danger: true,
-                      confirmLabel: "Delete anyway",
+                      confirmLabel: "Force delete",
                     });
                     if (!ok) return;
+                    force = true;
                   }
                 }
-                enqueueSpecDelete(panel.kind as StagingSpecKind, r.name);
+                enqueueSpecDelete(panel.kind as StagingSpecKind, r.name, undefined, undefined, force);
                 refreshPanel(panel, container);
               })();
             });

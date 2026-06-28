@@ -60,6 +60,32 @@ func (e *ConflictError) Error() string {
 	return fmt.Sprintf("newtron-server conflict (%d): %s", e.StatusCode, string(e.Body))
 }
 
+// ConflictDetail is the structured payload newtron returns on a referential-
+// integrity 409 (newtron #319): the referencing endpoints ("device:interface")
+// and whether ?force=true can cascade the delete.
+type ConflictDetail struct {
+	Resource       string   `json:"resource"`
+	Name           string   `json:"name"`
+	References     []string `json:"references"`
+	ForceAvailable bool     `json:"force_available"`
+}
+
+// Detail parses newtron's ConflictError envelope ({"data": {...}}). Returns
+// (zero, false) when the body isn't that shape (e.g. a plain drift conflict).
+func (e *ConflictError) Detail() (ConflictDetail, bool) {
+	var env struct {
+		Data ConflictDetail `json:"data"`
+	}
+	if err := json.Unmarshal(e.Body, &env); err != nil {
+		return ConflictDetail{}, false
+	}
+	d := env.Data
+	if d.Resource == "" && d.Name == "" && len(d.References) == 0 && !d.ForceAvailable {
+		return ConflictDetail{}, false
+	}
+	return d, true
+}
+
 // NotFoundError is returned when newtron-server returns a 404.
 // It maps to types.KindPreconditionFailure.
 type NotFoundError struct {

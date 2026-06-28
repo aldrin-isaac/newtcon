@@ -56,6 +56,24 @@ export function formatAuthorizationDetails(details: Record<string, unknown>): st
 }
 
 /**
+ * formatConflictDetails renders newtron's referential-integrity 409 (#319) from
+ * its structured fields — the referencing endpoints + whether a force delete can
+ * cascade — into operator language, instead of leaking the engine's raw
+ * "… pass force=true to cascade" message. Returns null when there are no
+ * structured references (a plain device-drift conflict falls back).
+ */
+export function formatConflictDetails(details: Record<string, unknown>): string | null {
+  const refs = Array.isArray(details?.references)
+    ? details.references.filter((r): r is string => typeof r === "string")
+    : [];
+  if (refs.length === 0) return null;
+  const shown = refs.slice(0, 6).join(", ");
+  const more = refs.length > 6 ? `, +${refs.length - 6} more` : "";
+  const forceable = details?.force_available === true ? " — force delete to also remove them" : "";
+  return `still in use on ${shown}${more}${forceable}`;
+}
+
+/**
  * formatErrorBrief returns a short single-line operator-readable string for
  * any error — suitable for toasts, inline panel notices, the staging-apply
  * results dialog. The long-form panel rendering (with details disclosure)
@@ -78,6 +96,12 @@ export function formatErrorBrief(err: unknown): string {
     if (err.kind === "authorization_failure") {
       const structured = formatAuthorizationDetails(err.details);
       if (structured) return `${kindLabel}: ${structured}`;
+    }
+    if (err.kind === "drift_refusal") {
+      // Referential-integrity 409 (#319): a complete operator phrase from the
+      // structured references, not the "drift detected" label nor engine jargon.
+      const conflict = formatConflictDetails(err.details);
+      if (conflict) return conflict;
     }
     // Prefer newtron's specific reason (in details.underlying_error_message)
     // over the generic envelope message ("<verb> <path>: <kind phrase>").

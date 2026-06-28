@@ -79,6 +79,21 @@ func writeUpstreamErrorWithStatus(w http.ResponseWriter, corrID string, err erro
 			fmt.Sprintf("%s: not found", endpoint), details)
 	case *newtronc.ConflictError:
 		setIfAbsent(details, "underlying_error_message", string(e.Body))
+		// Referential-integrity guard (newtron #319): surface the referencing
+		// endpoints + whether ?force=true can cascade, so the operator sees
+		// what's applied and can force the delete.
+		if d, ok := e.Detail(); ok {
+			if d.Resource != "" {
+				setIfAbsent(details, "resource", d.Resource)
+			}
+			if d.Name != "" {
+				setIfAbsent(details, "name", d.Name)
+			}
+			if len(d.References) > 0 {
+				setIfAbsent(details, "references", d.References)
+			}
+			setIfAbsent(details, "force_available", d.ForceAvailable)
+		}
 		types.WriteError(w, http.StatusConflict, types.KindDriftRefusal,
 			fmt.Sprintf("%s: conflict", endpoint), details)
 	case *newtronc.AuthorizationError:
