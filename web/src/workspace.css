@@ -800,6 +800,13 @@
   text-transform: uppercase; letter-spacing: var(--tracking-caps);
   color: var(--color-text-muted);
 }
+.panel-override-count--toggle { cursor: pointer; }
+.panel-override-toggle {
+  flex: none; appearance: none; border: none; background: none; cursor: pointer;
+  padding: 0 var(--space-2xs); margin-right: var(--space-2xs);
+  color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1;
+}
+.panel-override-toggle:hover { color: var(--color-text-secondary); }
 .panel-list-row--override {
   padding-left: var(--space-2xl);
   background: var(--color-surface-sunken);
