@@ -11,7 +11,7 @@ import {
 } from "../dist/topology-undo-capture.js";
 
 const TOPO = {
-  devices: {
+  nodes: {
     "r1": { ports: { eth0: {} }, steps: [{ type: "switch" }] },
     "r2": { ports: { eth0: {}, eth1: {} } },
     "host-a": {},
@@ -32,8 +32,8 @@ describe("extractRemoveDeviceBody()", () => {
     assert.equal(extractRemoveDeviceBody(TOPO, "nope"), null);
   });
 
-  test("returns null on missing devices key", () => {
-    assert.equal(extractRemoveDeviceBody({ devices: undefined }, "r1"), null);
+  test("returns null on missing nodes key", () => {
+    assert.equal(extractRemoveDeviceBody({ nodes: undefined }, "r1"), null);
     assert.equal(extractRemoveDeviceBody({}, "r1"), null);
   });
 
@@ -83,7 +83,7 @@ describe("captureTopologyBodies()", () => {
     ];
     const map = captureTopologyBodies(TOPO, queue);
     assert.equal(map.size, 2);
-    assert.deepEqual(map.get("1"), TOPO.devices["r1"]);
+    assert.deepEqual(map.get("1"), TOPO.nodes["r1"]);
     assert.deepEqual(map.get("2"), { a: "r2:eth1", z: "host-a:eth0" });
   });
 

@@ -554,7 +554,7 @@ async function buildFieldRow(
       break;
     }
     case "map": {
-      // Map fields (e.g. DeviceProfile / ZoneSpec scoped overrides:
+      // Map fields (e.g. NodeSpec / ZoneSpec scoped overrides:
       // `filters: map of FilterSpec`). Authoring maps requires a
       // dedicated key-and-value UI the renderer doesn't have yet.
       // Surface the limitation: name what newtron expects, what
@@ -650,7 +650,7 @@ async function loadScopeChoices(): Promise<{ zones: string[]; nodes: string[] }>
     : [];
   let nodes: string[] = [];
   if (topoRes.status === "fulfilled") {
-    const devices = (topoRes.value as { devices?: unknown } | null)?.devices;
+    const devices = (topoRes.value as { nodes?: unknown } | null)?.nodes;
     if (devices && typeof devices === "object") nodes = Object.keys(devices as object);
   }
   return { zones, nodes };

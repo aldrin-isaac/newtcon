@@ -93,8 +93,9 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 	// spec instance name. Returns the full newtron payload verbatim.
 	//
 	// upstreamKind is the URL segment newtron itself serves under — usually
-	// equal to url, but `profiles` maps to newtron's `nodes/` after
-	// newtron PR #206 (2026-06-17). Newtcon-internal callers still address
+	// equal to url, but `profiles` maps to newtron's `nodes/` (reads since
+	// newtron PR #206; write verbs create-/update-/delete-node since #320's
+	// DeviceProfile→NodeSpec rename). Newtcon-internal callers still address
 	// these as "profiles" so the SpecKind enum + frontend tabs don't shift.
 	for _, kind := range []struct{ url, newtronKind, upstreamKind string }{
 		{"services", "service", "services"},
@@ -104,7 +105,7 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 		{"filters", "filter", "filters"},
 		{"prefix-lists", "prefix-list", "prefix-lists"},
 		{"route-policies", "route-policy", "route-policies"},
-		{"profiles", "profile", "nodes"},
+		{"profiles", "node", "nodes"},
 		{"zones", "zone", "zones"},
 		{"platforms", "platform", "platforms"},
 	} {

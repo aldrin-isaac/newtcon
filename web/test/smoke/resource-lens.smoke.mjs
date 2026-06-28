@@ -16,7 +16,7 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 
 async function getDevice() {
   const t = await (await fetch(api("topology"))).json();
-  return (t.devices ?? {})[DEV] ?? {};
+  return (t.nodes ?? {})[DEV] ?? {};
 }
 async function putDevice(dev) {
   await fetch(api(`topology/nodes/${DEV}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dev) });

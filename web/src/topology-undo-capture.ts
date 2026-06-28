@@ -11,7 +11,7 @@ import type { Pending } from "./staging.js";
 
 /** Newtron's topology wire shape (subset newtcon cares about). */
 export interface RawTopology {
-  devices?: Record<string, Record<string, unknown>>;
+  nodes?: Record<string, Record<string, unknown>>;
   links?: Array<{ a?: string; z?: string }>;
   [k: string]: unknown;
 }
@@ -25,7 +25,7 @@ export function extractRemoveDeviceBody(
   topology: RawTopology,
   name: string,
 ): Record<string, unknown> | null {
-  const devices = topology.devices ?? {};
+  const devices = topology.nodes ?? {};
   const body = devices[name];
   if (!body || typeof body !== "object") return null;
   return body;
