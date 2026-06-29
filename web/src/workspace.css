@@ -931,6 +931,11 @@
   color: var(--color-text-muted);
   margin: 0 0 var(--space-2xs);
 }
+.drawer-pending-note {
+  font-size: var(--text-2xs); color: var(--color-warning);
+  background: var(--color-warning-bg); border-radius: var(--radius-sm);
+  padding: var(--space-2xs) var(--space-sm); margin: 0 0 var(--space-sm);
+}
 .drawer-name {
   font-family: var(--font-mono);
   font-size: var(--text-lg);

@@ -2042,8 +2042,19 @@ async function openDetail(kind: SpecKind, kindTitle: string, name: string): Prom
   content.appendChild(loading);
 
   try {
-    const detail = await fetchSpecDetail(kind, name);
+    // A not-yet-applied (pending-create) spec has no server detail —
+    // fetchSpecDetail would 404. Fall back to the staged create body so the
+    // operator can author sub-rules (QoS queues, filter / route-policy rules)
+    // BEFORE the first Save: they stage as sub-creates and apply right after the
+    // parent in the same Save (no more "apply the parent first, then add rules").
+    const pendingCreate = pendingSpecCreateItems(kind as StagingSpecKind).find((p) => p.name === name);
+    const detail = pendingCreate ? pendingCreate.body : await fetchSpecDetail(kind, name);
     content.removeChild(loading);
+
+    if (pendingCreate) {
+      content.appendChild(el("p", { className: "drawer-pending-note" },
+        "Not applied yet — fields and sub-rules you add here are staged and apply together on Save."));
+    }
 
     // Edit-mode controls — Edit button if the kind has any top-level field
     // beyond the identifier. Kinds whose schema is just `name` (zones,
