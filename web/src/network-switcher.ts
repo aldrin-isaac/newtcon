@@ -50,7 +50,10 @@ async function fetchNetworks(): Promise<NetworkInfo[]> {
     const r = await fetch("/api/networks", { cache: "no-store" });
     if (!r.ok) return [];
     const body = (await r.json()) as { networks?: NetworkInfo[] };
-    return body.networks ?? [];
+    // newtron returns networks in Go map-iteration order (non-deterministic).
+    // Sort by id for a stable, predictable dropdown — matching how every other
+    // list in the app sorts at the presentation layer (localeCompare).
+    return (body.networks ?? []).sort((a, b) => a.id.localeCompare(b.id));
   } catch {
     return [];
   }
