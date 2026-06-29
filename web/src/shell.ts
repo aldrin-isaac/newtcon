@@ -16,7 +16,7 @@ import { previewQueue, driftVerdict, shouldDriftCheck, type ApplyPreview, type P
 import { apiPath } from "./api-path.js";
 import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
-import type { Pending } from "./staging.js";
+import type { Pending, ApplyResult } from "./staging.js";
 import { fetchSpecDetail } from "./api/newtcon/network.js";
 import { fetchTopology } from "./api/newtcon/nodes.js";
 import { captureTopologyBodies, type RawTopology } from "./topology-undo-capture.js";
@@ -423,12 +423,10 @@ function setupPendingBar(): void {
     appendEntry(network, entry);
 
     if (r.failed.length > 0) {
-      const lines = r.failed.map((f) => `${describePending(f.pending)}: ${f.error}`).join("\n");
-      showToast({
-        kind: "error",
-        title: `Applied ${r.applied.length}, failed ${r.failed.length}`,
-        body: lines,
-      });
+      // Mixed/failed apply: a queue-shaped results modal — what went through vs.
+      // what failed (and stays on the queue to fix + retry). Clearer than a
+      // text toast when several items applied and one didn't.
+      mountApplyResultModal(r);
     } else if (r.applied.length > 0) {
       showToast({
         kind: "success",
@@ -637,6 +635,19 @@ function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
 
   row.appendChild(main);
 
+  // The endpoint + scope this change targets — the operator's "where does this
+  // actually go" context, alongside the body.
+  if (item.path) {
+    const url = document.createElement("div");
+    url.className = "apply-preview-url";
+    const m = document.createElement("span");
+    m.className = "apply-preview-method apply-preview-method--" + item.method.toLowerCase();
+    m.textContent = item.method;
+    url.appendChild(m);
+    url.appendChild(document.createTextNode(" " + item.path));
+    row.appendChild(url);
+  }
+
   if (item.body && Object.keys(item.body).length > 0) {
     const details = document.createElement("details");
     details.className = "apply-preview-details";
@@ -651,6 +662,76 @@ function renderApplyPreviewItem(item: PendingPreview): HTMLElement {
     row.appendChild(details);
   }
   return row;
+}
+
+// mountApplyResultModal — a queue-shaped results popup shown after an Apply that
+// had at least one failure: what went through (drained) vs. what failed (and
+// stays on the queue to fix + retry). Reuses the apply-preview item shape.
+function mountApplyResultModal(result: ApplyResult): void {
+  const overlay = document.createElement("div");
+  overlay.className = "apply-preview-overlay";
+  const card = document.createElement("div");
+  card.className = "apply-preview-card";
+  overlay.appendChild(card);
+
+  const head = document.createElement("div");
+  head.className = "apply-preview-head";
+  const title = document.createElement("h2");
+  title.className = "apply-preview-title";
+  title.textContent = `Applied ${result.applied.length} · Failed ${result.failed.length}`;
+  head.appendChild(title);
+  const subtitle = document.createElement("p");
+  subtitle.className = "apply-preview-subtitle";
+  subtitle.textContent = "Successful changes are applied and cleared. Failed changes stayed on the queue — fix and Save again.";
+  head.appendChild(subtitle);
+  card.appendChild(head);
+
+  const section = (label: string, cls: string, items: HTMLElement[]): void => {
+    if (items.length === 0) return;
+    const h = document.createElement("h3");
+    h.className = "apply-result-section " + cls;
+    h.textContent = label;
+    card.appendChild(h);
+    const list = document.createElement("ul");
+    list.className = "apply-preview-list";
+    for (const it of items) list.appendChild(it);
+    card.appendChild(list);
+  };
+
+  if (result.applied.length > 0) {
+    section(`Applied (${result.applied.length})`, "apply-result-section--ok",
+      previewQueue(result.applied).items.map(renderApplyPreviewItem));
+  }
+  if (result.failed.length > 0) {
+    const errById = new Map(result.failed.map((f) => [f.pending.id, f.error]));
+    const failItems = previewQueue(result.failed.map((f) => f.pending)).items.map((item) => {
+      const row = renderApplyPreviewItem(item);
+      row.classList.add("apply-result-item--failed");
+      const err = document.createElement("p");
+      err.className = "apply-result-error";
+      err.textContent = errById.get(item.id) ?? "failed";
+      row.appendChild(err);
+      return row;
+    });
+    section(`Failed — still on the queue (${result.failed.length})`, "apply-result-section--fail", failItems);
+  }
+
+  const buttons = document.createElement("div");
+  buttons.className = "apply-preview-actions";
+  const close = document.createElement("button");
+  close.className = "btn btn-primary";
+  close.textContent = "Close";
+  const dismiss = (): void => overlay.remove();
+  close.addEventListener("click", dismiss);
+  buttons.appendChild(close);
+  card.appendChild(buttons);
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) dismiss(); });
+  document.addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape") { dismiss(); document.removeEventListener("keydown", esc); }
+  });
+
+  document.body.appendChild(overlay);
 }
 
 // renderDriftSection probes, per staged spec mutation, whether the server

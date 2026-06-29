@@ -14,7 +14,7 @@
 // the switch) is a separate diff layer and needs a newtron-side
 // projection endpoint; out of scope here.
 
-import type { Pending, PendingInverse } from "./staging.js";
+import { pendingPath, type Pending, type PendingInverse } from "./staging.js";
 
 export type PreviewEffect = "create" | "update" | "delete" | "action";
 
@@ -27,6 +27,11 @@ export interface PendingPreview {
   title: string;
   /** Optional sub-line — spec kind, scope, host, etc. */
   scope: string;
+  /** HTTP method this change applies as (POST/PUT/DELETE) — the real verb. */
+  method: string;
+  /** Relative API path this change targets (scope query included for scoped
+   *  mutations) — the endpoint+scope context, surfaced alongside the body. */
+  path: string;
   /** True when the source-of-truth flagged this as destructive. */
   danger: boolean;
   /** Detail body for the expand-on-demand panel; null when nothing to show. */
@@ -146,13 +151,14 @@ export function previewQueue(queue: readonly Pending[]): ApplyPreview {
 // toPreview attaches the carried inverse + prior body uniformly, so every op
 // type flows them into the history item for undo without per-branch wiring.
 function toPreview(p: Pending): PendingPreview {
-  const pv = previewBase(p);
+  const { method, path } = pendingPath(p);
+  const pv: PendingPreview = { ...previewBase(p), method, path };
   if (p.inverse) pv.inverse = p.inverse;
   if ("preBody" in p && p.preBody) pv.preBody = p.preBody;
   return pv;
 }
 
-function previewBase(p: Pending): PendingPreview {
+function previewBase(p: Pending): Omit<PendingPreview, "method" | "path"> {
   if (p.group === "mutation") {
     return {
       id: p.id, effect: p.effect,
