@@ -591,6 +591,23 @@ function groupOrder(p: Pending): number {
   return 9;
 }
 
+// pendingPath returns the HTTP method + relative API path a Pending applies to
+// — the exact target applyOne hits (scope query included for scoped mutations).
+// Surfaced in the apply preview + results so the operator sees which endpoint
+// (and scope) each change targets. KEEP IN SYNC with applyOne below.
+export function pendingPath(p: Pending, mode: "default" | "topology" = "default"): { method: string; path: string } {
+  const modeQS = mode === "topology" ? "?mode=topology" : "";
+  if (p.group === "mutation") return { method: p.method, path: p.path };
+  if (p.group === "topology" && p.op === "add-device") return { method: "POST", path: "topology/nodes" };
+  if (p.group === "topology" && p.op === "remove-device") return { method: "DELETE", path: `topology/nodes/${enc(p.name)}` };
+  if (p.group === "topology" && p.op === "update-device") return { method: "PUT", path: `topology/nodes/${enc(p.name)}` };
+  if (p.group === "topology" && p.op === "add-link") return { method: "POST", path: "topology/links" };
+  if (p.group === "topology" && p.op === "remove-link") return { method: "DELETE", path: `topology/links/${enc(p.device)}/${enc(p.iface)}` };
+  if (p.group === "device" && p.op === "action") return { method: "POST", path: `nodes/${enc(p.device)}/rpc/${p.actionId}${modeQS}` };
+  if (p.group === "interface" && p.op === "action") return { method: "POST", path: `nodes/${enc(p.device)}/interfaces/${enc(p.iface)}/rpc/${p.actionId}${modeQS}` };
+  return { method: "?", path: "" };
+}
+
 async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void> {
   const modeQS = mode === "topology" ? "?mode=topology" : "";
   // The flat thread: a mutation is just its HTTP verb replayed on its path.
