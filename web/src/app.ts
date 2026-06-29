@@ -1825,7 +1825,12 @@ async function mountSchemaSubRuleAddForm(
       `Schema for ${subKind} unavailable: ${formatErrorBrief(err)}`));
     return;
   }
-  const { form, getValues, validate } = await renderSchemaForm({ schema });
+  // A sub-rule is nested in its parent and isn't independently scoped — it
+  // belongs to whichever parent instance the operator opened, so its scope is
+  // the parent's (inferred), never a per-sub-rule choice. newtron's sub-item
+  // schemas still carry scope/scope_instance (filed as a schema gap); exclude
+  // them here so the add form doesn't ask.
+  const { form, getValues, validate } = await renderSchemaForm({ schema, skipFields: new Set(["scope", "scope_instance"]) });
   formArea.appendChild(form);
 
   const errOut = el("div", { className: "form-error-out" });
