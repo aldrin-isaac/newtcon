@@ -34,11 +34,31 @@ import type { SchemaField } from "./api/newtcon/schema.js";
 
 export interface RequiredWhenAtomic {
   field: string;
+  /**
+   * When set, `field` must be a reference (a field with a ref_kind) and the
+   * operand is compared against `ref_field` on the *referenced* spec rather than
+   * against `field`'s own value (newtron 2026-06-29). E.g. NodeSpec's
+   * `loopback_ip` is `{field:"platform", ref_field:"device_type",
+   * not_equals:"host"}` — required unless the chosen platform's device_type is
+   * "host". Resolved client-side via the RefResolver passed to
+   * evaluateRequiredWhen; an unresolved lookup reads as "" (so a `not_equals`
+   * condition defaults to required — the right default for an unpicked platform).
+   */
+  ref_field?: string;
   equals?: unknown;
   not_equals?: unknown;
   in?: readonly unknown[];
   not_in?: readonly unknown[];
 }
+
+/**
+ * RefResolver — looks a reference field's value through to a field on the
+ * referenced spec: `(field, refValue, refField) => value`. E.g.
+ * ("platform", "Force10-S6000", "device_type") → "switch". Returns undefined
+ * when unresolvable (no such instance / data not loaded); the evaluator then
+ * treats the LHS as "".
+ */
+export type RefResolver = (field: string, refValue: string, refField: string) => unknown;
 
 export interface RequiredWhenAllOf {
   all_of: readonly RequiredWhen[];
@@ -69,18 +89,23 @@ export type RequiredWhen = RequiredWhenAtomic | RequiredWhenAllOf | RequiredWhen
 export function evaluateRequiredWhen(
   condition: RequiredWhen | null | undefined,
   values: Readonly<Record<string, unknown>>,
+  resolve?: RefResolver,
 ): boolean {
   if (!condition) return false;
   if (isAllOf(condition)) {
     if (!Array.isArray(condition.all_of)) return false;
-    return condition.all_of.every((c) => evaluateRequiredWhen(c, values));
+    return condition.all_of.every((c) => evaluateRequiredWhen(c, values, resolve));
   }
   if (isAnyOf(condition)) {
     if (!Array.isArray(condition.any_of)) return false;
-    return condition.any_of.some((c) => evaluateRequiredWhen(c, values));
+    return condition.any_of.some((c) => evaluateRequiredWhen(c, values, resolve));
   }
   if (isAtomic(condition)) {
-    const lhs = values[condition.field] ?? "";
+    // ref_field looks through the reference: compare `ref_field` on the spec
+    // named by `values[field]`, not `values[field]` itself. Unresolvable → "".
+    const lhs = condition.ref_field
+      ? (resolve ? resolve(condition.field, String(values[condition.field] ?? ""), condition.ref_field) : "")
+      : (values[condition.field] ?? "");
     if ("equals" in condition) return looseEqual(lhs, condition.equals);
     if ("not_equals" in condition) return !looseEqual(lhs, condition.not_equals);
     if ("in" in condition && Array.isArray(condition.in)) {
@@ -151,14 +176,17 @@ function formatNode(c: RequiredWhen, siblings: readonly SchemaField[]): string {
     return c.any_of.map((sub) => formatNode(sub, siblings)).filter((s) => s !== "").join(" or ");
   }
   if (isAtomic(c)) {
+    // For a ref_field condition the subject is the referenced field, e.g.
+    // "Platform device type" (label + humanized ref_field), not just "Platform".
     const label = labelFor(c.field, siblings);
-    if ("equals" in c) return `${label} is ${formatValue(c.equals)}`;
-    if ("not_equals" in c) return `${label} is not ${formatValue(c.not_equals)}`;
+    const subj = c.ref_field ? `${label} ${c.ref_field.replace(/_/g, " ")}` : label;
+    if ("equals" in c) return `${subj} is ${formatValue(c.equals)}`;
+    if ("not_equals" in c) return `${subj} is not ${formatValue(c.not_equals)}`;
     if ("in" in c && Array.isArray(c.in)) {
-      return `${label} is ${joinHuman(c.in.map(formatValue))}`;
+      return `${subj} is ${joinHuman(c.in.map(formatValue))}`;
     }
     if ("not_in" in c && Array.isArray(c.not_in)) {
-      return `${label} is none of ${joinHuman(c.not_in.map(formatValue))}`;
+      return `${subj} is none of ${joinHuman(c.not_in.map(formatValue))}`;
     }
   }
   return "";

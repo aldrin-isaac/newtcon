@@ -35,6 +35,9 @@ import { apiPath } from "./api-path.js";
 import {
   evaluateRequiredWhen,
   formatRequiredWhen,
+  type RequiredWhen,
+  type RequiredWhenAtomic,
+  type RefResolver,
 } from "./required-when.js";
 
 /**
@@ -209,6 +212,13 @@ export async function renderSchemaForm(
     }
   }
 
+  // Resolver for `ref_field` conditions (looks a platform name through to its
+  // device_type, etc.). Loaded async after mount; until then it's undefined and
+  // the evaluator reads the looked-through value as "" — which makes a
+  // `not_equals:"host"` condition default to required (the right default for an
+  // unpicked platform per the newtron note).
+  let refFieldResolver: RefResolver | undefined;
+
   // Re-evaluate every tracker against the current values. Toggles
   // input.required and updates the visible "*" marker on the label.
   // Called once on mount (in case prefill / smart-defaults already
@@ -217,7 +227,7 @@ export async function renderSchemaForm(
     if (trackers.length === 0) return;
     const values = readAllValues();
     for (const t of trackers) {
-      const req = evaluateRequiredWhen(t.field.required_when, values);
+      const req = evaluateRequiredWhen(t.field.required_when, values, refFieldResolver);
       t.input.required = req;
       // Strip a trailing " *" (if any) then re-append when required —
       // keeps the label in sync without re-rendering the row.
@@ -235,7 +245,7 @@ export async function renderSchemaForm(
     if (appliesTrackers.length === 0) return;
     const values = readAllValues();
     for (const t of appliesTrackers) {
-      const applies = evaluateRequiredWhen(t.field.applies_when, values);
+      const applies = evaluateRequiredWhen(t.field.applies_when, values, refFieldResolver);
       // `hidden` reflects to the content attribute; CSS rule
       // `.schema-form-row[hidden]` forces display:none over the row's
       // own display:flex.
@@ -258,6 +268,16 @@ export async function renderSchemaForm(
   refreshApplicability();
   refreshConditionalRequired();
   refreshSiblings();
+
+  // Load the ref_field resolver (e.g. platform → device_type) in the background;
+  // re-evaluate once it lands. Non-blocking so the form renders immediately, and
+  // safe-by-default until then (see refFieldResolver above).
+  void buildRefFieldResolver(opts.schema.fields).then((r) => {
+    if (!r) return;
+    refFieldResolver = r;
+    refreshApplicability();
+    refreshConditionalRequired();
+  });
 
   // Single listener at the form level — input bubbles from every
   // input/select inside, so we don't need per-input wiring.
@@ -740,6 +760,72 @@ async function fetchRefNames(refKind: string): Promise<string[]> {
   if (Array.isArray(body?.names)) return body!.names!;
   if (Array.isArray(body?.services)) return body!.services!.map((s) => s.name ?? "").filter((n) => n !== "");
   return [];
+}
+
+/**
+ * buildRefFieldResolver — preloads the data a `ref_field` condition needs and
+ * returns a synchronous RefResolver for evaluateRequiredWhen. Scans the form's
+ * fields for ref_field conditions (e.g. NodeSpec's loopback_ip →
+ * {field:"platform", ref_field:"device_type"}), then for each referenced kind
+ * fetches every instance's detail and indexes the ref_field value by name. Returns
+ * undefined when nothing needs resolving (the common case — no extra fetches).
+ */
+async function buildRefFieldResolver(
+  fields: readonly SchemaField[],
+): Promise<RefResolver | undefined> {
+  const needs = collectRefFieldNeeds(fields);
+  if (needs.length === 0) return undefined;
+  // key: `${field}::${refField}` → (refValue → looked-through value)
+  const data = new Map<string, Map<string, unknown>>();
+  await Promise.all(needs.map(async (n) => {
+    const map = await fetchRefFieldMap(n.refKind, n.refField).catch(() => new Map<string, unknown>());
+    data.set(`${n.field}::${n.refField}`, map);
+  }));
+  return (field, refValue, refField) => data.get(`${field}::${refField}`)?.get(refValue);
+}
+
+interface RefFieldNeed { field: string; refKind: string; refField: string; }
+
+/** Walk every field's required_when / applies_when for atomic ref_field
+ *  conditions; resolve each field's ref_kind from the sibling list. */
+function collectRefFieldNeeds(fields: readonly SchemaField[]): RefFieldNeed[] {
+  const out = new Map<string, RefFieldNeed>();
+  const visit = (cond: RequiredWhen | null | undefined): void => {
+    if (!cond) return;
+    if (Array.isArray((cond as { all_of?: RequiredWhen[] }).all_of)) {
+      (cond as { all_of: RequiredWhen[] }).all_of.forEach(visit);
+    } else if (Array.isArray((cond as { any_of?: RequiredWhen[] }).any_of)) {
+      (cond as { any_of: RequiredWhen[] }).any_of.forEach(visit);
+    } else {
+      const a = cond as RequiredWhenAtomic;
+      if (typeof a.field === "string" && typeof a.ref_field === "string" && a.ref_field !== "") {
+        const refKind = fields.find((f) => f.name === a.field)?.ref_kind;
+        if (refKind) out.set(`${a.field}::${a.ref_field}`, { field: a.field, refKind, refField: a.ref_field });
+      }
+    }
+  };
+  for (const f of fields) { visit(f.required_when); visit(f.applies_when); }
+  return [...out.values()];
+}
+
+/** For a ref kind, fetch every instance's detail and index `refField` by name. */
+async function fetchRefFieldMap(refKind: string, refField: string): Promise<Map<string, unknown>> {
+  const meta = await fetchSchema(refKind);
+  const listPath = meta.paths?.list;
+  if (!listPath) return new Map();
+  const base = listPath
+    .replace(/^\/newtron\/v1\//, "/api/")
+    .replace("{netID}", encodeURIComponent(activeNetwork()));
+  const names = await fetchRefNames(refKind);
+  const out = new Map<string, unknown>();
+  await Promise.all(names.map(async (name) => {
+    try {
+      const detail = (await apiFetch(`${base}/${encodeURIComponent(name)}`, { cache: "no-store" })) as
+        | Record<string, unknown> | null;
+      if (detail && refField in detail) out.set(name, detail[refField]);
+    } catch { /* unresolvable → omitted, resolver returns undefined → "" */ }
+  }));
+  return out;
 }
 
 // ─── nested object ─────────────────────────────────────────────────
