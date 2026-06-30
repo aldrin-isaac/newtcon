@@ -209,3 +209,79 @@ describe("formatRequiredWhen()", () => {
     );
   });
 });
+
+// ── ref_field: look through a reference (newtron 2026-06-29) ──────────
+// NodeSpec's loopback_ip / zone use {field:"platform", ref_field:"device_type",
+// not_equals:"host"} — required unless the chosen platform's device_type is host.
+
+const NODE_FIELDS = [
+  { name: "mgmt_ip", label: "Management IP", type: "string", required: true },
+  { name: "platform", label: "Platform", type: "ref", required: true, ref_kind: "PlatformSpec" },
+  { name: "loopback_ip", label: "Loopback IP", type: "string", required: false },
+  { name: "zone", label: "Zone", type: "ref", required: false, ref_kind: "ZoneSpec" },
+];
+
+// Resolver mirroring the schema-form preload: platform name → device_type.
+const DEVTYPE = { "Force10-S6000": "switch", "vSwitch": "switch", "HostBox": "host" };
+const resolvePlatform = (field, refValue, refField) =>
+  (field === "platform" && refField === "device_type") ? DEVTYPE[refValue] : undefined;
+
+const LOOPBACK_RW = { field: "platform", ref_field: "device_type", not_equals: "host" };
+
+describe("evaluateRequiredWhen() — ref_field", () => {
+  test("switch platform → device_type != host → required", () => {
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, { platform: "Force10-S6000" }, resolvePlatform), true);
+  });
+
+  test("host platform → device_type == host → NOT required", () => {
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, { platform: "HostBox" }, resolvePlatform), false);
+  });
+
+  test("unpicked platform → unresolved reads as '' → not_equals host → required (default)", () => {
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, { platform: "" }, resolvePlatform), true);
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, {}, resolvePlatform), true);
+  });
+
+  test("unknown platform name → resolver returns undefined → '' → required", () => {
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, { platform: "MysteryBox" }, resolvePlatform), true);
+  });
+
+  test("no resolver supplied → looked-through value is '' → not_equals host → required (safe default)", () => {
+    assert.equal(evaluateRequiredWhen(LOOPBACK_RW, { platform: "HostBox" }), true);
+  });
+
+  test("ref_field with equals (inverse): only host platforms", () => {
+    const c = { field: "platform", ref_field: "device_type", equals: "host" };
+    assert.equal(evaluateRequiredWhen(c, { platform: "HostBox" }, resolvePlatform), true);
+    assert.equal(evaluateRequiredWhen(c, { platform: "Force10-S6000" }, resolvePlatform), false);
+  });
+
+  test("ref_field with in / not_in", () => {
+    const cin = { field: "platform", ref_field: "device_type", in: ["switch", "router"] };
+    assert.equal(evaluateRequiredWhen(cin, { platform: "vSwitch" }, resolvePlatform), true);
+    assert.equal(evaluateRequiredWhen(cin, { platform: "HostBox" }, resolvePlatform), false);
+    const cnotin = { field: "platform", ref_field: "device_type", not_in: ["host"] };
+    assert.equal(evaluateRequiredWhen(cnotin, { platform: "vSwitch" }, resolvePlatform), true);
+    assert.equal(evaluateRequiredWhen(cnotin, { platform: "HostBox" }, resolvePlatform), false);
+  });
+
+  test("ref_field nested in a combinator threads the resolver", () => {
+    const c = { all_of: [LOOPBACK_RW, { field: "mgmt_ip", not_equals: "" }] };
+    assert.equal(evaluateRequiredWhen(c, { platform: "vSwitch", mgmt_ip: "10.0.0.1" }, resolvePlatform), true);
+    assert.equal(evaluateRequiredWhen(c, { platform: "HostBox", mgmt_ip: "10.0.0.1" }, resolvePlatform), false);
+  });
+
+  test("a plain (non-ref) atomic still uses the field's own value, ignoring the resolver", () => {
+    const c = { field: "mgmt_ip", equals: "10.0.0.1" };
+    assert.equal(evaluateRequiredWhen(c, { mgmt_ip: "10.0.0.1" }, resolvePlatform), true);
+  });
+});
+
+describe("formatRequiredWhen() — ref_field", () => {
+  test("reads as 'Platform device type is not host'", () => {
+    assert.equal(
+      formatRequiredWhen(LOOPBACK_RW, NODE_FIELDS),
+      "Required when Platform device type is not host.",
+    );
+  });
+});
