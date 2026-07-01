@@ -69,10 +69,17 @@ await put(N("/route-policies"), { name: "ROUTEPOLICY1", description: "route poli
 await put(N("/services"), { name: "TRANSIT", service_type: "routed", description: "Underlay L3 routed transit fabric", routing: { protocol: "bgp", peer_as: "request" } }, "service TRANSIT");
 await put(N("/services"), { name: "EVPNIRB", service_type: "evpn-irb", ipvpn: "IPVPN", macvpn: "MACVPN", ingress_filter: "FILTER1", egress_filter: "FILTER1", qos_policy: "QOS1" }, "service EVPNIRB");
 
-// 3. node specs — must exist before a topology device can reference them
+// 3. node specs — must exist before a topology device can reference them.
+// UPSERT (create then update): a create is skipped if the spec already exists,
+// which would leave a pre-existing network on its old identity. The follow-up PUT
+// forces this variant's platform/ASN/loopback/zone so re-seeding an existing
+// network (e.g. a distinct proof network) actually re-stamps its identity.
 const HOSTS = [["switch1", 0], ["switch2", 1], ["switch3", 2]];
 for (const [host, i] of HOSTS) {
-  await put(N("/nodes"), { name: host, mgmt_ip: "127.0.0.1", loopback_ip: `${V.lo}${i + 1}`, zone: V.zone, platform: V.platform, underlay_asn: ASNS[i], ssh_user: "admin" }, `node-spec ${host}`);
+  const body = { name: host, mgmt_ip: "127.0.0.1", loopback_ip: `${V.lo}${i + 1}`, zone: V.zone, platform: V.platform, underlay_asn: ASNS[i], ssh_user: "admin" };
+  await put(N("/nodes"), body, `node-spec ${host}`);
+  const { status, txt } = await req("PUT", N(`/nodes/${host}`), body);
+  if (status >= 300) { warn++; console.log(`  WARN node-spec ${host} update: ${status} ${txt.slice(0, 100)}`); }
 }
 
 // 4. topology — 3 switches in a triangle
@@ -108,8 +115,9 @@ for (const [dev, iface, ip, peer] of applies) {
   await put(N(`/nodes/${dev}/interfaces/${iface}/rpc/apply-service?mode=topology&persist=topology`), { service: "TRANSIT", ip_address: ip, peer_as: peer }, `apply TRANSIT ${dev}:${iface}`);
 }
 
-// 5. one zone override (for override-* smokes): IPVPN scoped to myzone
-await put(N("/ipvpns"), { name: "IPVPN", l3vni: 10002, route_targets: ["65001:301"], scope: "zone", scope_instance: V.zone }, `override ipvpn IPVPN@zone:${V.zone}`);
+// Note: no pre-seeded zone override — the override-* smokes create (and clean up)
+// their own scoped override on a discovered zone, so a fixture-provided one would
+// only collide (two overrides break the "delete → none left" assertion).
 
 console.log(warn === 0 ? "\nseed OK" : `\nseed completed with ${warn} warning(s)`);
 process.exitCode = 0;

@@ -49,7 +49,9 @@ try {
   await authenticatePage(page, BASE);
   // Pin the active network + auto-accept inline confirm modals.
   await page.evaluateOnNewDocument((net) => {
-    try { localStorage.setItem("newtcon.activeNetwork", net); } catch { /* */ }
+    // Pin spec view — "Configure a port" is a spec-view affordance; a running lab
+    // would otherwise default to Lab view (lifecycle actions, no port-config).
+    try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ }
     const install = () => new MutationObserver(() => {
       const btn = document.querySelector(".confirm-modal-btn--confirm");
       if (btn instanceof HTMLElement) btn.click();

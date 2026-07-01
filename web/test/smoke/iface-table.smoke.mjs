@@ -45,7 +45,11 @@ try {
   const rowCount = await page.evaluate(() => document.querySelectorAll(".iface-table tbody .iface-row").length);
   expect(rowCount === PORTS, `one row per platform port (discovered ${PORTS}, got ${rowCount})`);
   const order = await page.evaluate(() => Array.from(document.querySelectorAll(".iface-table tbody .iface-row .iface-name")).slice(0, 4).map((e) => e.textContent.trim()));
-  expect(JSON.stringify(order) === JSON.stringify(["Ethernet0", "Ethernet4", "Ethernet8", "Ethernet12"]), `numerically ordered (${order.join(",")})`);
+  // Assert numeric ORDERING, not specific names — port naming differs by platform
+  // (Force10 steps by 4: Ethernet0/4/8/12; cisco steps by 1: Ethernet0/1/2/3).
+  const nums = order.map((n) => parseInt(n.replace(/\D/g, ""), 10));
+  const ordered = order.every((n) => /^Ethernet\d+$/.test(n)) && nums.every((v, i) => i === 0 || v > nums[i - 1]);
+  expect(ordered, `ports numerically ordered (${order.join(",")})`);
   const roleChips = await page.evaluate(() => document.querySelectorAll(".iface-table .iface-role").length);
   expect(roleChips > 0, `role chips present (${roleChips})`);
   const applyCtas = await page.evaluate(() => document.querySelectorAll(".iface-apply-cta").length);
