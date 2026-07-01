@@ -9,6 +9,9 @@ try{
   await authenticatePage(p, BASE);
   await p.evaluateOnNewDocument(n=>{try{localStorage.setItem("newtcon.activeNetwork",n);}catch{}},NET);
   await p.goto(BASE,{waitUntil:"networkidle0",timeout:20000});
+  // Self-contained setup: DUPQOS must exist on the server so staging a *second*
+  // create of it 409s at apply (→ the mixed Applied/Failed result). Idempotent.
+  await p.evaluate(async(net)=>{try{await fetch(`/api/networks/${net}/qos-policies`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"DUPQOS"})});}catch{}},NET);
   await p.click("#tab-specs"); await p.waitForSelector('[data-kind="qos-policies"]',{timeout:8000});
   await p.click('[data-kind="qos-policies"]'); await p.waitForSelector(".panel-add-btn",{timeout:6000});
   const stageCreate=async(name)=>{
@@ -33,5 +36,7 @@ try{
   expect(true,"Q1: results modal shows 'Applied 1 · Failed 1'");
   const r=await p.evaluate(()=>({ok:!!document.querySelector(".apply-result-section--ok"),failSec:!!document.querySelector(".apply-result-section--fail"),err:(document.querySelector(".apply-result-error")?.textContent||"").slice(0,60)}));
   expect(r.ok,"has Applied section"); expect(r.failSec,"has Failed section"); expect(r.err!=="",`failed item shows error ("${r.err}")`);
+  // Cleanup: OKQOS (applied) + DUPQOS (setup) so the run is repeatable.
+  await p.evaluate(async(net)=>{for(const q of["OKQOS","DUPQOS"]){try{await fetch(`/api/networks/${net}/qos-policies/${q}`,{method:"DELETE"});}catch{}}},NET);
   console.log(`\n${pass} passed, ${fail} failed`); process.exitCode=fail?1:0;
 }catch(e){console.error("threw:",e.message);process.exitCode=1;}finally{await b.close();}

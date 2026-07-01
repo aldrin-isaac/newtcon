@@ -8,7 +8,7 @@ import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
-const NET = process.env.NET || "3node-vs-newtcon";
+const NET = process.env.NET || "2node-vs-service";
 const DEV = "switch4";
 const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
