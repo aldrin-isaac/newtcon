@@ -7,6 +7,7 @@
 //   5. Close button enables (either after error or after stream completes)
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -21,7 +22,7 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
-
+await authenticatePage(page, BASE);
 const deployPosts = [];
 page.on("request", (req) => {
   if (req.method() === "POST" && /\/api\/labs\/[^/]+\/deploy/.test(req.url())) {

@@ -6,7 +6,7 @@ let pass=0,fail=0; const expect=(c,m)=>{c?(pass++,console.log("  ok:",m)):(fail+
 const b=await puppeteer.launch({executablePath:"/usr/bin/google-chrome",headless:"new",args:["--no-sandbox","--disable-dev-shm-usage"],defaultViewport:{width:1500,height:950}});
 try{
   const p=await b.newPage();
-  await authenticatePage(p);
+  await authenticatePage(p, BASE);
   await p.evaluateOnNewDocument(n=>{try{localStorage.setItem("newtcon.activeNetwork",n);}catch{}},NET);
   await p.goto(BASE,{waitUntil:"networkidle0",timeout:20000});
   await p.click("#tab-specs"); await p.waitForSelector('[data-kind="qos-policies"]',{timeout:8000});

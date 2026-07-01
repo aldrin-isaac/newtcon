@@ -3,6 +3,7 @@
 // verify the whole-device write-back landed in newtron with the right shape.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -36,6 +37,7 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   // Pin the active network + auto-accept inline confirm modals.
   await page.evaluateOnNewDocument((net) => {
     try { localStorage.setItem("newtcon.activeNetwork", net); } catch { /* */ }

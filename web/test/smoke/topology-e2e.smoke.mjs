@@ -2,6 +2,7 @@
 // landed in newtron.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -22,6 +23,7 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument(() => {
     // Inline confirm modal auto-accept; replaces native-dialog handler.
     const install = () => new MutationObserver(() => {

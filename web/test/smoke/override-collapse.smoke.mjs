@@ -4,6 +4,7 @@
 // via newtron's scoped delete (newtcon has no scoped-delete affordance yet).
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -28,6 +29,8 @@ try {
   expect(r.status === 201, `zone override of IPVPN created (${r.status})`);
 
   const page = await browser.newPage();
+
+  await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });

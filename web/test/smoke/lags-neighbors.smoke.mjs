@@ -3,6 +3,7 @@
 // (creates a port-channel, verifies, deletes); Neighbors is read live.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -34,6 +35,8 @@ try {
   await rpc("create-portchannel", { name: "PortChannel99", mtu: 9100 });
 
   const page = await browser.newPage();
+
+  await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
