@@ -1,58 +1,100 @@
-# Smoke suite status (under `--auth-required`)
+# Smoke suite (`web/test/smoke/`)
 
-**Whole suite green or deploy-gated.** From 3 passing at the start of this effort
-to the full suite. Run with the fixture seeded (`node test/smoke/seed-fixture.mjs`)
-and `NEWTCON_URL` + `NEWTCON_TEST_USER=ron` / `NEWTCON_TEST_PASS` set.
+28 headless Puppeteer smokes that drive the real UI against a running
+newtcon-server (which proxies newtron). They run under `--auth-required` and are
+**network-agnostic** — each smoke discovers or creates the data it needs via the
+API instead of hard-coding one fixture's values, so the same smokes run against
+any adequately-shaped network.
 
-## Deploy-gated skips (exit 0 via `skipIfNotDeployed`)
-`topology-e2e`, `per-device-apply`, `topology-broad`, `resource-lens`,
-`state-tables`, `lags-neighbors` — their assertions read live device state
-(vlans/vrfs/acls/bgp/LAGs), which 503s on the staged fixture. They pass against a
-deployed lab (e.g. `2node-vs` when its VMs are up).
+## Running
 
-## What the effort found
-Every failure was **test drift**, not a product bug, with **one exception**: the
+Prerequisites: a newtcon-server on `NEWTCON_URL` (default `http://127.0.0.1:8095`)
+proxying a newtron with `--auth-required`, Chrome at `CHROME_BIN`, and the `ron`
+nologin test superuser (see [`testing-auth.md`](testing-auth.md)).
+
+```sh
+export NEWTCON_URL=http://127.0.0.1:8095
+export NEWTCON_TEST_USER=ron NEWTCON_TEST_PASS=…      # the ron service account
+export CHROME_BIN=/usr/bin/google-chrome
+
+# 1. Seed the fixture network (idempotent). Re-run before a suite — API-created
+#    specs can be wiped by an engine reset.
+node web/test/smoke/seed-fixture.mjs
+
+# 2. Run one smoke (NET + DEVICE override the target; defaults smoke-fixture / switch1)
+NET=smoke-fixture node web/test/smoke/drawer-header.smoke.mjs
+
+# 3. Run the whole suite
+for f in web/test/smoke/*.smoke.mjs; do NET=smoke-fixture node "$f"; done
+```
+
+A smoke exits 0 on pass, non-zero on fail, and prints `SKIP: …` + exits 0 when it
+can't run (a device-state smoke against a device with no live state).
+
+## Network-agnostic — proving it
+
+Fixture smokes **discover** identity/ports/services/zones via `apiGET`; device-state
+smokes **self-create** their state via device RPCs and clean up. To prove the
+discovery actually adapts, seed a *second* network with a distinct identity and run
+the suite against both:
+
+```sh
+node web/test/smoke/seed-fixture.mjs                              # smoke-fixture: Force10-S6000 / AS 65001 / 10.1.0.1 / myzone
+SMOKE_NET=3node-vs-newtcon node web/test/smoke/seed-fixture.mjs   # cisco-p200-32x100 / AS 64512 / 10.2.0.1 / zoneb
+for f in web/test/smoke/*.smoke.mjs; do NET=3node-vs-newtcon node "$f"; done
+```
+
+`seed-fixture.mjs` carries a per-network `VARIANTS` table (platform/hwsku/ASN/
+loopback/zone) and **upserts** node specs, so re-seeding an existing network
+re-stamps its variant identity.
+
+## The smokes
+
+**Shell / workspace / lab (8)** — `apply-results-modal`, `audit-reopen`,
+`auth-gate`, `deploy-as-lab`, `network-switcher`, `staging`, `lab-tab-retired`,
+`device-status-badges`.
+
+**Spec authoring (8)** — `specs-drawer-edit`, `specs-drawer-services-zones`,
+`specs-drawer-subrule`, `spec-tab-intent`, `delete-service-binding-warn`,
+`override-collapse`, `override-delete`, `subrule-before-apply`.
+
+**Topology / device drawer (9)** — `drawer-header`, `iface-actions`, `iface-table`,
+`port-config`, `topology-click-drawer`, `topology-profile-tab`, `node-scaffold`,
+`node-create-with-profile`, `device-lifecycle`.
+
+**Device-state — deploy-gated (3)** — `state-tables`, `lags-neighbors`,
+`resource-lens`. These read live device state, so they `skipIfNotDeployed` (exit 0
+with a SKIP) against a staged fixture and **pass against a running lab**:
+
+```sh
+NET=2node-vs node web/test/smoke/state-tables.smoke.mjs   # 2node-vs's switch1 serves live state
+```
+
+## Infrastructure
+
+- **`_auth.mjs`** — `authRequired`, `loginCookie`, `authenticatePage` (installs the
+  session cookie on a page before nav), `apiGET(net, path)` (the discovery
+  primitive), `deviceIsDeployed`, `skipIfNotDeployed`.
+- **`seed-fixture.mjs`** — idempotent 3-switch triangle + TRANSIT routed underlay
+  (applied on the inter-switch endpoints) + EVPN-IRB service + supporting specs,
+  with the per-network identity `VARIANTS`.
+- **`testing-auth.md`** — the `ron` nologin-superuser recipe + curl cookie-jar.
+
+## History
+
+A 2026 pass took the suite from 3 passing to fully green under `--auth-required`,
+then made every smoke network-agnostic (verified against smoke-fixture *and* the
+distinct 3node-vs-newtcon). It surfaced exactly **one real product bug** — the
 drawer-header identity subtitle went blank for offline/staged devices because it
-was sourced only from the live `/info` probe (fixed in #324 — falls back to the
-NodeSpec). The recurring drift causes were:
+read only the live `/info` probe (fixed to fall back to the NodeSpec, #324).
 
-- **Auth** — smokes predated `--auth-required`; direct-newtron and node-side
-  verify fetches needed the session cookie (`_auth.mjs` helper + `ron` account).
-- **#210 view-mode gating** — spec-only affordances (`+ Create node`, the Inspect
-  menu, the empty `NODE_ACTIONS` panel) require Spec view; lab lifecycle requires
-  Lab view. Smokes now pin `newtcon:topology-view:<net>`.
-- **Renames** — profiles→nodes (`#node-panel-profile`→`#node-panel-spec`), Summary
-  tab folded, `.spec-form`→`.schema-form`, "Type"→"Service Type", "Zones"→"Zone".
-- **Model shifts** — edit-Save **stages** (staging model) then applies; the schema
-  form uses HTML5 `required` + read-only immutable identifiers; newtron
-  upper-cases spec names (`smoke-edit-1`→`SMOKE_EDIT_1`).
-- **Fixture** — a durable `smoke-fixture` (`seed-fixture.mjs`); note its API-created
-  specs (e.g. the `myzone` zone) can be wiped by engine resets — re-seed before a run.
+Retired along the way, as **features they tested were removed** (not as lost
+coverage):
 
-## Durable test infrastructure added
-- `_auth.mjs` — `authenticatePage` / `loginCookie` / `skipIfNotDeployed`.
-- `seed-fixture.mjs` — idempotent 3-switch triangle + TRANSIT underlay + EVPN-IRB.
-- `docs/testing-auth.md` — the `ron` nologin-superuser + cookie-jar recipe.
-
----
-
-## Deploy-gated smokes vs a live lab (2node-vs)
-2node-vs is a running lab whose topology includes `switch1`/`switch2`. Pointing the
-device-state smokes at it (`NET=2node-vs`) exercises the real device paths:
-
-**Now green against 2node-vs** (fixed: authenticate the device rpc/topology fetches;
-target the switch by `data-device` not the first `.topo-node` — the first node is a
-host in a host+switch lab; `DEVICE` env override):
-- `state-tables` 3/0, `lags-neighbors` 5/0, `resource-lens` 5/0.
-
-**Retired** (`per-device-apply`, `topology-e2e`, `topology-broad`): their core was
-"open the VLANs group in the action panel → Create VLAN → apply". #210 emptied
-`NODE_ACTIONS` ("services only" scope), so there is no node-level
-Create-VLAN/VRF/ACL affordance anymore — device config flows through services
-(covered by `resource-lens`) and interface config (covered by `iface-actions`).
-Deleted rather than left as dead deploy-gated tests for a removed feature; their
-staging→apply→lands-on-device value is already covered.
-
-## Suite size
-Now **29 smokes**: 26 always-run green + 3 device-state smokes that skip on a staged
-fixture and pass against a running lab (`NET=2node-vs`).
+- `per-device-apply`, `topology-e2e`, `topology-broad` — tested the pre-#210
+  action-panel "Create VLAN → apply" flow; #210 emptied `NODE_ACTIONS` (device
+  config now flows through services + interfaces, covered by `resource-lens` +
+  `iface-actions`).
+- `topology-menu`, `topology-scope-services-only` — tested the docked action panel,
+  retired in #333 (a single left-click a device now opens the drawer; link/node
+  creation lives on the toolbar). Replaced by `topology-click-drawer`.
