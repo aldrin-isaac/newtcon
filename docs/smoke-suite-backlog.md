@@ -45,3 +45,23 @@ per-device-apply, topology-broad (device-state reads need a deployed device).
   null. Could be a real resolution bug rather than test drift.
 - lags-neighbors needs a LAG in the fixture (extend seed-fixture.mjs) or a
   deploy-gate.
+
+---
+
+## Final tail (3 remaining — diagnosed, need deeper rewrites)
+After the overnight passes the suite is ~25 green + ~7 deploy-gated skips. Three
+smokes need more than a selector nudge:
+
+- **specs-drawer-edit** — its node-side `api()` (own cookie jar, ron/ronthenewt)
+  creates the service fine, but the page-side Services row doesn't appear before
+  the 8s wait. Likely a facet/reload-timing gap (reload uses `domcontentloaded`,
+  not `networkidle0`); confirm the service lands then align the page wait.
+- **node-scaffold** — the "Add node" write flow persists **no** topology entry at
+  all (setup-device step + hwsku + bgp_asn all absent). The form-fill →
+  Stage node → Apply chain isn't landing; debug whether the schema-form fill
+  (role/underlay_asn) is captured by getValues at stage time (a required field may
+  be blocking the stage silently).
+- **topology-menu** — asserts the single-device action panel has "≥7 categories"
+  with VLAN/BGP/QoS forms. Post-#210 `NODE_ACTIONS` is **empty by design** (service
+  composition moved to the Specs tab; the panel shows the interfaces tab + a hint).
+  This smoke needs a rewrite to the new model, not a fix.

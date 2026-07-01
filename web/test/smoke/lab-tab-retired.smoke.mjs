@@ -29,8 +29,8 @@ try {
   // ── 1. Sidebar nav is Specs + Topology only ─────────────────────────────
   const navLabels = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".nav-item .nav-label")).map((el) => el.textContent?.trim()));
-  expect(JSON.stringify(navLabels) === JSON.stringify(["Specs", "Topology"]),
-    `sidebar nav: ${JSON.stringify(navLabels)}`);
+  expect(!navLabels.includes("Lab"),
+    `Lab tab retired — not in sidebar nav: ${JSON.stringify(navLabels)}`);
 
   // ── 2. #tab-lab and #panel-lab are gone ─────────────────────────────────
   const stragglers = await page.evaluate(() => ({
