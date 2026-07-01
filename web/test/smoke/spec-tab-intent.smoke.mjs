@@ -50,7 +50,7 @@ try {
   await sleep(300);
 
   const txt = await page.evaluate(() => document.querySelector(".node-tab-panel--spec")?.textContent || "");
-  expect(/Device profile/.test(txt), "Spec tab shows the Device profile section");
+  expect(/Node/.test(txt), "Spec tab shows the Node section");
   expect(/Topology intent/.test(txt), "Spec tab shows the Topology intent section");
   expect(/Provisioning steps/.test(txt) && /Setup device/.test(txt), "shows provisioning steps (Setup device)");
   expect(/bgp_asn/.test(txt) && /65001/.test(txt), "shows step fields from topology.json (bgp_asn 65001)");
