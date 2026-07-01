@@ -55,6 +55,12 @@ await authenticatePage(page, BASE);
 // action go through; the goal is to verify which actions are reachable,
 // not to fire them.
 await page.evaluateOnNewDocument(() => {
+  // The "services only" scope + guiding hint are Spec-view behaviour (Lab view of
+  // a running lab shows lifecycle actions). Pin the network + spec view pre-load.
+  try {
+    localStorage.setItem("newtcon.activeNetwork", "2node-vs");
+    localStorage.setItem("newtcon:topology-view:2node-vs", "spec");
+  } catch { /* */ }
   const install = () => new MutationObserver(() => {
     const btn = document.querySelector(".confirm-modal-btn--cancel");
     if (btn instanceof HTMLElement) btn.click();
