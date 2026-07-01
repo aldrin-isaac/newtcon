@@ -39,7 +39,12 @@ try {
       .find((el) => el.textContent.trim() === "Lab");
     if (chip instanceof HTMLElement) chip.click();
   });
-  await new Promise((r) => setTimeout(r, 300));
+  // Lab lifecycle buttons (Deploy/Provision/Destroy) render after the async lab
+  // status arrives — wait for Destroy rather than a fixed sleep.
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll(".topology-toolbar-btn")).some((b) => b.textContent.trim() === "Destroy"),
+    { timeout: 6000 },
+  ).catch(() => { /* expect below reports it */ });
 
   // ── 1. Destroy toolbar button is present in Lab view ───────────────────
   const destroyText = await page.evaluate(() => {
@@ -67,27 +72,14 @@ try {
 
   await page.screenshot({ path: "/tmp/newtcon-smoke-lifecycle-01-topology.png" });
 
-  // Switch back to Spec view so the right-click → Inspect context menu
-  // is available (gated to Spec post-#210).
-  await page.evaluate(() => {
-    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
-      .find((el) => el.textContent.trim() === "Spec");
-    if (chip instanceof HTMLElement) chip.click();
-  });
-  await new Promise((r) => setTimeout(r, 300));
-
-  // ── 3. Open the device inspector for switch1 via right-click → Inspect ───
-  // SVG node has class topo-node + data-device. The contextmenu handler in
-  // app.ts opens a floating menu whose header (.topo-menu-header--button)
-  // calls openNodeDrawer when clicked.
+  // ── 3. Open switch1's inspector IN LAB VIEW (left-click) so the lifecycle
+  // section renders the substrate pill. Opening it in Spec view (via the
+  // right-click → Inspect menu, which is Spec-gated post-#210) shows only a
+  // hint, no pill — so this smoke stays in Lab view and left-clicks the node,
+  // which opens the drawer with the current view mode. ─────────────────────
   await page.evaluate(() => {
     const g = document.querySelector("svg.topology-graph g.topo-node[data-device='switch1']");
-    if (g) g.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 }));
-  });
-  await new Promise((r) => setTimeout(r, 300));
-  await page.evaluate(() => {
-    const header = document.querySelector(".topo-menu-header--button");
-    if (header instanceof HTMLElement) header.click();
+    if (g) g.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
   await new Promise((r) => setTimeout(r, 800));
 
