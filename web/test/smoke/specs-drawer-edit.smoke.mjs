@@ -18,7 +18,10 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const USER = process.env.NEWTCON_TEST_USER || "ron";
 const PASSWORD = process.env.NEWTCON_TEST_PASS || "ronthenewt";
 const NETWORK = process.env.NEWTCON_TEST_NETWORK || "1node-vs-auth";
-const SVC = `smoke-edit-${Math.floor(Math.random() * 10000)}`;
+// newtron canonicalizes spec names to upper-case + underscores
+// (smoke-edit-1 → SMOKE_EDIT_1), so use the normalized form up front — otherwise
+// the created row never matches the name the smoke searches for.
+const SVC = `SMOKE_EDIT_${Math.floor(Math.random() * 10000)}`;
 const NEW_DESC = "edited by smoke";
 
 const ok = [], failed = [];
@@ -107,36 +110,41 @@ try {
   const editBtnText = await page.$eval(".drawer-edit-btn", (el) => (el.textContent || "").trim());
   expect(editBtnText === "Edit", `Edit button rendered with label "${editBtnText}"`);
 
-  // Click Edit → form replaces body.
-  await page.click(".drawer-edit-btn");
-  await page.waitForSelector(".spec-form", { timeout: 3000 });
+  // Click Edit → form replaces body. Use a JS click (the button can be below the
+  // fold in the drawer; page.click requires it to be in the viewport).
+  await page.evaluate(() => document.querySelector(".drawer-edit-btn")?.click());
+  await page.waitForSelector(".schema-form", { timeout: 3000 });
 
-  // Verify "name" is excluded from the edit form (identifier).
-  const hasNameField = await page.$("#field-name");
-  expect(hasNameField === null, "'name' field is NOT rendered in the edit form (identifier can't change)");
+  // The identifier renders READ-ONLY in edit mode (immutable) — the operator sees
+  // it but newtron rejects identifier changes, so the input is disabled/readOnly.
+  const nameField = await page.$("[name=name]");
+  const nameLocked = nameField ? await page.$eval("[name=name]", (el) => el.disabled || el.readOnly) : true;
+  expect(nameLocked, "'name' field is read-only in the edit form (identifier can't change)");
 
   // Verify prefill: `type` populated from wire `service_type` (the
   // asymmetry slice 1.8 introduced).
-  const typeValue = await page.$eval("#field-type", (el) => el.value);
+  const typeValue = await page.$eval("[name=service_type]", (el) => el.value);
   expect(typeValue === "routed", `type field prefilled from service_type: "${typeValue}"`);
 
   // Verify description prefilled.
-  const descBefore = await page.$eval("#field-description", (el) => el.value);
+  const descBefore = await page.$eval("[name=description]", (el) => el.value);
   expect(descBefore === "smoke initial description", `description prefilled: "${descBefore}"`);
 
-  // Edit the description + Save.
-  await page.evaluate(() => { document.querySelector("#field-description").value = ""; });
-  await page.type("#field-description", NEW_DESC);
-  await page.click(".form-submit-btn");
+  // Edit the description + Save. Save STAGES the update (staging model, via
+  // enqueueSpecUpdate) rather than PUTting immediately, so apply it through the
+  // pending bar + apply-preview, then verify it persisted.
+  await page.evaluate(() => { const d = document.querySelector("[name=description]"); d.value = ""; d.dispatchEvent(new Event("input", { bubbles: true })); });
+  await page.type("[name=description]", NEW_DESC);
+  await page.evaluate(() => document.querySelector(".form-submit-btn")?.click());
+  await new Promise((r) => setTimeout(r, 500));
+  await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
+  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 8000 });
+  await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((b) => /Apply/.test(b.textContent))?.click());
+  await new Promise((r) => setTimeout(r, 2500));
 
-  // Wait for the drawer to re-render in read-only mode (Edit button reappears)
-  // and the new description appears in the tailored layout.
-  await page.waitForFunction((expected) => {
-    if (!document.querySelector(".drawer-edit-btn")) return false; // still in edit mode
-    const dl = document.querySelector(".spec-detail");
-    return dl && (dl.textContent || "").includes(expected);
-  }, { timeout: 5000 }, NEW_DESC);
-  expect(true, `drawer re-rendered with the new description "${NEW_DESC}"`);
+  // Verify the edit persisted (authenticated /api read).
+  const after = await api("GET", `/api/networks/${NETWORK}/services/${SVC}`);
+  expect(JSON.parse(after.body).description === NEW_DESC, `description persisted after apply: "${JSON.parse(after.body).description}"`);
   await page.screenshot({ path: "/tmp/newtcon-smoke-spec-edit.png" });
 } finally {
   await browser.close();
