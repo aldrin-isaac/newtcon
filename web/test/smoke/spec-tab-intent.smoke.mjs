@@ -2,11 +2,15 @@
 // intent — provisioning steps + per-port config — not just the profile.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, apiGET } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
+const DEVICE = process.env.DEVICE || "switch1";
+// Discover the device's underlay ASN so the topology-intent assertion adapts to
+// whatever the network declares (it appears as the bgp_asn setup-device field).
+const ASN = (await apiGET(NET, `nodes/${DEVICE}`)).underlay_asn;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
@@ -35,8 +39,8 @@ try {
   await page.waitForSelector(".topo-node", { timeout: 10000 });
 
   // Right-click the node → floating menu → Inspect (header button) → drawer.
-  await page.evaluate(() => document.querySelector(".topo-node")
-    ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })));
+  await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)
+    ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
   await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
   await page.waitForSelector(".node-tabs", { timeout: 6000 });
@@ -53,7 +57,7 @@ try {
   expect(/Node/.test(txt), "Spec tab shows the Node section");
   expect(/Topology intent/.test(txt), "Spec tab shows the Topology intent section");
   expect(/Provisioning steps/.test(txt) && /Setup device/.test(txt), "shows provisioning steps (Setup device)");
-  expect(/bgp_asn/.test(txt) && /65001/.test(txt), "shows step fields from topology.json (bgp_asn 65001)");
+  expect(/bgp_asn/.test(txt) && txt.includes(String(ASN)), `shows step fields from topology.json (bgp_asn ${ASN})`);
   const ports = await page.evaluate(() => document.querySelectorAll(".node-spec-port-table tbody tr").length);
   expect(ports > 0, `shows the port-config table (${ports} ports)`);
   const order = await page.evaluate(() => Array.from(document.querySelectorAll(".node-spec-port-name"))

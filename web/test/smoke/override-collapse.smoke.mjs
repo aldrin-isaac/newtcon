@@ -18,19 +18,23 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 const _ck = await loginCookie(BASE);
 const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const JSON_H = { "Content-Type": "application/json", ...AUTH };
-const removeOverride = () => fetch(`${BASE}/api/networks/${NET}/ipvpns/IPVPN?scope=zone&scope_instance=myzone`, {
+// Discover an existing ipvpn + zone so the smoke adapts to the network's specs.
+const IPVPN = ((await (await fetch(`${BASE}/api/networks/${NET}/ipvpns`, { headers: AUTH })).json()).names || [])[0];
+const ZONE = ((await (await fetch(`${BASE}/api/networks/${NET}/zones`, { headers: AUTH })).json()).names || [])[0];
+if (!IPVPN || !ZONE) { console.log(`SKIP: ${NET} needs an ipvpn + a zone for the override smoke`); process.exit(0); }
+const removeOverride = () => fetch(`${BASE}/api/networks/${NET}/ipvpns/${IPVPN}?scope=zone&scope_instance=${ZONE}`, {
   method: "DELETE", headers: AUTH,
 }).catch(() => {});
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride(); // clear any leftover from a prior run
-  const base = await (await fetch(`${BASE}/api/networks/${NET}/ipvpns/IPVPN`, { headers: AUTH })).json();
+  const base = await (await fetch(`${BASE}/api/networks/${NET}/ipvpns/${IPVPN}`, { headers: AUTH })).json();
   const r = await fetch(`${BASE}/api/networks/${NET}/ipvpns`, {
     method: "POST", headers: JSON_H,
-    body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone", l3vni: base.l3vni, route_targets: base.route_targets }),
+    body: JSON.stringify({ name: IPVPN, scope: "zone", scope_instance: ZONE, l3vni: base.l3vni, route_targets: base.route_targets }),
   });
-  expect(r.status === 201, `zone override of IPVPN created (${r.status})`);
+  expect(r.status === 201, `zone override of ${IPVPN} created (${r.status})`);
 
   const page = await browser.newPage();
 
