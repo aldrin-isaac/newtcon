@@ -4236,6 +4236,25 @@ async function renderDrawerHeader(
       badges.appendChild(el("span", { className: "node-drawer-badge node-drawer-badge--running" }, "● online"));
     }
   }).catch(() => {
+    // /info is a live probe — unavailable when the device is unreachable or not
+    // yet deployed. Fall back to the NodeSpec so the identity line still shows the
+    // declared facts (platform · zone · AS · mgmt · loopback) rather than going
+    // blank. router-id / vtep are live-only and omitted here.
+    void fetchSpecDetail("nodes", device).then((spec) => {
+      if (subtitle.textContent !== "") return; // /info already populated it
+      const s = (spec ?? {}) as Record<string, unknown>;
+      const fact = (label: string, key: string): string => {
+        const v = s[key];
+        return (typeof v === "string" && v !== "") || typeof v === "number" ? `${label} ${String(v)}` : "";
+      };
+      subtitle.textContent = [
+        typeof s.platform === "string" ? s.platform : "",
+        fact("zone", "zone"),
+        fact("AS", "underlay_asn"),
+        fact("mgmt", "mgmt_ip"),
+        fact("lo", "loopback_ip"),
+      ].filter(Boolean).join(" · ");
+    }).catch(() => { /* spec also unavailable — leave the subtitle empty */ });
     if (viewMode === "spec-physical") {
       badges.appendChild(el("span", { className: "node-drawer-badge node-drawer-badge--down" }, "● offline"));
     }
