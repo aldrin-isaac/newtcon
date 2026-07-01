@@ -4,13 +4,16 @@
 // node via the form, applies, asserts the persisted scaffold, then deletes it.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
 const DEV = "switch4";
 const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
+const af = (p, opts = {}) => fetch(api(p), { ...opts, headers: { ...(opts.headers || {}), ...AUTH } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -52,18 +55,18 @@ try {
   await sleep(3000);
 
   // Verify persisted scaffold via the API.
-  const topo = await (await fetch(api("topology"))).json();
+  const topo = await (await af("topology")).json();
   const entry = (topo.nodes ?? {})[DEV] ?? {};
   const setup = (entry.steps ?? []).find((s) => (s.url || "") === "/setup-device");
   expect(!!setup, "topology device has a setup-device step");
   expect(setup && setup.params?.fields?.hwsku === "Force10-S6000", `setup-device carries hwsku (${setup?.params?.fields?.hwsku})`);
   expect(setup && setup.params?.fields?.bgp_asn === "65004", `setup-device carries bgp_asn (${setup?.params?.fields?.bgp_asn})`);
-  const prof = await (await fetch(api(`nodes/${DEV}`))).json();
+  const prof = await (await af(`nodes/${DEV}`)).json();
   expect(prof && prof.underlay_asn === 65004, `profile has underlay_asn (${prof?.underlay_asn})`);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
 } catch (e) { console.error("threw:", e.message); process.exitCode = 1; } finally {
-  try { await fetch(api(`topology/nodes/${DEV}?force=true`), { method: "DELETE" }); await fetch(api(`nodes/${DEV}`), { method: "DELETE" }); } catch { /* */ }
+  try { await af(`topology/nodes/${DEV}?force=true`, { method: "DELETE" }); await af(`nodes/${DEV}`, { method: "DELETE" }); } catch { /* */ }
   await browser.close();
 }
