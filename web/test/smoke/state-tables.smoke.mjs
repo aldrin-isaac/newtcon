@@ -3,7 +3,7 @@
 // device RPCs, verifies the columns + values, then deletes them.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -21,6 +21,7 @@ async function expandSection(page, title) {
   }, title);
 }
 
+await skipIfNotDeployed(NET, "switch1");
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await rpc("create-vrf", { name: "Vrf_SMK" });
