@@ -5852,7 +5852,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     // Topology view: layout is a split — left = SVG diagram + toolbar,
     // right = docked action panel.
-    const split = el("div", { className: "topology-split topology-split--no-panel" });
+    const split = el("div", { className: "topology-split" });
     const graphSlot = el("div", { className: "topology-graph-slot" });
     split.appendChild(graphSlot);
     root.appendChild(split);
