@@ -27,7 +27,9 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
-await authenticatePage(page, BASE);
+// NOTE: this smoke tests the login OVERLAY itself, so it must NOT pre-authenticate
+// (authenticatePage is intentionally omitted). It requires the server to run with
+// --auth-required for the overlay to appear.
 page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
