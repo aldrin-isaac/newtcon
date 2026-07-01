@@ -7,7 +7,7 @@
 // status dot color classes (topo-status-dot--…).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -17,6 +17,7 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 
 const VALID_STATES = ["running", "booting", "down", "unrealized"];
 
+await skipIfNotDeployed("2node-vs", "switch1");
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
