@@ -10,6 +10,7 @@
 //      scaffold — that would write to disk on the operator's box)
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -24,6 +25,7 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
+await authenticatePage(page, BASE);
 const apiCalls = [];
 page.on("request", (req) => { if (req.url().includes("/api/")) apiCalls.push(req.url()); });
 page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
@@ -75,9 +77,11 @@ try {
   const modalFields = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".network-modal-form .form-control"))
       .map((el) => el.name));
-  expect(modalFields.length === 3, `modal has 3 inputs (got ${JSON.stringify(modalFields)})`);
-  expect(modalFields.includes("id") && modalFields.includes("spec_dir") && modalFields.includes("description"),
-    `modal fields are id + spec_dir + description`);
+  // spec_dir was removed (newtron #245/#251) — networks are created under
+  // newtron's --networks-base, so the operator only supplies id + description.
+  expect(modalFields.length === 2, `modal has 2 inputs (got ${JSON.stringify(modalFields)})`);
+  expect(modalFields.includes("id") && modalFields.includes("description"),
+    `modal fields are id + description`);
   await page.screenshot({ path: "/tmp/newtcon-smoke-n03-modal.png" });
 
   console.log("");

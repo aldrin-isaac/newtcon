@@ -4,6 +4,7 @@
 // node via the form, applies, asserts the persisted scaffold, then deletes it.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -17,6 +18,7 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => {
     try { localStorage.setItem("newtcon.activeNetwork", n); localStorage.setItem("newtcon:topology-view:" + n, "spec"); } catch { /* */ }
     const inst = () => new MutationObserver(() => { const b = document.querySelector(".confirm-modal-btn--confirm"); if (b instanceof HTMLElement) b.click(); }).observe(document.body, { childList: true, subtree: true });

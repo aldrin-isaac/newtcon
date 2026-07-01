@@ -2,6 +2,7 @@
 // interface table — all ports with role/status/service, filters, expand-in-place.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -16,6 +17,7 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((net) => {
     try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ }
   }, NET);

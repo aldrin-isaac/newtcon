@@ -2,6 +2,7 @@
 // header, confirm the apply-preview modal, verify they land in newtron.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -44,6 +45,7 @@ const zoneName = "zone_t" + Math.floor(Math.random() * 9000 + 1000);
 
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
   console.log(`→ open ${BASE} (network ${NET})`);

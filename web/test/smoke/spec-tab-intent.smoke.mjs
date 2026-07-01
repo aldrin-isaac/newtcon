@@ -2,6 +2,7 @@
 // intent — provisioning steps + per-port config — not just the profile.
 
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -19,6 +20,7 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
+  await authenticatePage(page, BASE);
   // Pin the network + spec view mode (the right-click menu wires Inspect → drawer in spec mode).
   await page.evaluateOnNewDocument((net) => {
     try {
