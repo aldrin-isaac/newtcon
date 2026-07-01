@@ -33,8 +33,13 @@ try {
   await page.click("#tab-topology"); await page.waitForSelector(".topo-node", { timeout: 10000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".topology-toolbar-btn")).find((b) => /Create node/.test(b.textContent))?.click());
   await page.waitForSelector('input[name="name"]', { timeout: 6000 });
-  // wait for zone + platform option lists to populate
-  await page.waitForFunction(() => (document.querySelector('select[name="zone"]')?.options.length ?? 0) > 1 && (document.querySelector('select[name="platform"]')?.options.length ?? 1) > 1, { timeout: 8000 });
+  // Wait for the SPECIFIC options we fill to populate. A count > 1 is wrong for a
+  // 1-zone fixture (smoke-fixture has only "myzone"), which left the zone select
+  // on its placeholder and silently blocked the required-field submit.
+  await page.waitForFunction(() =>
+    Array.from(document.querySelector('select[name="zone"]')?.options ?? []).some((o) => o.value === "myzone") &&
+    Array.from(document.querySelector('select[name="platform"]')?.options ?? []).some((o) => o.value === "Force10-S6000_vs"),
+    { timeout: 8000 });
 
   await page.evaluate((dev) => {
     const set = (sel, val, evt) => { const e = document.querySelector(sel); e.value = val; e.dispatchEvent(new Event(evt, { bubbles: true })); };
