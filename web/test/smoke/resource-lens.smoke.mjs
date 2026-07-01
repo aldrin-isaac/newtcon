@@ -4,7 +4,7 @@
 // API, verifies the lens, then reverts.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -23,6 +23,7 @@ async function putDevice(dev) {
   await fetch(api(`topology/nodes/${DEV}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dev) });
 }
 
+await skipIfNotDeployed(NET, "switch1");
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 let original = null;
 try {
