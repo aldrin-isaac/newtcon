@@ -19,14 +19,19 @@ const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
 const _ck = await loginCookie(BASE);
 const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const af = (p, opts = {}) => fetch(api(p), { ...opts, headers: { ...(opts.headers || {}), ...AUTH } });
-const removeOverride = () => af("ipvpns/IPVPN?scope=zone&scope_instance=myzone", { method: "DELETE" }).catch(() => {});
+// Discover an existing ipvpn + zone to scope the override onto, so the smoke
+// adapts to whatever specs the network has rather than assuming IPVPN/myzone.
+const IPVPN = ((await (await af("ipvpns")).json()).names || [])[0];
+const ZONE = ((await (await af("zones")).json()).names || [])[0];
+if (!IPVPN || !ZONE) { console.log(`SKIP: ${NET} needs an ipvpn + a zone for the override smoke`); process.exit(0); }
+const removeOverride = () => af(`ipvpns/${IPVPN}?scope=zone&scope_instance=${ZONE}`, { method: "DELETE" }).catch(() => {});
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride();
-  const b = await (await af("ipvpns/IPVPN")).json();
+  const b = await (await af(`ipvpns/${IPVPN}`)).json();
   const cr = await af("ipvpns", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone", l3vni: b.l3vni, route_targets: b.route_targets }) });
+    body: JSON.stringify({ name: IPVPN, scope: "zone", scope_instance: ZONE, l3vni: b.l3vni, route_targets: b.route_targets }) });
   expect(cr.status === 201, `override created (${cr.status})`);
 
   const page = await browser.newPage();
@@ -53,8 +58,8 @@ try {
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((x) => /Apply/.test(x.textContent))?.click());
   await sleep(2500);
 
-  const baseAlive = (await (await af("ipvpns")).json()).names?.includes("IPVPN");
-  expect(baseAlive, "network base IPVPN survives the scoped delete");
+  const baseAlive = (await (await af("ipvpns")).json()).names?.includes(IPVPN);
+  expect(baseAlive, `network base ${IPVPN} survives the scoped delete`);
   // Re-open the facet and confirm no override rows remain.
   await page.click('[data-kind="services"]'); await sleep(150);
   await page.click('[data-kind="ipvpns"]'); await sleep(400);

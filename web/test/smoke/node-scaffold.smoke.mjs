@@ -14,6 +14,14 @@ const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
 const _ck = await loginCookie(BASE);
 const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const af = (p, opts = {}) => fetch(api(p), { ...opts, headers: { ...(opts.headers || {}), ...AUTH } });
+// Discover the network's zone + a platform (reuse an existing device's) + that
+// platform's hwsku, so the scaffolded node adapts to the network rather than
+// assuming myzone / Force10-S6000.
+const ZONE = ((await (await af("zones")).json()).names || [])[0];
+const REF = await (await af(`nodes/${process.env.DEVICE || "switch1"}`)).json();
+const PLATFORM = REF.platform;
+const HWSKU = PLATFORM ? (await (await af(`platforms/${PLATFORM}`)).json()).hwsku : null;
+if (!ZONE || !PLATFORM) { console.log(`SKIP: ${NET} needs a zone + a platform for the node-scaffold smoke`); process.exit(0); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -36,21 +44,21 @@ try {
   // Wait for the SPECIFIC options we fill to populate. A count > 1 is wrong for a
   // 1-zone fixture (smoke-fixture has only "myzone"), which left the zone select
   // on its placeholder and silently blocked the required-field submit.
-  await page.waitForFunction(() =>
-    Array.from(document.querySelector('select[name="zone"]')?.options ?? []).some((o) => o.value === "myzone") &&
-    Array.from(document.querySelector('select[name="platform"]')?.options ?? []).some((o) => o.value === "Force10-S6000_vs"),
-    { timeout: 8000 });
+  await page.waitForFunction((zone, platform) =>
+    Array.from(document.querySelector('select[name="zone"]')?.options ?? []).some((o) => o.value === zone) &&
+    Array.from(document.querySelector('select[name="platform"]')?.options ?? []).some((o) => o.value === platform),
+    { timeout: 8000 }, ZONE, PLATFORM);
 
-  await page.evaluate((dev) => {
+  await page.evaluate((dev, zone, platform) => {
     const set = (sel, val, evt) => { const e = document.querySelector(sel); e.value = val; e.dispatchEvent(new Event(evt, { bubbles: true })); };
     set('input[name="name"]', dev, "input");
     set('input[name="mgmt_ip"]', "127.0.0.1", "input");
-    set('input[name="loopback_ip"]', "10.1.0.4", "input");
-    set('select[name="zone"]', "myzone", "change");
-    set('select[name="platform"]', "Force10-S6000_vs", "change");
+    set('input[name="loopback_ip"]', "10.9.9.9", "input");
+    set('select[name="zone"]', zone, "change");
+    set('select[name="platform"]', platform, "change");
     set('select[name="role"]', "LeafRouter", "change");
     set('input[name="underlay_asn"]', "65004", "input");
-  }, DEV);
+  }, DEV, ZONE, PLATFORM);
   await page.evaluate(() => Array.from(document.querySelectorAll("button")).find((b) => b.textContent.trim() === "Stage node")?.click());
   await sleep(500);
   // Save → confirm in the apply-preview modal (its own Apply button).
@@ -64,7 +72,7 @@ try {
   const entry = (topo.nodes ?? {})[DEV] ?? {};
   const setup = (entry.steps ?? []).find((s) => (s.url || "") === "/setup-device");
   expect(!!setup, "topology device has a setup-device step");
-  expect(setup && setup.params?.fields?.hwsku === "Force10-S6000", `setup-device carries hwsku (${setup?.params?.fields?.hwsku})`);
+  expect(setup && setup.params?.fields?.hwsku === HWSKU, `setup-device carries discovered hwsku ${HWSKU} (${setup?.params?.fields?.hwsku})`);
   expect(setup && setup.params?.fields?.bgp_asn === "65004", `setup-device carries bgp_asn (${setup?.params?.fields?.bgp_asn})`);
   const prof = await (await af(`nodes/${DEV}`)).json();
   expect(prof && prof.underlay_asn === 65004, `profile has underlay_asn (${prof?.underlay_asn})`);

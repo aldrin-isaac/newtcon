@@ -3,11 +3,16 @@
 // (default lands on Interfaces).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, apiGET } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
+const DEVICE = process.env.DEVICE || "switch1";
+// Discover the device's declared identity so the assertions adapt to whatever
+// network we run against — platform / ASN / loopback differ per fixture.
+const spec = await apiGET(NET, `nodes/${DEVICE}`);
+const PLATFORM = spec.platform, ASN = spec.underlay_asn, LOOPBACK = spec.loopback_ip;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -22,7 +27,7 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 10000 });
-  await page.evaluate(() => document.querySelector(".topo-node")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })));
+  await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
   await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
   await page.waitForSelector(".node-tabs", { timeout: 6000 });
@@ -35,9 +40,10 @@ try {
   expect(active === "Spec", `default tab is Spec in spec-view (Summary removed) (${active})`);
 
   // Header carries identity facts + a stats row, always visible.
-  await page.waitForFunction(() => /Force10-S6000/.test(document.querySelector(".node-drawer-subtitle")?.textContent || ""), { timeout: 6000 });
+  await page.waitForFunction((p) => (document.querySelector(".node-drawer-subtitle")?.textContent || "").includes(p), { timeout: 6000 }, PLATFORM);
   const sub = await page.evaluate(() => document.querySelector(".node-drawer-subtitle")?.textContent || "");
-  expect(/Force10-S6000/.test(sub) && /AS 65001/.test(sub) && /lo 10\.1\.0\.1/.test(sub), `header subtitle has identity facts (${sub})`);
+  expect(sub.includes(PLATFORM) && sub.includes(`AS ${ASN}`) && sub.includes(`lo ${LOOPBACK}`),
+    `header subtitle has discovered identity facts (platform=${PLATFORM} AS=${ASN} lo=${LOOPBACK}): "${sub}"`);
   // Interface counts + drift come from live probes (/interfaces, /drift), present
   // only with a deployed device. Assert them when they populate; skip on the
   // staged fixture (the identity subtitle above is the spec-based part, which now

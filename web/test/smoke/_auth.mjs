@@ -61,6 +61,20 @@ export async function authenticatePage(page, base = DEFAULT_BASE) {
   return true;
 }
 
+// Authenticated GET of /api/networks/{net}/{path}, parsed as JSON. This is the
+// primitive that lets a smoke DISCOVER a network's real data (device identity,
+// port inventory, services with bindings, an existing zone/ipvpn) instead of
+// hard-coding fixture-specific values — the key to being network-agnostic. The
+// session cookie is fetched once per process and reused.
+let _agnosticCookie;
+export async function apiGET(net, path, base = DEFAULT_BASE) {
+  if (_agnosticCookie === undefined) _agnosticCookie = await loginCookie(base);
+  const H = _agnosticCookie ? { Cookie: `${_agnosticCookie.name}=${_agnosticCookie.value}` } : {};
+  const r = await fetch(`${base}/api/networks/${net}/${path}`, { headers: H });
+  if (!r.ok) throw new Error(`GET /api/networks/${net}/${path}: HTTP ${r.status}`);
+  return r.json();
+}
+
 // True when a device has live state to read (a deployed VM). The staged smoke
 // fixture has no config DB, so its device-state endpoints 503. Deploy-gated
 // smokes call skipIfNotDeployed() to skip (not fail) in that case.

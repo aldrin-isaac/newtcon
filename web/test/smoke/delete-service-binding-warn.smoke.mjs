@@ -3,12 +3,25 @@
 // Cancel must leave the service untouched. Read-only: never confirms the delete.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, apiGET } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
-const SVC = "TRANSIT"; // applied on 6 underlay endpoints in the fixture
+// Discover the most-bound service (and its binding count) from the topology's
+// apply-service steps, so the warning assertion adapts to whatever the network
+// has applied rather than assuming a specific fixture service + count.
+const _topo = await apiGET(NET, "topology");
+const _byService = {};
+for (const [, node] of Object.entries(_topo.nodes || {})) {
+  for (const s of node.steps || []) {
+    if (/apply-service/.test(s.url || "") && s.params?.service) {
+      _byService[s.params.service] = (_byService[s.params.service] || 0) + 1;
+    }
+  }
+}
+const [SVC, BINDING_COUNT] = Object.entries(_byService).sort((a, b) => b[1] - a[1])[0] || [null, 0];
+if (!SVC) { console.log(`SKIP: ${NET} has no applied services to exercise the delete-binding warning`); process.exit(0); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -29,9 +42,9 @@ try {
   await page.waitForSelector(".confirm-modal", { timeout: 5000 });
   const body = await page.evaluate(() => document.querySelector(".confirm-modal-body")?.textContent || "");
   const confirmLabel = await page.evaluate(() => document.querySelector(".confirm-modal-btn--confirm")?.textContent || "");
-  expect(/applied on 6 interfaces/.test(body), `warns with binding count (“${body.slice(0, 70)}…”)`);
+  expect(body.includes(`applied on ${BINDING_COUNT} interface`), `warns with discovered binding count ${BINDING_COUNT} (“${body.slice(0, 70)}…”)`);
   expect(/also removes those \d+ binding/.test(body), "explains force delete cascades the bindings");
-  expect(/switch\d:Ethernet\d/.test(body), "lists the bound endpoints");
+  expect(/[\w-]+:Ethernet\d+/.test(body), "lists the bound endpoints (device:interface)");
   expect(confirmLabel === "Force delete", `confirm offers Force delete (got "${confirmLabel}")`);
 
   // Cancel → service must remain.

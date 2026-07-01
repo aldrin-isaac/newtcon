@@ -2,11 +2,17 @@
 // interface table — all ports with role/status/service, filters, expand-in-place.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, apiGET } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
+const DEVICE = process.env.DEVICE || "switch1";
+// Discover the device's platform port inventory so the count/row assertions adapt
+// to whatever platform the network's device uses (one table row per platform port).
+const _spec = await apiGET(NET, `nodes/${DEVICE}`);
+const _plat = await apiGET(NET, `platforms/${_spec.platform}`);
+const PORTS = _plat.port_count ?? _plat.ports;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -26,7 +32,7 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 10000 });
-  await page.evaluate(() => document.querySelector(".topo-node")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })));
+  await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
   await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
   await page.waitForSelector(".node-tabs", { timeout: 6000 });
@@ -35,11 +41,15 @@ try {
   await sleep(300);
 
   const counts = await page.evaluate(() => document.querySelector(".iface-view-counts")?.textContent || "");
-  expect(/32 ports/.test(counts), `port-utilization header (${counts})`);
+  expect(counts.includes(`${PORTS} ports`), `port-utilization header (discovered ${PORTS} ports): ${counts}`);
   const rowCount = await page.evaluate(() => document.querySelectorAll(".iface-table tbody .iface-row").length);
-  expect(rowCount === 32, `one row per platform port (${rowCount})`);
+  expect(rowCount === PORTS, `one row per platform port (discovered ${PORTS}, got ${rowCount})`);
   const order = await page.evaluate(() => Array.from(document.querySelectorAll(".iface-table tbody .iface-row .iface-name")).slice(0, 4).map((e) => e.textContent.trim()));
-  expect(JSON.stringify(order) === JSON.stringify(["Ethernet0", "Ethernet4", "Ethernet8", "Ethernet12"]), `numerically ordered (${order.join(",")})`);
+  // Assert numeric ORDERING, not specific names — port naming differs by platform
+  // (Force10 steps by 4: Ethernet0/4/8/12; cisco steps by 1: Ethernet0/1/2/3).
+  const nums = order.map((n) => parseInt(n.replace(/\D/g, ""), 10));
+  const ordered = order.every((n) => /^Ethernet\d+$/.test(n)) && nums.every((v, i) => i === 0 || v > nums[i - 1]);
+  expect(ordered, `ports numerically ordered (${order.join(",")})`);
   const roleChips = await page.evaluate(() => document.querySelectorAll(".iface-table .iface-role").length);
   expect(roleChips > 0, `role chips present (${roleChips})`);
   const applyCtas = await page.evaluate(() => document.querySelectorAll(".iface-apply-cta").length);

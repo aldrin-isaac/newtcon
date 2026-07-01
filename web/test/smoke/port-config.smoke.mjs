@@ -13,8 +13,13 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const _ck = await loginCookie(BASE);
 const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const NET = process.env.NET || "smoke-fixture";
-const DEVICE = "switch1";
-const PORT = "Ethernet0";
+const DEVICE = process.env.DEVICE || "switch1";
+const PORT = process.env.PORT || "Ethernet0";
+// Discover the platform's port count so the inventory-picker assertion adapts to
+// whatever platform the network's device uses.
+const _spec = await (await fetch(`${BASE}/api/networks/${NET}/nodes/${DEVICE}`, { headers: AUTH })).json();
+const _plat = await (await fetch(`${BASE}/api/networks/${NET}/platforms/${_spec.platform}`, { headers: AUTH })).json();
+const PORTS = _plat.port_count ?? _plat.ports;
 
 const failed = [];
 const ok = [];
@@ -44,7 +49,9 @@ try {
   await authenticatePage(page, BASE);
   // Pin the active network + auto-accept inline confirm modals.
   await page.evaluateOnNewDocument((net) => {
-    try { localStorage.setItem("newtcon.activeNetwork", net); } catch { /* */ }
+    // Pin spec view — "Configure a port" is a spec-view affordance; a running lab
+    // would otherwise default to Lab view (lifecycle actions, no port-config).
+    try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ }
     const install = () => new MutationObserver(() => {
       const btn = document.querySelector(".confirm-modal-btn--confirm");
       if (btn instanceof HTMLElement) btn.click();
@@ -61,9 +68,10 @@ try {
 
   // Select the device → action panel with the Interfaces tab.
   console.log(`→ select ${DEVICE}`);
-  await page.evaluate(() => {
-    document.querySelectorAll(".topo-node")[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
+  const ORIGINAL = await fetchTopoPort(); // capture pre-smoke state to restore later
+  await page.evaluate((dev) => {
+    document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }, DEVICE);
   await page.waitForSelector(".topo-portcfg", { timeout: 8000 });
   expect(true, "device panel shows the 'Configure a port' section");
 
@@ -75,7 +83,7 @@ try {
     { timeout: 8000 },
   );
   const portCount = await page.evaluate(() => document.querySelector(".topo-portcfg-select").options.length - 1);
-  expect(portCount === 32, `picker populated from inventory (${portCount} ports; expected 32)`);
+  expect(portCount === PORTS, `picker populated from inventory (${portCount} ports; discovered ${PORTS})`);
 
   // Pick the port → schema-driven PortConfig form renders.
   console.log(`→ pick ${PORT}`);
@@ -106,7 +114,7 @@ try {
   // The queued op shows in the per-device queued list.
   const queued = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".topo-queued-item-label")).map((e) => e.textContent.trim()));
-  expect(queued.some((t) => /ports on switch1/i.test(t)), `port edit staged + shown in queue (${JSON.stringify(queued)})`);
+  expect(queued.some((t) => new RegExp(`ports on ${DEVICE}`, "i").test(t)), `port edit staged + shown in queue (${JSON.stringify(queued)})`);
 
   // Apply via the per-device savebar; capture the whole-device PUT.
   console.log("→ Apply changes (per-device savebar)");
@@ -135,7 +143,7 @@ try {
   console.log("→ cleanup (restore port)");
   const topo = await (await fetch(`${BASE}/api/networks/${NET}/topology`, { headers: AUTH })).json();
   const dev = (topo.data ?? topo).nodes[DEVICE];
-  dev.ports[PORT] = { admin_status: "up", mtu: 9100 };
+  if (ORIGINAL) dev.ports[PORT] = ORIGINAL; else delete dev.ports[PORT];
   await fetch(`${BASE}/api/networks/${NET}/topology/nodes/${DEVICE}`, {
     method: "PUT", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify(dev),
   });

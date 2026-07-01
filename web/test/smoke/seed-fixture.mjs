@@ -16,6 +16,19 @@ import { loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NET = process.env.SMOKE_NET || "smoke-fixture";
+
+// Per-network identity variant. The suite is network-agnostic — smokes discover
+// these values via the API rather than hard-coding them — so seeding a second
+// network with DISTINCT identity (different platform/hwsku/ASN/loopback/zone) is
+// what proves the discovery actually adapts. Any unlisted network falls back to
+// the smoke-fixture variant.
+const VARIANTS = {
+  "smoke-fixture":    { platform: "Force10-S6000_vs",    hwsku: "Force10-S6000",        baseAsn: 65001, lo: "10.1.0.", zone: "myzone" },
+  "3node-vs-newtcon": { platform: "cisco-p200-32x100-vs", hwsku: "cisco-p200-32x100-vs", baseAsn: 64512, lo: "10.2.0.", zone: "zoneb" },
+};
+const V = VARIANTS[NET] || VARIANTS["smoke-fixture"];
+const ASNS = [V.baseAsn, V.baseAsn + 1, V.baseAsn + 2];
+
 const cookie = await loginCookie(BASE);
 const HDRS = { "Content-Type": "application/json", ...(cookie ? { Cookie: `${cookie.name}=${cookie.value}` } : {}) };
 
@@ -41,7 +54,7 @@ console.log(`seeding ${NET} @ ${BASE}${cookie ? " (auth)" : ""}`);
 await put("/api/networks", { id: NET, description: "smoke-suite fixture (seed-fixture.mjs)" }, "register network");
 
 // 2. flat specs (order: referenced before referencer)
-await put(N("/zones"), { name: "myzone" }, "zone myzone");
+await put(N("/zones"), { name: V.zone }, `zone ${V.zone}`);
 await put(N("/ipvpns"), { name: "IPVPN", l3vni: 10001, route_targets: ["65001:300"], description: "L3 VRF for EVPNIRB" }, "ipvpn IPVPN");
 await put(N("/macvpns"), { name: "MACVPN", vni: 10100, route_targets: ["65533:100"] }, "macvpn MACVPN");
 await put(N("/prefix-lists"), { name: "PREFIXLIST1" }, "prefix-list PREFIXLIST1");
@@ -56,29 +69,34 @@ await put(N("/route-policies"), { name: "ROUTEPOLICY1", description: "route poli
 await put(N("/services"), { name: "TRANSIT", service_type: "routed", description: "Underlay L3 routed transit fabric", routing: { protocol: "bgp", peer_as: "request" } }, "service TRANSIT");
 await put(N("/services"), { name: "EVPNIRB", service_type: "evpn-irb", ipvpn: "IPVPN", macvpn: "MACVPN", ingress_filter: "FILTER1", egress_filter: "FILTER1", qos_policy: "QOS1" }, "service EVPNIRB");
 
-// 3. node specs — must exist before a topology device can reference them
-for (const [host, lo, asn] of [["switch1", "10.1.0.1", 65001], ["switch2", "10.1.0.2", 65002], ["switch3", "10.1.0.3", 65003]]) {
-  await put(N("/nodes"), { name: host, mgmt_ip: "127.0.0.1", loopback_ip: lo, zone: "myzone", platform: "Force10-S6000_vs", underlay_asn: asn, ssh_user: "admin" }, `node-spec ${host}`);
+// 3. node specs — must exist before a topology device can reference them.
+// UPSERT (create then update): a create is skipped if the spec already exists,
+// which would leave a pre-existing network on its old identity. The follow-up PUT
+// forces this variant's platform/ASN/loopback/zone so re-seeding an existing
+// network (e.g. a distinct proof network) actually re-stamps its identity.
+const HOSTS = [["switch1", 0], ["switch2", 1], ["switch3", 2]];
+for (const [host, i] of HOSTS) {
+  const body = { name: host, mgmt_ip: "127.0.0.1", loopback_ip: `${V.lo}${i + 1}`, zone: V.zone, platform: V.platform, underlay_asn: ASNS[i], ssh_user: "admin" };
+  await put(N("/nodes"), body, `node-spec ${host}`);
+  const { status, txt } = await req("PUT", N(`/nodes/${host}`), body);
+  if (status >= 300) { warn++; console.log(`  WARN node-spec ${host} update: ${status} ${txt.slice(0, 100)}`); }
 }
 
 // 4. topology — 3 switches in a triangle
 const topo = JSON.parse((await req("GET", N("/topology"))).txt || "{}");
 const have = new Set(Object.keys(topo.nodes || {}));
-const scaffold = (host, asn) => ({
-  steps: [{ url: "/setup-device", params: { fields: { hostname: host, type: "LeafRouter", docker_routing_config_mode: "unified", frr_mgmt_framework_config: "true", hwsku: "Force10-S6000", bgp_asn: String(asn) } } }],
-  ports: {},
+const scaffold = (host, asn, ports) => ({
+  steps: [{ url: "/setup-device", params: { fields: { hostname: host, type: "LeafRouter", docker_routing_config_mode: "unified", frr_mgmt_framework_config: "true", hwsku: V.hwsku, bgp_asn: String(asn) } } }],
+  ports,
 });
-for (const [host, asn] of [["switch1", 65001], ["switch2", 65002], ["switch3", 65003]]) {
+for (const [host, i] of HOSTS) {
   if (have.has(host)) { console.log(`  ok   node ${host} (exists)`); continue; }
-  await put(N("/topology/nodes"), { name: host, device: scaffold(host, asn) }, `node ${host}`);
+  await put(N("/topology/nodes"), { name: host, device: scaffold(host, ASNS[i], {}) }, `node ${host}`);
 }
 // configure the two inter-switch ports on each switch — apply-service requires
 // the interface to exist on the device. PUT (whole-device replace) is idempotent.
-for (const [host, asn] of [["switch1", 65001], ["switch2", 65002], ["switch3", 65003]]) {
-  const body = {
-    steps: [{ url: "/setup-device", params: { fields: { hostname: host, type: "LeafRouter", docker_routing_config_mode: "unified", frr_mgmt_framework_config: "true", hwsku: "Force10-S6000", bgp_asn: String(asn) } } }],
-    ports: { Ethernet0: { admin_status: "up", mtu: 9100 }, Ethernet4: { admin_status: "up", mtu: 9100 } },
-  };
+for (const [host, i] of HOSTS) {
+  const body = scaffold(host, ASNS[i], { Ethernet0: { admin_status: "up", mtu: 9100 }, Ethernet4: { admin_status: "up", mtu: 9100 } });
   const { status, txt } = await req("PUT", N(`/topology/nodes/${host}`), body);
   if (status < 300) console.log(`  ok   ports ${host} (${status})`);
   else { warn++; console.log(`  WARN ports ${host}: ${status} ${txt.slice(0, 100)}`); }
@@ -89,16 +107,17 @@ for (const [a, z] of links) await put(N("/topology/links"), { a, z }, `link ${a}
 
 // 4. TRANSIT applied on all 6 inter-switch endpoints (persist to topology), peer AS = neighbor's
 const applies = [
-  ["switch1", "Ethernet0", "10.255.255.0/31", 65002], ["switch1", "Ethernet4", "10.255.255.5/31", 65003],
-  ["switch2", "Ethernet0", "10.255.255.1/31", 65001], ["switch2", "Ethernet4", "10.255.255.2/31", 65003],
-  ["switch3", "Ethernet0", "10.255.255.3/31", 65002], ["switch3", "Ethernet4", "10.255.255.4/31", 65001],
+  ["switch1", "Ethernet0", "10.255.255.0/31", ASNS[1]], ["switch1", "Ethernet4", "10.255.255.5/31", ASNS[2]],
+  ["switch2", "Ethernet0", "10.255.255.1/31", ASNS[0]], ["switch2", "Ethernet4", "10.255.255.2/31", ASNS[2]],
+  ["switch3", "Ethernet0", "10.255.255.3/31", ASNS[1]], ["switch3", "Ethernet4", "10.255.255.4/31", ASNS[0]],
 ];
 for (const [dev, iface, ip, peer] of applies) {
   await put(N(`/nodes/${dev}/interfaces/${iface}/rpc/apply-service?mode=topology&persist=topology`), { service: "TRANSIT", ip_address: ip, peer_as: peer }, `apply TRANSIT ${dev}:${iface}`);
 }
 
-// 5. one zone override (for override-* smokes): IPVPN scoped to myzone
-await put(N("/ipvpns"), { name: "IPVPN", l3vni: 10002, route_targets: ["65001:301"], scope: "zone", scope_instance: "myzone" }, "override ipvpn IPVPN@zone:myzone");
+// Note: no pre-seeded zone override — the override-* smokes create (and clean up)
+// their own scoped override on a discovered zone, so a fixture-provided one would
+// only collide (two overrides break the "delete → none left" assertion).
 
 console.log(warn === 0 ? "\nseed OK" : `\nseed completed with ${warn} warning(s)`);
 process.exitCode = 0;
