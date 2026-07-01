@@ -1,63 +1,35 @@
-# Smoke suite backlog (under `--auth-required`)
+# Smoke suite status (under `--auth-required`)
 
-**18 / 32 PASS or SKIP** (up from 12 → 18 this pass; 3 at the effort's start).
-Run with the fixture seeded (`node test/smoke/seed-fixture.mjs`) and
-`NEWTCON_URL` + `NEWTCON_TEST_USER=ron` / `NEWTCON_TEST_PASS` set.
+**Whole suite green or deploy-gated.** From 3 passing at the start of this effort
+to the full suite. Run with the fixture seeded (`node test/smoke/seed-fixture.mjs`)
+and `NEWTCON_URL` + `NEWTCON_TEST_USER=ron` / `NEWTCON_TEST_PASS` set.
 
-## Green / skip (18)
-apply-results-modal, audit-reopen, auth-gate, delete-service-binding-warn,
-deploy-as-lab, device-status-badges, iface-actions, iface-table, network-switcher,
-override-collapse, override-delete, port-config, spec-tab-intent, staging,
-subrule-before-apply — plus deploy-gated **skips** (exit 0): topology-e2e,
-per-device-apply, topology-broad (device-state reads need a deployed device).
+## Deploy-gated skips (exit 0 via `skipIfNotDeployed`)
+`topology-e2e`, `per-device-apply`, `topology-broad`, `resource-lens`,
+`state-tables`, `lags-neighbors` — their assertions read live device state
+(vlans/vrfs/acls/bgp/LAGs), which 503s on the staged fixture. They pass against a
+deployed lab (e.g. `2node-vs` when its VMs are up).
 
-## Done this pass
-- **A (direct-newtron auth):** override-delete, port-config routed through newtcon
-  `/api` + cookie. The device-state topology smokes deploy-gated (`skipIfNotDeployed`).
-- **device-status-badges:** updated to the #210 palette (`topo-elem--{spec-only|
-  actuated-*|drift|unknown}`) + dropped the obsolete palette-vs-lifecycle match.
-- **D (stale bodies):** specs-drawer-* auth-env aligned to `NEWTCON_TEST_PASS`/ron;
-  `service_type` (not `type`); queue `dwrr` (not `wrr`).
+## What the effort found
+Every failure was **test drift**, not a product bug, with **one exception**: the
+drawer-header identity subtitle went blank for offline/staged devices because it
+was sourced only from the live `/info` probe (fixed in #324 — falls back to the
+NodeSpec). The recurring drift causes were:
 
-## Remaining 14 — per-smoke UI drift (with next step)
-| Smoke | Symptom | Root cause / next step |
-|---|---|---|
-| lab-tab-retired | nav asserts stale set | nav is `[Specs,Topology,Permissions,Changes,Audit]`; update the expected list |
-| node-create-with-profile | no "+ Create node" in toolbar (`[Deploy,Provision,Destroy]`) | profiles→nodes + Add-node moved; retarget the create affordance |
-| topology-profile-tab | "Node not clickable" (0/0) | "profile" tab renamed/removed (profiles→nodes); update the tab selector |
-| specs-drawer-services-zones | "Node not clickable" | selector drift; find the current clickable element |
-| node-scaffold | "topology device has a setup-device step" | scaffold-step assertion; verify against buildDeviceScaffold output |
-| topology-scope-services-only | guiding hint text `null` | hint copy/selector changed |
-| topology-menu | 404 resource | a fetch 404s (endpoint moved) during the menu flow |
-| specs-drawer-edit | 8000ms timeout | UI element after create; find the current selector |
-| specs-drawer-subrule | post-queue UI assertion | queue body fixed; a later UI check (queues section) drifted |
-| drawer-header | 6000ms timeout | waits on a drawer element past `.topo-node`; per-smoke selector |
-| resource-lens | 6000ms timeout | same class — the resource-lens section selector |
-| state-tables | 6000ms timeout | same class — the State-tab table selector |
-| lags-neighbors | LAG table empty | fixture has no LAGs — seed a LAG, or deploy-gate |
-| device-lifecycle | lifecycle pill state `null` | 2node-vs lab IS running; the drawer lifecycle pill isn't resolving lab status — investigate as possible real bug vs. selector |
+- **Auth** — smokes predated `--auth-required`; direct-newtron and node-side
+  verify fetches needed the session cookie (`_auth.mjs` helper + `ron` account).
+- **#210 view-mode gating** — spec-only affordances (`+ Create node`, the Inspect
+  menu, the empty `NODE_ACTIONS` panel) require Spec view; lab lifecycle requires
+  Lab view. Smokes now pin `newtcon:topology-view:<net>`.
+- **Renames** — profiles→nodes (`#node-panel-profile`→`#node-panel-spec`), Summary
+  tab folded, `.spec-form`→`.schema-form`, "Type"→"Service Type", "Zones"→"Zone".
+- **Model shifts** — edit-Save **stages** (staging model) then applies; the schema
+  form uses HTML5 `required` + read-only immutable identifiers; newtron
+  upper-cases spec names (`smoke-edit-1`→`SMOKE_EDIT_1`).
+- **Fixture** — a durable `smoke-fixture` (`seed-fixture.mjs`); note its API-created
+  specs (e.g. the `myzone` zone) can be wiped by engine resets — re-seed before a run.
 
-## Notes
-- The three 6000ms-timeout smokes (drawer-header/resource-lens/state-tables)
-  likely share one cause (an element that renders only in a view mode or with
-  data the fixture lacks) — investigate together.
-- device-lifecycle is worth a closer look: the lab is running yet the pill reads
-  null. Could be a real resolution bug rather than test drift.
-- lags-neighbors needs a LAG in the fixture (extend seed-fixture.mjs) or a
-  deploy-gate.
-
----
-
-## Final tail (3 remaining — diagnosed, need deeper rewrites)
-After the overnight passes the suite is ~25 green + ~7 deploy-gated skips. Three
-smokes need more than a selector nudge:
-
-- **specs-drawer-edit** — its node-side `api()` (own cookie jar, ron/ronthenewt)
-  creates the service fine, but the page-side Services row doesn't appear before
-  the 8s wait. Likely a facet/reload-timing gap (reload uses `domcontentloaded`,
-  not `networkidle0`); confirm the service lands then align the page wait.
-- **node-scaffold** — the "Add node" write flow persists **no** topology entry at
-  all (setup-device step + hwsku + bgp_asn all absent). The form-fill →
-  Stage node → Apply chain isn't landing; debug whether the schema-form fill
-  (role/underlay_asn) is captured by getValues at stage time (a required field may
-  be blocking the stage silently).
+## Durable test infrastructure added
+- `_auth.mjs` — `authenticatePage` / `loginCookie` / `skipIfNotDeployed`.
+- `seed-fixture.mjs` — idempotent 3-switch triangle + TRANSIT underlay + EVPN-IRB.
+- `docs/testing-auth.md` — the `ron` nologin-superuser + cookie-jar recipe.
