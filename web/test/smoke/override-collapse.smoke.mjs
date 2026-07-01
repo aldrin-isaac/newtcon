@@ -4,7 +4,7 @@
 // via newtron's scoped delete (newtcon has no scoped-delete affordance yet).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -13,17 +13,21 @@ const NET = process.env.NET || "smoke-fixture";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
-const removeOverride = () => fetch(`${NEWTRON}/newtron/v1/networks/${NET}/delete-ipvpn`, {
-  method: "POST", headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone" }),
+// Node-side calls go through newtcon /api with the session cookie (newtron :18080
+// needs a bearer under --auth-required). Scoped delete uses newtcon's DELETE.
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
+const JSON_H = { "Content-Type": "application/json", ...AUTH };
+const removeOverride = () => fetch(`${BASE}/api/networks/${NET}/ipvpns/IPVPN?scope=zone&scope_instance=myzone`, {
+  method: "DELETE", headers: AUTH,
 }).catch(() => {});
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride(); // clear any leftover from a prior run
-  const base = await (await fetch(`${BASE}/api/networks/${NET}/ipvpns/IPVPN`)).json();
+  const base = await (await fetch(`${BASE}/api/networks/${NET}/ipvpns/IPVPN`, { headers: AUTH })).json();
   const r = await fetch(`${BASE}/api/networks/${NET}/ipvpns`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: JSON_H,
     body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone", l3vni: base.l3vni, route_targets: base.route_targets }),
   });
   expect(r.status === 201, `zone override of IPVPN created (${r.status})`);

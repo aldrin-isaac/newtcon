@@ -44,7 +44,7 @@ try {
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-01-overlay.png" });
 
   const title = await page.$eval("#auth-overlay .auth-card-title", (el) => el.textContent?.trim());
-  expect(title === "Sign in to newtcon", `overlay title: "${title}"`);
+  expect(title === "Sign in to Newtron Console", `overlay title: "${title}"`);
 
   // 2. Workspace gated — panel-specs is empty until sign-in mounts it.
   const specsPanelEmpty = await page.$eval("#panel-specs", (el) => el.children.length === 0);

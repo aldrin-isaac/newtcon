@@ -2,7 +2,7 @@
 // header, confirm the apply-preview modal, verify they land in newtron.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -33,7 +33,11 @@ async function saveAndConfirm(page) {
 
 // newtron returns 500 (not 404) with {"error":"zone '..' not found"} for a
 // missing zone, so "absent" means not-ok rather than a specific status.
-const zoneUrl = (name) => `${NEWTRON}/newtron/v1/networks/${NET}/zones/${name}`;
+// Verify through newtcon (authenticated via the session cookie) rather than
+// hitting newtron :18080 directly, which needs a bearer under --auth-required.
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
+const zoneUrl = (name) => `${BASE}/api/networks/${NET}/zones/${name}`;
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
@@ -107,7 +111,7 @@ try {
   expect(greenRowSeen >= 1, `≥1 green pending-add row in the panel (got ${greenRowSeen})`);
 
   // Confirm newtron does NOT yet have it (still queued, not saved).
-  const beforeSave = await fetch(zoneUrl(zoneName));
+  const beforeSave = await fetch(zoneUrl(zoneName), { headers: AUTH });
   expect(!beforeSave.ok, `newtron does NOT have ${zoneName} pre-save (got ${beforeSave.status})`);
 
   // ─── Save (+ confirm the apply-preview modal) ─────────────────────
@@ -118,7 +122,7 @@ try {
   const barHiddenAfter = await page.$eval("#pending-bar", (el) => el.hidden);
   expect(barHiddenAfter, "pending bar hidden after Save");
 
-  const afterSave = await fetch(zoneUrl(zoneName));
+  const afterSave = await fetch(zoneUrl(zoneName), { headers: AUTH });
   expect(afterSave.ok, `newtron now serves zone ${zoneName} (got ${afterSave.status})`);
 
   // ─── Cleanup: queue a delete then Save ──────────────────────────
@@ -137,7 +141,7 @@ try {
   console.log("→ click Save to apply the delete");
   await saveAndConfirm(page);
 
-  const afterDelete = await fetch(zoneUrl(zoneName));
+  const afterDelete = await fetch(zoneUrl(zoneName), { headers: AUTH });
   expect(!afterDelete.ok, `zone ${zoneName} gone from newtron after delete (status ${afterDelete.status})`);
 
   console.log("");
