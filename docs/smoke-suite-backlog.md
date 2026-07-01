@@ -61,7 +61,3 @@ smokes need more than a selector nudge:
   Stage node → Apply chain isn't landing; debug whether the schema-form fill
   (role/underlay_asn) is captured by getValues at stage time (a required field may
   be blocking the stage silently).
-- **topology-menu** — asserts the single-device action panel has "≥7 categories"
-  with VLAN/BGP/QoS forms. Post-#210 `NODE_ACTIONS` is **empty by design** (service
-  composition moved to the Specs tab; the panel shows the interfaces tab + a hint).
-  This smoke needs a rewrite to the new model, not a fix.

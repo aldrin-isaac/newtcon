@@ -67,33 +67,15 @@ try {
     `bar has Apply + Discard buttons (got "${saveText}")`);
   const ifaceCount = await page.$$eval(".topo-iface-chip", (els) => els.length);
   expect(ifaceCount > 0, `interface chips populated from topology (got ${ifaceCount})`);
+  // Post-#210: NODE_ACTIONS is empty by design — a single-device panel guides to
+  // the interface list + the Specs tab rather than node-config action groups
+  // (VLAN/etc. are gone; service composition lives in the Specs tab).
   const groupCount = await page.$$eval(".topo-action-group", (els) => els.length);
-  expect(groupCount >= 7, `action panel has ≥7 categories (got ${groupCount})`);
+  expect(groupCount === 0, `single-device panel has no node-action groups post-#210 (got ${groupCount})`);
+  const nodeHint = await page.$eval(".topo-action-panel-empty-hint", (el) => el.textContent).catch(() => "");
+  expect(/Specs tab/.test(nodeHint) && /port mode/.test(nodeHint),
+    `guiding hint points to interfaces + Specs tab (got "${nodeHint}")`);
   await shot(page, "p03-single-select-panel");
-
-  // ---- Open a group, see actions -------------------------------------
-  console.log("→ open VLANs group");
-  await page.evaluate(() => {
-    const groups = Array.from(document.querySelectorAll(".topo-action-group"));
-    const vlanGroup = groups.find((g) => /VLAN/.test(g.querySelector(".topo-action-group-summary")?.textContent ?? ""));
-    if (vlanGroup) vlanGroup.setAttribute("open", "");
-  });
-  await new Promise((r) => setTimeout(r, 100));
-  await shot(page, "p04-vlans-open");
-
-  // ---- Click "Create VLAN" → inline form with VLAN ID + Name --------
-  console.log("→ click Create VLAN");
-  await page.evaluate(() => {
-    const items = Array.from(document.querySelectorAll(".topo-action-item-label"));
-    const createVlan = items.find((it) => it.textContent.trim() === "Create VLAN");
-    createVlan?.closest("button")?.click();
-  });
-  await new Promise((r) => setTimeout(r, 200));
-  const inlineForm = await page.$(".topo-inline-form");
-  expect(!!inlineForm, "inline action form opens");
-  const inlineLabels = await page.$$eval(".topo-inline-form .form-label", (els) => els.map((e) => e.textContent.trim()));
-  expect(inlineLabels.some((l) => /VLAN ID/.test(l)), `inline form has VLAN ID field (got ${JSON.stringify(inlineLabels)})`);
-  await shot(page, "p05-inline-form");
 
   // ---- Click interface chip → panel switches to interface actions ---
   console.log("→ click first interface chip");
@@ -104,9 +86,10 @@ try {
   const ifKind = await page.$eval(".topo-action-panel-kind", (el) => el.textContent).catch(() => "");
   expect(ifKind === "Interface", `panel kind switches to Interface (got "${ifKind}")`);
   const ifGroups = await page.$$eval(".topo-action-group-summary", (els) => els.map((e) => e.textContent.trim()));
+  // Post-#210 the interface panel is port mode + service binding (BGP/QoS moved
+  // to the Specs-tab service composition).
+  expect(ifGroups.includes("Port mode"), "iface panel includes Port mode group");
   expect(ifGroups.includes("Service"), "iface panel includes Service group");
-  expect(ifGroups.includes("BGP"), "iface panel includes BGP group");
-  expect(ifGroups.includes("QoS"), "iface panel includes QoS group");
   await shot(page, "p06-iface-panel");
 
   // ---- Click "Bind service" → form with service dropdown (autofill) -
