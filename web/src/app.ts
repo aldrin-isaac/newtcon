@@ -159,6 +159,7 @@ import {
   isDevicePendingRemove,
   pendingTopologyLinkAdds,
   enqueueInterfaceAction,
+  enqueuePortConfig,
   enqueueTopologyRemoveLink,
   deviceQueue,
   subscribe as subscribePending,
@@ -3402,6 +3403,13 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
 
   actions.appendChild(portModeMenu(formHost, device, row.name, reload));
 
+  // Physical port properties (admin_status / mtu / speed / …) — the schema-driven
+  // PortConfig form, staged as a whole-device update. This is the drawer home for
+  // what used to live only in the Topology side panel's "Configure a port".
+  const propsBtn = el("button", { type: "button", className: "iface-action-btn" }, "Properties");
+  propsBtn.addEventListener("click", () => void openPortPropsForm(formHost, device, row.name, reload));
+  actions.appendChild(propsBtn);
+
   if (row.canApplyService) {
     const apply = el("button", { type: "button", className: "iface-action-btn" }, "Apply service");
     apply.addEventListener("click", () => openIfaceForm(formHost, device, row.name, findIfaceAction("Service", "apply-service"), reload));
@@ -3431,6 +3439,55 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
     raw.appendChild(renderValue(row.live));
     host.appendChild(raw);
   }
+}
+
+// openPortPropsForm renders the schema-driven PortConfig form (admin_status /
+// mtu / speed / description) for one port, prefilled from its current topology
+// config, and stages the edit as a whole-device update (enqueuePortConfig folds
+// every port edit on a device into one PUT so sibling ports aren't clobbered).
+async function openPortPropsForm(formHost: HTMLElement, device: string, port: string, reload: () => void): Promise<void> {
+  formHost.textContent = "";
+  formHost.appendChild(el("p", { className: "iface-action-form-loading" }, "Loading port properties…"));
+
+  let schema: Awaited<ReturnType<typeof fetchSchema>>;
+  let currentDevice: Record<string, unknown>;
+  try {
+    const [sc, topo] = await Promise.all([fetchSchema("PortConfig"), fetchTopology()]);
+    schema = sc;
+    currentDevice = ((topo as { nodes?: Record<string, Record<string, unknown>> } | null)?.nodes ?? {})[device] ?? {};
+  } catch {
+    formHost.textContent = "";
+    formHost.appendChild(el("p", { className: "panel-error" },
+      "Port configuration isn't available — this newtron build exposes no PortConfig schema."));
+    return;
+  }
+
+  const currentPort = ((currentDevice.ports as Record<string, Record<string, unknown>>) ?? {})[port] ?? {};
+  // `port` is the ports-map key, not a body field — skip it in the form.
+  const sf = await renderSchemaForm({ schema, prefill: { ...currentPort }, skipFields: new Set(["port"]) });
+
+  formHost.textContent = "";
+  const wrap = el("div", { className: "iface-action-form iface-portprops-form" });
+  wrap.appendChild(el("p", { className: "iface-action-form-title" }, `Port properties · ${port}`));
+  wrap.appendChild(sf.form);
+  const errOut = el("div", { className: "form-error-out" });
+  wrap.appendChild(errOut);
+  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
+  cancel.addEventListener("click", () => { formHost.textContent = ""; });
+  const stage = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Queue");
+  btnRow.appendChild(cancel);
+  btnRow.appendChild(stage);
+  wrap.appendChild(btnRow);
+  formHost.appendChild(wrap);
+
+  stage.addEventListener("click", () => {
+    errOut.textContent = "";
+    if (!sf.validate()) return;
+    enqueuePortConfig(device, port, sf.getValues(), currentDevice);
+    showToast({ kind: "success", title: "Queued", body: `Port properties on ${port} — Save to apply.` });
+    reload();
+  });
 }
 
 // findIfaceAction locates an INTERFACE_ACTIONS def by group + id (+ optional
