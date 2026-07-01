@@ -33,3 +33,26 @@ NodeSpec). The recurring drift causes were:
 - `_auth.mjs` — `authenticatePage` / `loginCookie` / `skipIfNotDeployed`.
 - `seed-fixture.mjs` — idempotent 3-switch triangle + TRANSIT underlay + EVPN-IRB.
 - `docs/testing-auth.md` — the `ron` nologin-superuser + cookie-jar recipe.
+
+---
+
+## Deploy-gated smokes vs a live lab (2node-vs)
+2node-vs is a running lab whose topology includes `switch1`/`switch2`. Pointing the
+device-state smokes at it (`NET=2node-vs`) exercises the real device paths:
+
+**Now green against 2node-vs** (fixed: authenticate the device rpc/topology fetches;
+target the switch by `data-device` not the first `.topo-node` — the first node is a
+host in a host+switch lab; `DEVICE` env override):
+- `state-tables` 3/0, `lags-neighbors` 5/0, `resource-lens` 5/0.
+
+**Retired** (`per-device-apply`, `topology-e2e`, `topology-broad`): their core was
+"open the VLANs group in the action panel → Create VLAN → apply". #210 emptied
+`NODE_ACTIONS` ("services only" scope), so there is no node-level
+Create-VLAN/VRF/ACL affordance anymore — device config flows through services
+(covered by `resource-lens`) and interface config (covered by `iface-actions`).
+Deleted rather than left as dead deploy-gated tests for a removed feature; their
+staging→apply→lands-on-device value is already covered.
+
+## Suite size
+Now **29 smokes**: 26 always-run green + 3 device-state smokes that skip on a staged
+fixture and pass against a running lab (`NET=2node-vs`).
