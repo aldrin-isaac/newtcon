@@ -3,12 +3,15 @@
 // device RPCs, verifies the columns + values, then deletes them.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
-const rpc = (sub, body) => fetch(`${BASE}/api/networks/${NET}/nodes/switch1/rpc/${sub}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const DEVICE = process.env.DEVICE || "switch1";
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
+const rpc = (sub, body) => fetch(`${BASE}/api/networks/${NET}/nodes/${DEVICE}/rpc/${sub}`, { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify(body) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
@@ -21,7 +24,7 @@ async function expandSection(page, title) {
   }, title);
 }
 
-await skipIfNotDeployed(NET, "switch1");
+await skipIfNotDeployed(NET, DEVICE);
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await rpc("create-vrf", { name: "Vrf_SMK" });
@@ -37,7 +40,7 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 10000 });
-  await page.evaluate(() => document.querySelector(".topo-node")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })));
+  await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
   await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
   await page.waitForSelector(".node-tabs", { timeout: 6000 });

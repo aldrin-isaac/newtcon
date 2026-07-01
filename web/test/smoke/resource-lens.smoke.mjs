@@ -4,26 +4,28 @@
 // API, verifies the lens, then reverts.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
-const DEV = "switch1";
+const DEV = process.env.DEVICE || "switch1";
 const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 
 async function getDevice() {
-  const t = await (await fetch(api("topology"))).json();
+  const t = await (await fetch(api("topology"), { headers: AUTH })).json();
   return (t.nodes ?? {})[DEV] ?? {};
 }
 async function putDevice(dev) {
-  await fetch(api(`topology/nodes/${DEV}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dev) });
+  await fetch(api(`topology/nodes/${DEV}`), { method: "PUT", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify(dev) });
 }
 
-await skipIfNotDeployed(NET, "switch1");
+await skipIfNotDeployed(NET, DEV);
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 let original = null;
 try {
@@ -42,7 +44,7 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 10000 });
-  await page.evaluate(() => document.querySelector(".topo-node")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })));
+  await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEV);
   await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
   await page.waitForSelector(".node-tabs", { timeout: 6000 });
