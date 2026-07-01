@@ -8,7 +8,7 @@ import { authenticatePage } from "./_auth.mjs";
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
-const NET = process.env.NET || "2node-vs-service";
+const NET = process.env.NET || "smoke-fixture";
 const DEVICE = "switch1";
 const PORT = "Ethernet0";
 
