@@ -2,7 +2,7 @@
 // landed in newtron.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NET = process.env.NET || "smoke-fixture";
@@ -15,6 +15,7 @@ const expect = (cond, msg) => {
   else { console.log("  ok:", msg); }
 };
 
+await skipIfNotDeployed(NET, "switch1");
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",

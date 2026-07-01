@@ -4,7 +4,7 @@
 // Discard changes (client-only), confirm newtron still has the VLAN.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 const NET = process.env.NET || "smoke-fixture";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
@@ -14,6 +14,7 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok: " : "  FAIL: ") + m); }
 
+await skipIfNotDeployed(NET, "switch1");
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
