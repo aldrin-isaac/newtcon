@@ -17,8 +17,8 @@ import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
-const USER = process.env.NEWTCON_TEST_USER || "alice";
-const PASSWORD = process.env.NEWTCON_TEST_PASSWORD || "YourPaSsWoRd";
+const USER = process.env.NEWTCON_TEST_USER || "ron";
+const PASSWORD = process.env.NEWTCON_TEST_PASS || "ronthenewt";
 const NETWORK = process.env.NEWTCON_TEST_NETWORK || "1node-vs-auth";
 
 const ok = [], failed = [];

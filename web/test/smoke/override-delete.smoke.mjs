@@ -4,7 +4,7 @@
 // gone, and the network base survives. Cleans up via newtron if anything leaks.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -14,16 +14,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 const api = (p) => `${BASE}/api/networks/${NET}/${p}`;
-const removeOverride = () => fetch(`${NEWTRON}/newtron/v1/networks/${NET}/delete-ipvpn`, {
-  method: "POST", headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone" }),
-}).catch(() => {});
+// Node-side calls go through newtcon /api with the session cookie (newtron :18080
+// needs a bearer under --auth-required).
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
+const af = (p, opts = {}) => fetch(api(p), { ...opts, headers: { ...(opts.headers || {}), ...AUTH } });
+const removeOverride = () => af("ipvpns/IPVPN?scope=zone&scope_instance=myzone", { method: "DELETE" }).catch(() => {});
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride();
-  const b = await (await fetch(api("ipvpns/IPVPN"))).json();
-  const cr = await fetch(api("ipvpns"), { method: "POST", headers: { "Content-Type": "application/json" },
+  const b = await (await af("ipvpns/IPVPN")).json();
+  const cr = await af("ipvpns", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "IPVPN", scope: "zone", scope_instance: "myzone", l3vni: b.l3vni, route_targets: b.route_targets }) });
   expect(cr.status === 201, `override created (${cr.status})`);
 
@@ -51,7 +53,7 @@ try {
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((x) => /Apply/.test(x.textContent))?.click());
   await sleep(2500);
 
-  const baseAlive = (await (await fetch(api("ipvpns"))).json()).names?.includes("IPVPN");
+  const baseAlive = (await (await af("ipvpns")).json()).names?.includes("IPVPN");
   expect(baseAlive, "network base IPVPN survives the scoped delete");
   // Re-open the facet and confirm no override rows remain.
   await page.click('[data-kind="services"]'); await sleep(150);

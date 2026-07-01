@@ -3,11 +3,15 @@
 // verify the whole-device write-back landed in newtron with the right shape.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
+// Node-side calls go through newtcon /api with the session cookie (newtron :18080
+// needs a bearer under --auth-required).
+const _ck = await loginCookie(BASE);
+const AUTH = _ck ? { Cookie: `${_ck.name}=${_ck.value}` } : {};
 const NET = process.env.NET || "smoke-fixture";
 const DEVICE = "switch1";
 const PORT = "Ethernet0";
@@ -21,7 +25,7 @@ function expect(cond, msg) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchTopoPort() {
-  const r = await fetch(`${NEWTRON}/newtron/v1/networks/${NET}/topology`);
+  const r = await fetch(`${BASE}/api/networks/${NET}/topology`, { headers: AUTH });
   if (!r.ok) return { _error: r.status };
   const body = await r.json();
   const dev = (body.data ?? body).nodes?.[DEVICE] ?? {};
@@ -129,11 +133,11 @@ try {
 
   // Cleanup: restore the port to its pre-smoke state.
   console.log("→ cleanup (restore port)");
-  const topo = await (await fetch(`${NEWTRON}/newtron/v1/networks/${NET}/topology`)).json();
+  const topo = await (await fetch(`${BASE}/api/networks/${NET}/topology`, { headers: AUTH })).json();
   const dev = (topo.data ?? topo).nodes[DEVICE];
   dev.ports[PORT] = { admin_status: "up", mtu: 9100 };
   await fetch(`${BASE}/api/networks/${NET}/topology/nodes/${DEVICE}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dev),
+    method: "PUT", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify(dev),
   });
 
   console.log("");

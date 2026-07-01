@@ -2,7 +2,7 @@
 // and verify each landed in newtron with the right shape.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
 const NET = process.env.NET || "smoke-fixture";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
@@ -70,6 +70,7 @@ async function fetchJSON(path) {
   return r.json();
 }
 
+await skipIfNotDeployed(NET, "switch1");
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",

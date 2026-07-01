@@ -60,3 +60,24 @@ export async function authenticatePage(page, base = DEFAULT_BASE) {
   await page.setCookie({ name: cookie.name, value: cookie.value, url: base, httpOnly: true });
   return true;
 }
+
+// True when a device has live state to read (a deployed VM). The staged smoke
+// fixture has no config DB, so its device-state endpoints 503. Deploy-gated
+// smokes call skipIfNotDeployed() to skip (not fail) in that case.
+export async function deviceIsDeployed(net, device, base = DEFAULT_BASE) {
+  try {
+    const ck = await loginCookie(base);
+    const H = ck ? { Cookie: `${ck.name}=${ck.value}` } : {};
+    const r = await fetch(`${base}/api/networks/${net}/nodes/${device}/vlans`, { headers: H });
+    return r.ok;
+  } catch { return false; }
+}
+
+// Exit 0 with a SKIP line when the target device isn't deployed. Call at the top
+// of a smoke whose assertions read live device state (config DB / BGP / VLAN…).
+export async function skipIfNotDeployed(net, device, base = DEFAULT_BASE) {
+  if (!(await deviceIsDeployed(net, device, base))) {
+    console.log(`SKIP: ${net}/${device} has no live state (needs a deployed device); staged fixture can't verify device reads`);
+    process.exit(0);
+  }
+}

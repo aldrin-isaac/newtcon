@@ -15,7 +15,8 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
 
-const VALID_STATES = ["running", "booting", "down", "unrealized"];
+const VALID_STATES = ["running", "booting", "down", "unrealized"];       // status dot (lifecycle)
+const PALETTE_STATES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"]; // <g> topo-elem (palette, #210)
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -55,12 +56,12 @@ try {
     (validStates) => {
       const out = [];
       for (const g of document.querySelectorAll("svg.topology-graph g.topo-node[data-device]")) {
-        const found = validStates.find((s) => g.classList.contains(`topo-node--${s}`));
+        const found = validStates.find((s) => g.classList.contains(`topo-elem--${s}`));
         out.push({ device: g.getAttribute("data-device"), state: found ?? null });
       }
       return out;
     },
-    VALID_STATES,
+    PALETTE_STATES,
   );
   const allClassed = states.every((s) => s.state !== null);
   expect(allClassed, `every device <g> has a unified state class: ${JSON.stringify(states)}`);
@@ -99,12 +100,10 @@ try {
   expect(allTooltips,
     `every status badge has a tooltip containing the device name: ${JSON.stringify(tooltips)}`);
 
-  // 5. node-state matches dot-state for every device (no class drift).
-  const consistent = states.every((s) => {
-    const d = dots.find((x) => x.device === s.device);
-    return d && d.dotState === s.state;
-  });
-  expect(consistent, "device <g> state class matches its dot color class for every device");
+  // (Post-#210 the <g> palette state (spec-only / actuated-*) and the dot
+  // lifecycle state (running / booting / …) are intentionally separate systems,
+  // so they are no longer expected to be equal — #2 and #3 assert each is
+  // well-formed on its own.)
 
   // 6. The 5s status poll fires. Wait a bit past the first interval and check
   // we observed ≥1 lab-status request after the initial mount call. The
