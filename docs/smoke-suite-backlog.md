@@ -1,75 +1,47 @@
 # Smoke suite backlog (under `--auth-required`)
 
-Status after the auth/fixture work (PRs #314–#319). **12 / 32 green.** This
-enumerates the 20 remaining, grouped by root cause so they can be prioritized.
-All runs assume the fixture is seeded (`node test/smoke/seed-fixture.mjs`) and
-`NEWTCON_URL` + `NEWTCON_TEST_USER=ron` / `NEWTCON_TEST_PASS` are set.
+**18 / 32 PASS or SKIP** (up from 12 → 18 this pass; 3 at the effort's start).
+Run with the fixture seeded (`node test/smoke/seed-fixture.mjs`) and
+`NEWTCON_URL` + `NEWTCON_TEST_USER=ron` / `NEWTCON_TEST_PASS` set.
 
-## Green (12)
+## Green / skip (18)
 apply-results-modal, audit-reopen, auth-gate, delete-service-binding-warn,
-deploy-as-lab, iface-actions, iface-table, network-switcher, override-collapse,
-spec-tab-intent, staging, subrule-before-apply.
+deploy-as-lab, device-status-badges, iface-actions, iface-table, network-switcher,
+override-collapse, override-delete, port-config, spec-tab-intent, staging,
+subrule-before-apply — plus deploy-gated **skips** (exit 0): topology-e2e,
+per-device-apply, topology-broad (device-state reads need a deployed device).
 
----
+## Done this pass
+- **A (direct-newtron auth):** override-delete, port-config routed through newtcon
+  `/api` + cookie. The device-state topology smokes deploy-gated (`skipIfNotDeployed`).
+- **device-status-badges:** updated to the #210 palette (`topo-elem--{spec-only|
+  actuated-*|drift|unknown}`) + dropped the obsolete palette-vs-lifecycle match.
+- **D (stale bodies):** specs-drawer-* auth-env aligned to `NEWTCON_TEST_PASS`/ron;
+  `service_type` (not `type`); queue `dwrr` (not `wrr`).
 
-## A. Direct-newtron fetches → 401 under auth (mechanical)
-Route the node-side fetch through newtcon `/api` with the session cookie
-(`loginCookie`), the pattern already applied to staging/override-collapse.
-**Caveat:** newtcon proxies device state as *collection* reads
-(`/nodes/{device}/vlans|vrfs|acls|bgp/status`), not the per-id newtron paths the
-smokes use — so these need fetch-collection-then-filter, not a 1:1 URL swap.
-
-| Smoke | Direct call(s) | Fix |
+## Remaining 14 — per-smoke UI drift (with next step)
+| Smoke | Symptom | Root cause / next step |
 |---|---|---|
-| override-delete | `POST /delete-ipvpn` | newtcon `DELETE ipvpns/{n}?scope=…` + cookie (mirror override-collapse) |
-| port-config | 2× `GET /topology` | newtcon `GET /api/networks/{n}/topology` + cookie |
-| topology-e2e | 1× `/node/switch1/vlan/{id}` | newtcon `/nodes/switch1/vlans` + filter (+ has B) |
-| per-device-apply | 3× `/node/switch1/vlan/{id}` | same VLAN-collection pattern (+ has B) |
-| topology-broad | `/vrf/`, `/acl/`, `/bgp/status`, `/topology` | newtcon `/nodes/{d}/{vrfs,acls,bgp/status}` + filter (+ has B) |
+| lab-tab-retired | nav asserts stale set | nav is `[Specs,Topology,Permissions,Changes,Audit]`; update the expected list |
+| node-create-with-profile | no "+ Create node" in toolbar (`[Deploy,Provision,Destroy]`) | profiles→nodes + Add-node moved; retarget the create affordance |
+| topology-profile-tab | "Node not clickable" (0/0) | "profile" tab renamed/removed (profiles→nodes); update the tab selector |
+| specs-drawer-services-zones | "Node not clickable" | selector drift; find the current clickable element |
+| node-scaffold | "topology device has a setup-device step" | scaffold-step assertion; verify against buildDeviceScaffold output |
+| topology-scope-services-only | guiding hint text `null` | hint copy/selector changed |
+| topology-menu | 404 resource | a fetch 404s (endpoint moved) during the menu flow |
+| specs-drawer-edit | 8000ms timeout | UI element after create; find the current selector |
+| specs-drawer-subrule | post-queue UI assertion | queue body fixed; a later UI check (queues section) drifted |
+| drawer-header | 6000ms timeout | waits on a drawer element past `.topo-node`; per-smoke selector |
+| resource-lens | 6000ms timeout | same class — the resource-lens section selector |
+| state-tables | 6000ms timeout | same class — the State-tab table selector |
+| lags-neighbors | LAG table empty | fixture has no LAGs — seed a LAG, or deploy-gate |
+| device-lifecycle | lifecycle pill state `null` | 2node-vs lab IS running; the drawer lifecycle pill isn't resolving lab status — investigate as possible real bug vs. selector |
 
-## B. Topology deeper (navigation fixed in #319, more remains)
-`.topo-node` now renders; these still fail on later steps.
-| Smoke | Remaining |
-|---|---|
-| topology-e2e | VLAN read (A) + link/intent assertions |
-| topology-broad | VRF/ACL/BGP reads (A) + `topology has links` assertion |
-| per-device-apply | VLAN reads (A) + apply assertions |
-| topology-menu | re-run after #319 to surface its next failure (likely A or assertion) |
-
-## C. Later-element timeout (have the view setter, fail past `.topo-node`)
-These already set `topology-view:spec` but time out (~6 s) on a drawer/element —
-needs per-smoke selector/timing investigation.
-- drawer-header, resource-lens, state-tables
-
-## D. Stale create bodies — real schema drift
-The smoke sends a create body newtron now rejects (400). Fix the body to the
-current schema (e.g. the filter needing `type`, discovered while seeding).
-- specs-drawer-edit (`create service` 400)
-- specs-drawer-subrule (`add queue` 400)
-
-## E. Element-interaction / profiles→nodes drift
-- specs-drawer-services-zones ("Node is not clickable") — selector/timing
-- topology-profile-tab ("Node not clickable"; the tab name predates profiles→nodes — likely renamed/removed)
-
-## F. Assertion drift — bespoke, likely the smoke caught a real UI change
-Read before greening; some encode an old contract.
-- node-create-with-profile (**13** assertions fail — almost certainly the profiles→nodes rename; may need a near-rewrite)
-- lags-neighbors (0/5 — LAG/neighbor tables; check fixture has LAGs/neighbors)
-- node-scaffold (0/4 — Add-node scaffold flow)
-- device-lifecycle (2 — start/stop/deploy lifecycle; may need a deployed device)
-- device-status-badges (2 — status pills; may need live device state)
-- topology-scope-services-only (2 — scoped-services topology filter)
-- lab-tab-retired (1 — asserts the retired Lab tab is gone)
-
----
-
-## Suggested order
-1. **A** (mechanical, ~5 smokes) — same cookie pattern, unblocks B too.
-2. **D** + **E** (stale bodies / selectors — small, and D catches real drift).
-3. **C** (per-smoke timing).
-4. **F** last — read each; some are real drift worth a design look, not just "make green."
-
-Note: a few (device-lifecycle, device-status-badges, and the "live data" bits of
-the topology smokes) may not be greenable against the **staged** fixture at all —
-they need a **deployed** device. Those should be marked deploy-gated rather than
-forced green.
+## Notes
+- The three 6000ms-timeout smokes (drawer-header/resource-lens/state-tables)
+  likely share one cause (an element that renders only in a view mode or with
+  data the fixture lacks) — investigate together.
+- device-lifecycle is worth a closer look: the lab is running yet the pill reads
+  null. Could be a real resolution bug rather than test drift.
+- lags-neighbors needs a LAG in the fixture (extend seed-fixture.mjs) or a
+  deploy-gate.
