@@ -3933,10 +3933,15 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
     return;
   }
 
+  if (status.state === "unreachable") {
+    body.appendChild(el("p", { className: "lifecycle-hint" },
+      `${device}'s VM is running, but newtron can't read its live state — the deploy may be stale or mid-provision, or its management interface is down. You can still stop the VM or SSH in to investigate.`));
+  }
+
   // Start/Stop — only meaningful for lab-managed VMs.
   if (labNode) {
     const actions = el("div", { className: "lifecycle-actions" });
-    if (status.state === "running" || status.state === "booting") {
+    if (status.state === "running" || status.state === "booting" || status.state === "unreachable") {
       const stop = el("button", { type: "button", className: "btn btn-danger btn-sm" }, "Stop VM");
       stop.addEventListener("click", async () => {
         const ok = await confirmInline({
@@ -3975,8 +3980,9 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
     }
     body.appendChild(actions);
 
-    // SSH/console snippets — only when the VM is up and ports are known.
-    if (status.state === "running" && labNode.ssh_port) {
+    // SSH/console snippets — only when the VM is up and ports are known
+    // (incl. unreachable: the VM is up, so SSH is exactly how you'd investigate).
+    if ((status.state === "running" || status.state === "unreachable") && labNode.ssh_port) {
       const sshUser = labNode.ssh_user || "admin";
       const sshCmd = `ssh -p ${labNode.ssh_port} ${sshUser}@localhost`;
       body.appendChild(buildCopyRow("SSH", sshCmd));
@@ -5421,7 +5427,7 @@ function startTopologyPoll(args: PollArgs): void {
 // Orthogonal to the palette: the dot reads as "what stage of life is
 // this in" (booting pulses) while the outline reads as "is intent +
 // reality aligned" (palette state). Both update together on poll.
-const STATUS_CLASSES = ["running", "booting", "down", "unrealized"] as const;
+const STATUS_CLASSES = ["running", "booting", "unreachable", "down", "unrealized"] as const;
 const PALETTE_CLASSES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"] as const;
 
 function patchDeviceStatuses(
