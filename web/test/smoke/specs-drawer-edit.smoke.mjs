@@ -15,8 +15,8 @@ import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
-const USER = process.env.NEWTCON_TEST_USER || "alice";
-const PASSWORD = process.env.NEWTCON_TEST_PASSWORD || "YourPaSsWoRd";
+const USER = process.env.NEWTCON_TEST_USER || "ron";
+const PASSWORD = process.env.NEWTCON_TEST_PASS || "ronthenewt";
 const NETWORK = process.env.NEWTCON_TEST_NETWORK || "1node-vs-auth";
 const SVC = `smoke-edit-${Math.floor(Math.random() * 10000)}`;
 const NEW_DESC = "edited by smoke";
@@ -49,7 +49,7 @@ async function maybeLogin() {
 
 async function createService(network, name) {
   const r = await api("POST", `/api/networks/${network}/services`, {
-    name, type: "routed", description: "smoke initial description",
+    name, service_type: "routed", description: "smoke initial description",
   });
   if (r.status !== 201 && r.status !== 200) throw new Error(`create service: ${r.status} ${r.body}`);
 }
