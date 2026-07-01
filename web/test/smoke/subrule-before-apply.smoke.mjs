@@ -4,12 +4,14 @@
 // parent + rules apply together in one Save (groupOrder already sequences them).
 // Staged-only (no apply) → no engine mutation; the browser close drops the queue.
 import puppeteer from "puppeteer-core";
+import { authenticatePage } from "./_auth.mjs";
 const BASE=process.env.NEWTCON_URL||"http://127.0.0.1:8095", NET=process.env.NET||"1node-vs";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let pass=0,fail=0; const expect=(c,m)=>{c?(pass++,console.log("  ok:",m)):(fail++,console.error("  FAIL:",m));};
 const b=await puppeteer.launch({executablePath:"/usr/bin/google-chrome",headless:"new",args:["--no-sandbox","--disable-dev-shm-usage"],defaultViewport:{width:1500,height:950}});
 try{
   const p=await b.newPage();
+  await authenticatePage(p);
   await p.evaluateOnNewDocument(n=>{try{localStorage.setItem("newtcon.activeNetwork",n);}catch{}},NET);
   p.on("pageerror",e=>console.log("  [pageerror]",e.message));
   await p.goto(BASE,{waitUntil:"networkidle0",timeout:20000});
