@@ -40,7 +40,7 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 // ---- helpers --------------------------------------------------------------
 
 async function signIn() {
-  await page.waitForSelector("#auth-username", { timeout: 5000 });
+  if (!(await page.$("#auth-overlay:not([hidden])"))) return; // cookie-authenticated; no overlay
   await page.type("#auth-username", USER);
   await page.type("#auth-password", PASSWORD);
   await page.click("#auth-submit");
@@ -110,13 +110,13 @@ try {
       .map((el) => (el.textContent || "").trim());
     // Find the prominent "Type" row's value
     const typeDt = Array.from(c.querySelectorAll(".spec-detail-label:not(.spec-detail-label--extra)"))
-      .find((el) => (el.textContent || "").trim() === "Type");
+      .find((el) => (el.textContent || "").trim() === "Service Type");
     const typeValueEl = typeDt?.nextElementSibling;
     const typeValue = typeValueEl ? (typeValueEl.textContent || "").trim() : null;
     return { prominent: labels, extras: extraLabels, typeValue };
   });
   expect(serviceLayout !== null, "service drawer DOM is present");
-  expect(serviceLayout.prominent.includes("Type"),
+  expect(serviceLayout.prominent.includes("Service Type"),
     `service prominent rows include "Type": ${JSON.stringify(serviceLayout.prominent)}`);
   expect(!serviceLayout.prominent.includes("service_type"),
     "wire name 'service_type' is NOT a prominent row label");
@@ -125,7 +125,7 @@ try {
   await page.screenshot({ path: "/tmp/newtcon-smoke-spec-drawer-01-service.png" });
 
   // ---- zone detail (empty-state) ----
-  await openSpecRow("Zones", "amer");
+  await openSpecRow("Zone", "amer");
 
   const zoneState = await page.evaluate(() => {
     const c = document.getElementById("drawer-content");
