@@ -120,7 +120,6 @@ import {
 import { NODE_ACTIONS } from "./topology-actions.js";
 import { showContextMenu } from "./topology-actions-ui.js";
 import { iconSVG } from "./icons.js";
-import { renderActionPanel } from "./topology-action-panel.js";
 import { comparePorts } from "./port-config.js";
 import {
   buildDeviceInterfaceView,
@@ -5792,9 +5791,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           // observation views), and the drift summary (Physical-only).
           renderViewRow();
           renderToolbar();
-          selected.clear();
           renderGraph();
-          renderPanel();
           renderDriftSummary();
         });
         viewRow.appendChild(chip);
@@ -5842,10 +5839,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     };
     if (zones.length > 1) renderFilterRow();
 
-    // Persistent UI state: which nodes are selected; the docked panel reads
-    // this and renders the action set + Save/Discard for the selection.
-    const selected: Set<string> = new Set();
-
     // Pan/zoom viewport state — persists across renderGraph() calls so
     // the operator's view doesn't snap back to natural after every
     // selection / pending-bar / status tick.
@@ -5859,11 +5852,9 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     // Topology view: layout is a split — left = SVG diagram + toolbar,
     // right = docked action panel.
-    const split = el("div", { className: "topology-split" });
+    const split = el("div", { className: "topology-split topology-split--no-panel" });
     const graphSlot = el("div", { className: "topology-graph-slot" });
-    const panelRoot = el("aside", { className: "topo-action-panel" });
     split.appendChild(graphSlot);
-    split.appendChild(panelRoot);
     root.appendChild(split);
 
     // Floating zoom toolbar — absolute-positioned over the SVG via
@@ -5920,14 +5911,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     for (const [name, dev] of Object.entries(rawDevices)) {
       interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort(comparePorts));
     }
-    const deviceTypeOf = (name: string): string => {
-      const steps = (rawDevices[name] as { steps?: Array<{ params?: { fields?: { type?: string } } }> })?.steps ?? [];
-      for (const s of steps) {
-        const t = s.params?.fields?.type;
-        if (typeof t === "string" && t !== "") return t;
-      }
-      return "device";
-    };
 
     let renderGraph: () => void;
     renderGraph = (): void => {
@@ -5965,22 +5948,13 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         paletteByDevice,
         statusTextByDevice,
         dimmedNames: dimmed,
-        onNodeClick: isSpec
-          ? (deviceName, ev) => {
-              if (ev.shiftKey) {
-                if (selected.has(deviceName)) selected.delete(deviceName);
-                else selected.add(deviceName);
-              } else {
-                selected.clear();
-                selected.add(deviceName);
-              }
-              renderGraph();
-              renderPanel();
-            }
-          : (deviceName) => { openNodeDrawer(deviceName, viewMode); },
+        // Click a device — in EVERY view — opens the drawer, the single home for
+        // device inspection + per-port/interface config. (There is no docked
+        // action panel + selection any more; link creation is on the toolbar.)
+        onNodeClick: (deviceName) => { openNodeDrawer(deviceName, viewMode); },
         driftByDevice,
         statusByDevice,
-        selected: isSpec ? selected : new Set<string>(),
+        selected: new Set<string>(),
         isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
         isPendingRemove: (n) => isDevicePendingRemove(n),
         viewState,
@@ -6062,57 +6036,14 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       renderGraph();
     });
 
-    // Re-render the graph + panel when the pending queue changes — but do
-    // NOT remount: that would clear the current selection. The panel reads
-    // the queue and shows per-device queued items + Apply/Discard buttons.
-    const unsub = subscribePending(() => { renderGraph(); renderPanel(); });
+    // Re-render the graph when the pending queue changes — but do NOT remount
+    // (that would reset the pan/zoom viewport). The graph reflects pending
+    // adds/removes; per-device apply lives on the drawer + the workspace bar.
+    const unsub = subscribePending(() => { renderGraph(); });
     if ((root as unknown as { _topoUnsub?: () => void })._topoUnsub) {
       (root as unknown as { _topoUnsub?: () => void })._topoUnsub!();
     }
     (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
-
-    const renderPanel = (): void => {
-      if (viewMode !== "spec") {
-        // Observation views — hide the action panel entirely so the
-        // SVG fills the width. Drawer (left-click) is the inspection
-        // affordance; spec mutation is unavailable here by design.
-        //
-        // Also collapse the grid column: display:none on the panel
-        // itself doesn't collapse the .topology-split grid track, so
-        // the 380px right column would stay allocated and leave a
-        // visible empty margin. .topology-split--no-panel switches the
-        // grid to a single 1fr column.
-        panelRoot.style.display = "none";
-        panelRoot.textContent = "";
-        split.classList.add("topology-split--no-panel");
-        return;
-      }
-      panelRoot.style.display = "";
-      split.classList.remove("topology-split--no-panel");
-      renderActionPanel(
-        { devices: Array.from(selected) },
-        {
-          panelRoot,
-          topology: {
-            interfacesFor: (d) => interfacesByDevice.get(d) ?? [],
-            deviceType: deviceTypeOf,
-          },
-          onChange: () => { renderGraph(); renderPanel(); },
-          onLinkRequest: () => { selected.clear(); mountTopologyTab(root); },
-        },
-      );
-    };
-
-    // Background-dismiss selection on outside graph clicks (Spec only —
-    // observation views don't carry selection state).
-    graphSlot.addEventListener("click", (e) => {
-      if (viewMode !== "spec") return;
-      if (e.target === graphSlot || (e.target as Element).tagName?.toLowerCase() === "svg") {
-        selected.clear();
-        renderGraph();
-        renderPanel();
-      }
-    });
 
     // Right-click on empty canvas → "Create node" affordance. Suppressed
     // in observation views (no spec mutation there). Per-device
@@ -6126,7 +6057,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     });
 
     renderGraph();
-    renderPanel();
 
     // Phase 2: live-update device badges on a 5s tick. Patches in place — the
     // operator can keep interacting with the panel + drawers while statuses

@@ -86,9 +86,8 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     network-switcher.ts       → active-network dropdown (PR #133)
     device-status.ts          → unified-substrate state resolver (PR #137)
     staging.ts                → workspace-level pending-changes queue
-    topology-actions.ts       → declarative action specs (per-port: mode + service)
-    topology-action-panel.ts  → docked side-panel renderer for actions + interfaces
-    topology-actions-ui.ts    → floating right-click context menu
+    topology-actions.ts       → declarative action specs (per-port: mode + service; NODE_ACTIONS empty post-#210) + INTERFACE_ACTIONS used by the drawer Interfaces tab
+    topology-actions-ui.ts    → floating right-click context menu (Inspect / delete / canvas Create-node)
     icons.ts                  → inline-SVG icon set (Lucide)
     render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
     form-error-binding.ts     → extractFieldFromValidationError + attachServerValidationToForm + clearFieldErrors (per-field server-error display; slice #172.B)
