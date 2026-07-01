@@ -4,6 +4,7 @@
 
 import puppeteer from "puppeteer-core";
 import { authenticatePage } from "./_auth.mjs";
+const NET = process.env.NET || "smoke-fixture";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -29,6 +30,7 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
+  await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
   page.on("console", (msg) => {
     if (msg.type() === "error") console.log("  [console.error]", msg.text());
