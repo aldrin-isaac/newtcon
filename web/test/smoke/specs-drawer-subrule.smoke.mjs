@@ -24,7 +24,9 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const USER = process.env.NEWTCON_TEST_USER || "ron";
 const PASSWORD = process.env.NEWTCON_TEST_PASS || "ronthenewt";
 const NETWORK = process.env.NEWTCON_TEST_NETWORK || "1node-vs-auth";
-const POLICY = `smoke-qos-${Math.floor(Math.random() * 10000)}`;
+// newtron canonicalizes spec names to upper-case + underscores
+// (smoke-qos-1 → SMOKE_QOS_1); use the normalized form so the created row matches.
+const POLICY = `SMOKE_QOS_${Math.floor(Math.random() * 10000)}`;
 
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
@@ -93,26 +95,33 @@ try {
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
   await page.reload({ waitUntil: "domcontentloaded" });
 
-  // Sign in.
-  await page.waitForSelector("#auth-username", { timeout: 5000 });
-  await page.type("#auth-username", USER);
-  await page.type("#auth-password", PASSWORD);
-  await page.click("#auth-submit");
-  await page.waitForFunction(() => {
+  // authenticatePage already established the session cookie, so the auth overlay
+  // is hidden. Only drive the UI login if the overlay is actually shown.
+  const overlayShown = await page.evaluate(() => {
     const el = document.getElementById("auth-overlay");
-    return el && el.hidden;
-  }, { timeout: 5000 });
-  expect(true, "signed in");
+    return !!el && !el.hidden;
+  });
+  if (overlayShown) {
+    await page.type("#auth-username", USER);
+    await page.type("#auth-password", PASSWORD);
+    await page.click("#auth-submit");
+    await page.waitForFunction(() => document.getElementById("auth-overlay")?.hidden, { timeout: 5000 });
+  }
+  expect(true, overlayShown ? "signed in" : "cookie-authenticated (gate skipped)");
 
-  // Switch to QoS policies facet via the subnav.
+  // Activate the Specs tab + wait for its subnav to render (the reload uses
+  // domcontentloaded, so the facet may not exist yet), then switch to the QoS
+  // policies facet.
+  await page.waitForSelector("#tab-specs", { timeout: 8000 });
+  await page.click("#tab-specs");
+  await page.waitForSelector('.specs-subnav-item[data-kind="qos-policies"]', { timeout: 8000 });
   await page.evaluate(() => {
-    const btn = document.querySelector('.specs-subnav-item[data-kind="qos-policies"]');
-    btn?.click();
+    document.querySelector('.specs-subnav-item[data-kind="qos-policies"]')?.click();
   });
   await page.waitForFunction(
     (name) => Array.from(document.querySelectorAll(".panel-list-item"))
       .some((el) => (el.textContent || "").trim() === name),
-    { timeout: 5000 },
+    { timeout: 8000 },
     POLICY,
   );
 
@@ -133,8 +142,12 @@ try {
       .map((el) => (el.textContent || "").trim());
     const extras = Array.from(c.querySelectorAll(".spec-detail-label--extra"))
       .map((el) => (el.textContent || "").trim());
-    const subRuleSectionExists = !!c.querySelector(".subrule-delete-section");
-    const subRuleListItems = Array.from(c.querySelectorAll(".subrule-list .subrule-row")).length;
+    // Post-#173 the sub-rule delete/list UI is the unified sub-rule table
+    // (.subrule-section > .subrule-table); data rows are .subrule-row minus the
+    // empty-state + inline-add-editing variants.
+    const subRuleSectionExists = !!c.querySelector(".subrule-section");
+    const subRuleListItems = Array.from(c.querySelectorAll(".subrule-table .subrule-row"))
+      .filter((r) => !r.classList.contains("subrule-row-empty") && !r.classList.contains("subrule-row--editing")).length;
     return { prominent, extras, subRuleSectionExists, subRuleListItems };
   });
 
