@@ -5,6 +5,7 @@ import puppeteer from "puppeteer-core";
 import { authenticatePage } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
+const NET = process.env.NET || "smoke-fixture";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 
@@ -37,6 +38,9 @@ try {
     }
   });
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
+  // Target the fixture, and use the spec-level topology view so staged nodes
+  // (no actuated/live data) render as .topo-node.
+  await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
 
   console.log(`→ open ${BASE}`);
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });

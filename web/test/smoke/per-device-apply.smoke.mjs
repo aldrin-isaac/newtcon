@@ -5,6 +5,7 @@
 
 import puppeteer from "puppeteer-core";
 import { authenticatePage } from "./_auth.mjs";
+const NET = process.env.NET || "smoke-fixture";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -24,6 +25,7 @@ const vlanID = 3700 + Math.floor(Math.random() * 200);
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
+  await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   await page.evaluateOnNewDocument(() => {
     // Inline confirm modal auto-accept; replaces native-dialog handler.
     const install = () => new MutationObserver(() => {
