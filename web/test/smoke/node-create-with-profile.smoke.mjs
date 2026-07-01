@@ -29,9 +29,13 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 await authenticatePage(page, BASE);
+// "+ Create node" is a Spec-view toolbar affordance (Lab view shows
+// Deploy/Provision/Destroy). Set the network + spec view before the load.
+await page.evaluateOnNewDocument(() => {
+  localStorage.setItem("newtcon.activeNetwork", "2node-vs");
+  localStorage.setItem("newtcon:topology-view:2node-vs", "spec");
+});
 try {
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
-  await page.evaluate(() => localStorage.setItem("newtcon.activeNetwork", "2node-vs"));
   await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
   await page.click("#tab-topology");
   await new Promise((r) => setTimeout(r, 1500));
@@ -115,12 +119,14 @@ try {
     if (btn instanceof HTMLButtonElement) btn.click();
   });
   await new Promise((r) => setTimeout(r, 200));
-  const errorVisible = await page.evaluate(() => {
-    const e = document.querySelector(".form-error-out .panel-error");
-    return e?.textContent?.trim() ?? null;
+  // The schema form uses HTML5 `required`, so an empty submit is blocked by the
+  // browser (the first required field goes :invalid) rather than surfacing a
+  // server-side .panel-error. Assert the submit was blocked by native validation.
+  const blocked = await page.evaluate(() => {
+    const f = document.querySelector('input[name="name"]');
+    return !!(f && f.matches(":invalid"));
   });
-  expect(errorVisible && /required/i.test(errorVisible),
-    `empty-submit shows validation error: "${errorVisible}"`);
+  expect(blocked, "empty-submit blocked by required-field validation (name is :invalid)");
 
   console.log("");
   if (failed.length === 0) console.log("✅ all checks passed");

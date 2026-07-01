@@ -40,19 +40,9 @@ try {
 
   // Preset the active network so the topology view targets one that actually
   // exists in this dev environment.
-  await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
+  await page.evaluate((n) => { localStorage.setItem("newtcon.activeNetwork", n); localStorage.setItem("newtcon:topology-view:" + n, "spec"); }, NETWORK);
   await page.reload({ waitUntil: "domcontentloaded" });
 
-  // Sign in.
-  await page.waitForSelector("#auth-username", { timeout: 5000 });
-  await page.type("#auth-username", USER);
-  await page.type("#auth-password", PASSWORD);
-  await page.click("#auth-submit");
-  await page.waitForFunction(() => {
-    const el = document.getElementById("auth-overlay");
-    return el && el.hidden;
-  }, { timeout: 5000 });
-  expect(true, "signed in");
 
   // Switch to Topology tab.
   await page.click("#tab-topology");
@@ -116,7 +106,7 @@ try {
   //     lives inside the "All fields" disclosure, not in the prominent rows.
   if (value === "rendered") {
     const layoutSignal = await page.evaluate(() => {
-      const panel = document.getElementById("node-panel-profile");
+      const panel = document.getElementById("node-panel-spec");
       if (!panel) return null;
       const rowLabels = Array.from(panel.querySelectorAll(".spec-detail-label:not(.spec-detail-label--extra)"))
         .map((el) => (el.textContent || "").trim());
@@ -140,7 +130,7 @@ try {
     // ssh_pass might or might not exist depending on the test newtron's config.
     // If it's present, it MUST be in the extras disclosure, not in prominent.
     const newtronReturnsSshPass = await page.evaluate(() => {
-      const panel = document.getElementById("node-panel-profile");
+      const panel = document.getElementById("node-panel-spec");
       return panel ? (panel.textContent || "").includes("ssh_pass") : false;
     });
     if (newtronReturnsSshPass) {
