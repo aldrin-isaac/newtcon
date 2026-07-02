@@ -55,6 +55,18 @@ try {
   const userPillHidden = await page.$eval("#user-pill-wrap", (el) => el.hasAttribute("hidden"));
   expect(userPillHidden, "user pill hidden while not signed in");
 
+  // 3a. Focus retention (regression): a background 401 — what raises the
+  // "session expired / timeout" banner — must NOT steal focus back to the
+  // username field while the operator is typing their password.
+  await page.focus("#auth-username"); await page.type("#auth-username", "probe");
+  await page.focus("#auth-password"); await page.type("#auth-password", "half");
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent("auth:401")));
+  await new Promise((r) => setTimeout(r, 120));
+  const focusAfter401 = await page.evaluate(() => document.activeElement?.id);
+  expect(focusAfter401 === "auth-password", `focus stays on password after a background 401 (got "${focusAfter401}")`);
+  // Clear the probe values so the real sign-in below starts clean.
+  await page.evaluate(() => { const u = document.getElementById("auth-username"); const pw = document.getElementById("auth-password"); if (u) u.value = ""; if (pw) pw.value = ""; });
+
   // 4. Successful sign-in: type creds, submit, overlay hides, app mounts.
   await page.type("#auth-username", USER);
   await page.type("#auth-password", PASSWORD);

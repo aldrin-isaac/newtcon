@@ -147,6 +147,13 @@ export async function ensureSignedIn(): Promise<void> {
  */
 export function setupAuthGate(): void {
   document.addEventListener("auth:401", () => {
+    // If the overlay is already up — initial sign-in in progress, or a prior 401
+    // already prompted re-sign-in — a further 401 from an in-flight background
+    // request must be a NO-OP. Re-running this would re-stack a submit handler
+    // (→ duplicate login POSTs), reset the banner, and — the reported bug — steal
+    // focus back to the username field while the operator is typing their password.
+    const overlay = requireOverlay();
+    if (!overlay.hidden) return;
     // Session expired mid-session. Clear our display state, show the overlay
     // again. The operator's view (Topology / Specs / whatever) stays in the
     // background; signing back in returns them right where they were.
@@ -159,7 +166,6 @@ export function setupAuthGate(): void {
       error.hidden = false;
     }
     // Wire a one-shot submit handler for the re-sign-in.
-    const overlay = requireOverlay();
     const form = overlay.querySelector<HTMLFormElement>("#auth-form")!;
     const userInput = overlay.querySelector<HTMLInputElement>("#auth-username")!;
     const pwInput = overlay.querySelector<HTMLInputElement>("#auth-password")!;
@@ -313,12 +319,19 @@ function showAnonymousPill(): void {
 
 function showOverlay(): void {
   const el = requireOverlay();
+  const wasHidden = el.hidden;
   el.hidden = false;
-  // Move focus into the form so the operator can type immediately.
-  setTimeout(() => {
-    const userInput = el.querySelector<HTMLInputElement>("#auth-username");
-    userInput?.focus();
-  }, 10);
+  // Move focus into the form so the operator can type immediately — but ONLY on
+  // the initial hidden→visible transition. showOverlay() also fires on every
+  // auth:401, and a background request that 401s while the operator is mid-way
+  // through typing their password would otherwise yank focus back to the username
+  // field. If the overlay is already up, leave the operator's focus alone.
+  if (wasHidden) {
+    setTimeout(() => {
+      const userInput = el.querySelector<HTMLInputElement>("#auth-username");
+      userInput?.focus();
+    }, 10);
+  }
 }
 
 function hideOverlay(): void {
