@@ -10,7 +10,7 @@ import {
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
-import { formatErrorBrief } from "./render-error.js";
+import { formatErrorBrief, extractUnderlyingMessage } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
 import { mountHistoryTab } from "./history.js";
 import { mountAuditTab, renderEventsTable, renderEventsError } from "./audit.js";
@@ -3889,7 +3889,8 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
     try { labState = await fetchLabStatus(network); } catch { /* lab unknown */ }
   }
   let online: boolean | undefined;
-  try { await fetchNodeInfo(device); online = true; } catch { online = false; }
+  let probeErr: unknown;
+  try { await fetchNodeInfo(device); online = true; } catch (e) { online = false; probeErr = e; }
 
   const status = resolveDeviceStatus(device, labState, online);
   const labNode = labState?.nodes?.[device];
@@ -3934,8 +3935,20 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
   }
 
   if (status.state === "unreachable") {
-    body.appendChild(el("p", { className: "lifecycle-hint" },
-      `${device}'s VM is running, but newtron can't read its live state — the deploy may be stale or mid-provision, or its management interface is down. You can still stop the VM or SSH in to investigate.`));
+    // Surface the REAL cause. newtcon classifies newtron's http_5xx as
+    // "newtron_unavailable", but newtron is up — the device is. The genuinely
+    // useful detail (e.g. "DEVICE_METADATA|localhost not found in CONFIG_DB" →
+    // the device is booted but SONiC config isn't initialized) lives in the
+    // probe error's underlying_error_message, not the generic "upstream
+    // unreachable" wrapper.
+    const reason = probeErr instanceof ApiError ? extractUnderlyingMessage(probeErr.details) : null;
+    const hint = el("p", { className: "lifecycle-hint" },
+      `${device}'s VM is running, but newtron can't read its live state. You can still stop the VM or SSH in to investigate.`);
+    body.appendChild(hint);
+    if (reason) {
+      body.appendChild(el("p", { className: "lifecycle-hint lifecycle-hint--detail" },
+        `newtron reports: ${reason}`));
+    }
   }
 
   // Start/Stop — only meaningful for lab-managed VMs.
