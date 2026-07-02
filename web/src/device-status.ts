@@ -1,23 +1,30 @@
 // device-status.ts — unified per-device status resolver across substrates.
 //
 // Phase 2 of the unified-substrate direction: the operator should see one
-// per-device state ("running" / "booting" / "down" / "unrealized") without
-// caring whether the device is a newtlab VM or physical hardware. The badge
-// state is substrate-agnostic; the substrate-specific detail (vm pid +
-// ssh_port, or "reachable via newtron probe") lives in the tooltip only.
+// per-device state without caring whether the device is a newtlab VM or physical
+// hardware. States:
+//   running     — realized AND reachable (the operator can read live state)
+//   booting     — realized, mid-boot
+//   unreachable — realized (VM process up) but the live probe FAILED: newtron
+//                 can't read the device (stale deploy, mgmt down, mid-provision).
+//                 Distinct from "running" (the process is alive but useless for
+//                 reads) and from "down" (the VM isn't stopped).
+//   down        — the VM is stopped / errored
+//   unrealized  — exists in newtron's topology but no substrate realizes it
 //
-// Source-of-truth order per device:
-//   1. newtlab /labs/{network}/status — authoritative for VMs the lab knows
-//      about (running, stopped, error; phase indicates mid-boot).
-//   2. newtron /info — runtime probe, used only when newtlab has no record of
-//      this device. Success means "something is reachable at this name"
-//      (typically physical hardware or a lab outside the current view).
-//   3. Neither — the device exists in newtron's topology but no substrate
-//      is realizing it yet.
+// The badge state is substrate-agnostic; substrate detail lives in the tooltip.
+//
+// Source-of-truth per device:
+//   1. newtlab /labs/{network}/status — authoritative that a VM EXISTS + its
+//      process state (running/stopped/error; phase = mid-boot).
+//   2. newtron /info probe (`online`) — REACHABILITY. Folded into a lab-running
+//      device (running vs unreachable) AND the sole signal when newtlab has no
+//      record (physical hardware / a lab outside the current view).
+//   3. Neither — unrealized.
 
 import type { LabState } from "./api/newtcon/lab.js";
 
-export type DeviceState = "running" | "booting" | "down" | "unrealized";
+export type DeviceState = "running" | "booting" | "unreachable" | "down" | "unrealized";
 
 export interface DeviceStatus {
   state: DeviceState;
@@ -40,6 +47,14 @@ export function resolveDeviceStatus(
       if (labNode.ssh_port) ports.push(`ssh :${labNode.ssh_port}`);
       if (labNode.console_port) ports.push(`console :${labNode.console_port}`);
       const portDetail = ports.length > 0 ? ` — ${ports.join(", ")}` : "";
+      // The VM process is up — but "running" should mean the operator can actually
+      // read the device. If the live /info probe DEFINITIVELY failed, the process
+      // is alive yet newtron can't reach it (stale/mismatched deploy, mgmt down,
+      // mid-provision): a distinct "unreachable", not a green "running". An
+      // undefined probe (in flight / not run) stays optimistically "running".
+      if (online === false) {
+        return { state: "unreachable", detail: `lab VM up (pid ${labNode.pid})${portDetail} — but newtron can't read its live state` };
+      }
       return { state: "running", detail: `lab VM (pid ${labNode.pid})${portDetail}` };
     }
     if (labNode.status === "stopped") {

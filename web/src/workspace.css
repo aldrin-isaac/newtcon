@@ -2010,6 +2010,7 @@
 }
 .lifecycle-pill--running    .lifecycle-pill-state { background: var(--color-success); }
 .lifecycle-pill--booting    .lifecycle-pill-state { background: var(--color-warning, #d97706); }
+.lifecycle-pill--unreachable .lifecycle-pill-state { background: var(--color-warning, #d97706); }
 .lifecycle-pill--down       .lifecycle-pill-state { background: var(--color-danger, #dc2626); }
 .lifecycle-pill--unrealized .lifecycle-pill-state { background: var(--color-text-muted); }
 .lifecycle-pill-detail { color: var(--color-text-muted); font-size: var(--text-xs); }
@@ -2053,6 +2054,10 @@
 }
 .topo-status-dot--running    { fill: var(--color-success); }
 .topo-status-dot--booting    { fill: var(--color-warning, #d97706); }
+/* Up but unreachable: hollow amber-ringed dot — the process is alive (has a
+ * ring) but its interior is empty (can't confirm live state). Distinct from
+ * solid-green running and pulsing-amber booting. */
+.topo-status-dot--unreachable { fill: var(--color-surface); stroke: var(--color-warning, #d97706); stroke-width: 2px; }
 .topo-status-dot--down       { fill: var(--color-danger, #dc2626); }
 .topo-status-dot--unrealized { fill: var(--color-text-muted); }
 

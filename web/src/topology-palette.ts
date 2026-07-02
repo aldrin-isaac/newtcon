@@ -69,6 +69,7 @@ export function resolvePalette(signal: ActuationSignal | null): PaletteState {
  *   unrealized         → spec-only (no substrate is realizing it)
  *   down               → actuated-down
  *   booting            → unknown (mid-transition; don't read as ok or down)
+ *   unreachable        → unknown (VM up but live state can't be read)
  *   running + drift>0  → drift
  *   running            → actuated-ok
  */
@@ -78,10 +79,11 @@ export function resolveDevicePalette(
 ): PaletteState {
   if (!status) return "unknown";
   switch (status.state) {
-    case "unrealized": return "spec-only";
-    case "down":       return "actuated-down";
-    case "booting":    return "unknown";
-    case "running":    return driftCount > 0 ? "drift" : "actuated-ok";
+    case "unrealized":  return "spec-only";
+    case "down":        return "actuated-down";
+    case "booting":     return "unknown";
+    case "unreachable": return "unknown";
+    case "running":     return driftCount > 0 ? "drift" : "actuated-ok";
   }
 }
 
