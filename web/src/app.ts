@@ -5430,6 +5430,17 @@ function startTopologyPoll(args: PollArgs): void {
 const STATUS_CLASSES = ["running", "booting", "unreachable", "down", "unrealized"] as const;
 const PALETTE_CLASSES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"] as const;
 
+// Reachability probes (/info) are bounded so a HANGING newtron response resolves
+// as offline (→ the device shows "unreachable") rather than leaving it in limbo.
+const REACHABILITY_PROBE_TIMEOUT_MS = 8000;
+function withProbeTimeout<T>(p: Promise<T>): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("reachability probe timed out")), REACHABILITY_PROBE_TIMEOUT_MS)),
+  ]);
+}
+
 function patchDeviceStatuses(
   svg: SVGSVGElement,
   statuses: Map<string, DeviceStatus>,
@@ -5502,8 +5513,14 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Hit /info as the cheapest available liveness probe. Success → online.
         // Failure → offline (we don't distinguish reasons in v1; newtron#75
         // tracks a dedicated /status endpoint).
+        //
+        // BOUND the probe: a fast 503 (newtron rejects) already resolves as
+        // offline, but a HANGING /info (newtron blocking on an unreachable/
+        // mid-boot device, no response) would otherwise leave `online` unset —
+        // the device would sit in limbo ("running", optimistic) instead of
+        // showing unreachable. Time it out so a hang resolves as offline too.
         try {
-          await fetchNodeInfo(name);
+          await withProbeTimeout(fetchNodeInfo(name));
           onlineByDevice.set(name, true);
         } catch {
           onlineByDevice.set(name, false);
