@@ -55,6 +55,7 @@ internal/handlers/            → one file per resource family
   auth.go                     → /api/auth/{login,logout,whoami} (operator identity via newtron L2c bearer; cookie ↔ store; returns 404 when --auth-required is off)
   authorization.go            → /api/networks/{netID}/authorization (read-only inspector for newtron's grant table; slice 2.2)
   audit.go                    → /api/networks/{netID}/audit/{events,integrity} (forwards newtron's audit endpoints; slice #175.B)
+  secrets.go                  → /api/networks/{netID}/secrets (write-only credential store: GET names / POST set / DELETE key; backs ${secret:…} authoring)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,nodes,zones,platforms} (list+detail+create+delete+sub-rules; "nodes" = newtron NodeSpec, formerly "profiles")
@@ -66,6 +67,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   auth.go                     → Login/Logout RPCs + WithBearer context plumbing + bearer-injecting RoundTripper
   authorization.go            → GetAuthorization (read newtron's live grant table; slice 2.2)
   audit.go                    → AuditEvents + AuditIntegrity (read newtron's audit log + L6 chain status; slice #175.B)
+  secrets.go                  → ListSecrets + SetSecret + DeleteSecret (network-scoped write-only secret store; values never returned)
   errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
