@@ -1091,9 +1091,12 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
              : "nothing — inherits from the next scope up")));
       if (scope === "node" && instance) {
         void fetchSpecDetail("nodes", instance).then((node) => {
-          const n = node as { ssh_user?: string; ssh_pass?: string };
+          // Show only the resolved USER (fine to display). NOT the password —
+          // GET /nodes/{name} returns ssh_pass in the clear (newtlab dials with
+          // it); the password state is shown above from the masked authored read.
+          const n = node as { ssh_user?: string };
           ctxBox.appendChild(el("p", { className: "lifecycle-hint lifecycle-hint--detail" },
-            `Effective login ${instance} dials with (resolved): user ${n.ssh_user || "admin"}, password ${n.ssh_pass ? "set" : "(none)"}`));
+            `Effective login ${instance} connects as: ${n.ssh_user || "admin"} (resolved through the scope chain).`));
         }).catch(() => { /* effective read is best-effort context */ });
       }
     } catch {
@@ -1663,7 +1666,11 @@ export function renderValue(value: unknown): HTMLElement | Text {
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       dl.appendChild(el("dt", {}, k));
       const dd = el("dd");
-      dd.appendChild(renderValue(v));
+      // Never render a device password verbatim — some reads (GET /nodes/{name})
+      // return ssh_pass in the clear. Redact at any nesting depth.
+      dd.appendChild(k === "ssh_pass"
+        ? el("span", { className: "spec-detail-redacted" }, "••••••")
+        : renderValue(v));
       dl.appendChild(dd);
     }
     return dl;
@@ -3146,7 +3153,8 @@ function renderValueInto(container: HTMLElement, data: unknown): void {
 // defines, and any extra fields newtron returned (not in the schema) sit
 // inside an "All fields" disclosure so the operator never silently loses
 // visibility of newtron data — even fields the schema hasn't been updated
-// to cover (e.g. ssh_pass, additions made after this build).
+// to cover (additions made after this build). The one exception is ssh_pass,
+// redacted below — it's a credential some reads return in the clear.
 //
 // extraExcludes is for fields already rendered elsewhere in the drawer
 // (e.g. sub-rule children for kinds that have a dedicated rules / queues /
@@ -3172,7 +3180,13 @@ function renderSpecDetailInto(container: HTMLElement, fields: SpecField[], data:
   // "name" is rendered in the drawer header already (drawer-name); skip it
   // here to avoid a redundant row in the body. extraExcludes adds caller-
   // supplied fields (typically a sub-rule's wire-field name).
-  const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name", ...extraExcludes]);
+  //
+  // ssh_pass is redacted globally: some reads (GET /nodes/{name}) return the
+  // RESOLVED login with ssh_pass IN THE CLEAR (newtlab dials with it), and since
+  // it left the NodeSpec schema (newtron#388) it would otherwise surface in the
+  // "All fields" disclosure. The device password is never rendered here — the SSH
+  // Login control shows only the masked, per-scope authored value.
+  const shape = buildSpecDetailShape(fields, data as Record<string, unknown>, ["name", "ssh_pass", ...extraExcludes]);
 
   // Empty-state: the schema is just `name` (zones today) AND newtron returned
   // nothing else. Operator gets an honest "nothing more to see" rather than
