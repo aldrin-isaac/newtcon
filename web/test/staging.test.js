@@ -13,6 +13,8 @@ import {
   enqueueSubUpdate,
   enqueueSubDelete,
   enqueueSubReorder,
+  enqueueSSHLoginSet,
+  enqueueSSHLoginClear,
   enqueueTopologyAddDevice,
   enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
@@ -347,5 +349,57 @@ describe("enqueuePortConfig() — port edits fold into one whole-device update",
     assert.equal(dq.length, 1);
     assert.equal(dq[0].op, "update-device");
     assert.equal(deviceQueue("other").length, 0, "scoped to the target device");
+  });
+});
+
+describe("SSH login staging (scoped scalar)", () => {
+  beforeEach(() => discardAll());
+
+  test("enqueueSSHLoginSet stages a set at the scope", () => {
+    const p = enqueueSSHLoginSet("network", "", { ssh_user: "admin" }, "set net", null);
+    assert.equal(p.group, "ssh-login");
+    assert.equal(p.op, "set");
+    assert.equal(p.scope, "network");
+    assert.deepEqual(p.body, { ssh_user: "admin" });
+  });
+
+  test("set over nothing-authored → inverse is a clear", () => {
+    const p = enqueueSSHLoginSet("node", "switch1", { ssh_user: "x" }, "t", null);
+    assert.equal(p.inverse.op, "clear");
+    assert.equal(p.inverse.scope, "node");
+    assert.equal(p.inverse.scopeInstance, "switch1");
+  });
+
+  test("set over an existing login → inverse restores the prior value", () => {
+    const p = enqueueSSHLoginSet("network", "", { ssh_user: "new" }, "t",
+      { ssh_user: "old", ssh_pass: "${secret:k}" });
+    assert.equal(p.inverse.op, "set");
+    assert.deepEqual(p.inverse.body, { ssh_user: "old", ssh_pass: "${secret:k}" });
+  });
+
+  test("clear over an existing login → inverse re-sets it", () => {
+    const p = enqueueSSHLoginClear("zone", "amer", "t", { ssh_user: "z", ssh_pass: "" });
+    assert.equal(p.op, "clear");
+    assert.equal(p.inverse.op, "set");
+    assert.deepEqual(p.inverse.body, { ssh_user: "z", ssh_pass: "" });
+  });
+
+  test("clear over nothing-authored → no inverse (a no-op clear)", () => {
+    const p = enqueueSSHLoginClear("node", "switch1", "t", null);
+    assert.equal(p.inverse, undefined);
+  });
+
+  test("repeated edits at one scope coalesce to the latest", () => {
+    enqueueSSHLoginSet("network", "", { ssh_user: "a" }, "t", null);
+    enqueueSSHLoginSet("network", "", { ssh_user: "b" }, "t", null);
+    const q = getQueue().filter((x) => x.group === "ssh-login");
+    assert.equal(q.length, 1);
+    assert.deepEqual(q[0].body, { ssh_user: "b" });
+  });
+
+  test("different scopes do NOT coalesce", () => {
+    enqueueSSHLoginSet("network", "", { ssh_user: "a" }, "t", null);
+    enqueueSSHLoginSet("node", "switch1", { ssh_user: "b" }, "t", null);
+    assert.equal(getQueue().filter((x) => x.group === "ssh-login").length, 2);
   });
 });

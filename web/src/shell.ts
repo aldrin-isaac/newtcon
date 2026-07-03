@@ -310,6 +310,7 @@ function pendingItemClass(p: Pending): string {
       : p.effect === "delete" ? "pending-bar-item--del"
         : "pending-bar-item--mod";
   }
+  if (p.group === "ssh-login") return p.op === "clear" ? "pending-bar-item--del" : "pending-bar-item--mod";
   return p.op.startsWith("add") ? "pending-bar-item--add" : "pending-bar-item--del";
 }
 

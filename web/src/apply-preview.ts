@@ -169,6 +169,17 @@ function previewBase(p: Pending): Omit<PendingPreview, "method" | "path"> {
       body: p.body ?? null,
     };
   }
+  if (p.group === "ssh-login") {
+    return {
+      id: p.id,
+      effect: p.op === "set" ? "update" : "delete",
+      kind: "SSH login",
+      title: p.title,
+      scope: p.scope === "network" ? "network" : `${p.scope} ${p.scopeInstance}`,
+      danger: p.op === "clear",
+      body: p.body ?? null,
+    };
+  }
   if (p.group === "topology" && p.op === "add-device") {
     return {
       id: p.id, effect: "create", kind: "device",
