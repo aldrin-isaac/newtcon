@@ -56,6 +56,7 @@ internal/handlers/            → one file per resource family
   authorization.go            → /api/networks/{netID}/authorization (read-only inspector for newtron's grant table; slice 2.2)
   audit.go                    → /api/networks/{netID}/audit/{events,integrity} (forwards newtron's audit endpoints; slice #175.B)
   secrets.go                  → /api/networks/{netID}/secrets (write-only credential store: GET names / POST set / DELETE key; backs ${secret:…} authoring)
+  ssh_credentials.go          → /api/networks/{netID}/{ssh-credentials,set-ssh-credentials,clear-ssh-credentials} (scoped SSH login: read authored / upsert / clear at network|zone|node; backs the "SSH Login" control)
   networks.go                 → /api/networks (list + register)
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,nodes,zones,platforms} (list+detail+create+delete+sub-rules; "nodes" = newtron NodeSpec, formerly "profiles")
@@ -68,6 +69,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   authorization.go            → GetAuthorization (read newtron's live grant table; slice 2.2)
   audit.go                    → AuditEvents + AuditIntegrity (read newtron's audit log + L6 chain status; slice #175.B)
   secrets.go                  → ListSecrets + SetSecret + DeleteSecret (network-scoped write-only secret store; values never returned)
+  ssh_credentials.go          → ShowSSHCredentials + SetSSHCredentials + ClearSSHCredentials (scoped SSH-login scalar; set/clear/show at network|zone|node)
   errors.go                   → typed errors (UnavailableError, NotFoundError, ConflictError, ValidationError, UnauthenticatedError, AuthorizationError)
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes

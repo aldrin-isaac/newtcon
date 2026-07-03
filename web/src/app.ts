@@ -97,8 +97,9 @@ import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveKindToSlug, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
-import { planSecretFields } from "./secret-field.js";
+import { planSecretFields, secretReference, isSecretReference } from "./secret-field.js";
 import { setSecret } from "./api/newtcon/secrets.js";
+import { showSSHCredentials, setSSHCredentials, clearSSHCredentials, type SSHCredentialsWrite } from "./api/newtcon/ssh-credentials.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
@@ -1069,6 +1070,104 @@ async function renderSchemaDrivenCreate(
       submitBtn.disabled = false;
       submitBtn.textContent = "Create";
       errorOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
+    }
+  });
+}
+
+// openSSHLoginDrawer — the scoped "SSH Login" control (the scalar mirror of the
+// ip-vpn override affordance). Sets ssh_user + masked ssh_pass at network / zone /
+// node scope via newtron's set/clear-ssh-credentials, reusing the schema-form scope
+// machinery and the ${secret:} store flow. Direct write (not staged) — substrate
+// config, applied immediately. The network-floor invariant is enforced upstream
+// (400 override-without-base / 409 clear-base-with-overrides), surfaced verbatim.
+async function openSSHLoginDrawer(): Promise<void> {
+  const network = activeNetwork();
+  const drawer = document.getElementById("detail-drawer");
+  const content = document.getElementById("drawer-content");
+  if (!drawer || !content) return;
+  drawer.setAttribute("aria-hidden", "false");
+  drawer.classList.add("open");
+  content.textContent = "";
+  content.appendChild(el("p", { className: "drawer-kind" }, "Network"));
+  content.appendChild(el("h2", { className: "drawer-name" }, "SSH Login"));
+  content.appendChild(el("p", { className: "node-spec-intro" },
+    "The login newtron uses to reach devices — resolved node > zone > network > platform > \"admin\". Set it once at network scope; override at zone/node for exceptions."));
+
+  // Current network-scope login as read-only context.
+  const ctxBox = el("div", { className: "ssh-login-context" });
+  ctxBox.appendChild(el("p", { className: "spec-detail-empty-state" }, "Loading current login…"));
+  content.appendChild(ctxBox);
+  void showSSHCredentials(network, "network").then((cur) => {
+    ctxBox.textContent = "";
+    const user = cur.ssh_user || "(inherits)";
+    const pass = cur.ssh_pass ? (isSecretReference(cur.ssh_pass) ? `set — ${cur.ssh_pass}` : "set") : "(inherits)";
+    ctxBox.appendChild(el("p", { className: "lifecycle-hint" }, `Current network login — user: ${user}; password: ${pass}`));
+  }).catch(() => { ctxBox.textContent = ""; });
+
+  const schema = await fetchSchema("SSHCredentials").catch((err) => {
+    content.appendChild(el("p", { className: "panel-error" }, `SSH-login schema unavailable: ${formatErrorBrief(err)}`));
+    return null;
+  });
+  if (!schema) return;
+
+  const { form, getValues, validate } = await renderSchemaForm({ schema });
+  content.appendChild(form);
+  const errOut = el("div", { className: "form-error-out" });
+  content.appendChild(errOut);
+
+  const buttons = el("div", { className: "form-button-row" });
+  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Set login");
+  const clearBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Clear this scope");
+  buttons.appendChild(saveBtn);
+  buttons.appendChild(clearBtn);
+  content.appendChild(buttons);
+
+  saveBtn.addEventListener("click", async () => {
+    if (!validate()) return;
+    errOut.textContent = "";
+    const values = getValues();
+    const scope = String(values["scope"] ?? "network");
+    const instance = String(values["scope_instance"] ?? "");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      // A plaintext password goes to the secret store, referenced as ${secret:KEY}
+      // (key: <instance>_ssh_pass, or "ssh_pass" at network). Empty ⇒ inherit.
+      const pass = String(values["ssh_pass"] ?? "");
+      if (pass && !isSecretReference(pass)) {
+        const key = scope === "network" ? "ssh_pass" : `${instance}_ssh_pass`;
+        await setSecret(network, key, pass);
+        values["ssh_pass"] = secretReference(key);
+      } else if (!pass) {
+        delete values["ssh_pass"];
+      }
+      if (!values["ssh_user"]) delete values["ssh_user"];
+      await setSSHCredentials(network, values as unknown as SSHCredentialsWrite);
+      showToast({ kind: "success", title: "SSH login set", body: `Login set at ${scope}${instance ? " " + instance : ""} scope.` });
+      closeDetail();
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Set login";
+      errOut.textContent = engineOpErrorBody(err);
+    }
+  });
+
+  clearBtn.addEventListener("click", async () => {
+    const values = getValues();
+    const scope = String(values["scope"] ?? "network");
+    const instance = String(values["scope_instance"] ?? "");
+    const ok = await confirmInline({
+      title: `Clear the SSH login at ${scope}${instance ? " " + instance : ""} scope?`,
+      body: "Removes both fields at this scope; it will inherit from the next scope up.",
+      confirmLabel: "Clear",
+    });
+    if (!ok) return;
+    try {
+      await clearSSHCredentials(network, scope, instance || undefined);
+      showToast({ kind: "success", title: "Override cleared", body: `Cleared at ${scope}${instance ? " " + instance : ""} scope.` });
+      closeDetail();
+    } catch (err) {
+      errOut.textContent = engineOpErrorBody(err);
     }
   });
 }
@@ -5729,6 +5828,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
         });
         toolbar.appendChild(addLinkBtn);
+
+        // Network SSH login (scoped scalar) — the login newtron dials devices with.
+        const sshLoginBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "SSH Login");
+        sshLoginBtn.addEventListener("click", () => { void openSSHLoginDrawer(); });
+        toolbar.appendChild(sshLoginBtn);
       } else if (viewMode === "spec-lab") {
         // Lab substrate lifecycle: Deploy → Provision → Destroy (newtlab's own
         // verbs). Blue (spec-only) devices become green via Deploy + Provision.
