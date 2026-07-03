@@ -435,23 +435,20 @@ async function buildFieldRow(
       input.name = field.name;
       input.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
       if (field.secret) {
-        // Credential (newtron#371): masked, never prefilled with plaintext,
-        // never echoed. A ${secret:KEY} pointer coming back means "already set"
-        // — surface that and leave the box empty. Submit empty ⇒ the caller
-        // keeps the existing reference (or a platform/zone/network default);
-        // type a value ⇒ the caller writes it to the store + sets ${secret:key}
-        // (see planSecretFields). Not browser-required even when the schema
-        // marks it so — empty is a valid "use the inherited credential".
+        // Credential (newtron#371): masked, never prefilled with plaintext, never
+        // echoed. A ${secret:KEY} pointer coming back means "already set" — surface
+        // that and leave the box empty. The consuming control (the SSH Login form)
+        // writes a typed value to the secret store and sends ${secret:key}; an empty
+        // submit means "inherit from the next scope up". Not browser-required even
+        // when the schema marks it so — empty is a valid "use the inherited login".
         input.type = "password";
         input.autocomplete = "new-password";
         const alreadySet = isSecretReference(String(defaultValue));
-        // D (platform default, newtron#370/#379): a lab node created from a
-        // platform inherits its login, so the operator need not type one — say so.
-        // Only prompt for a value on an explicit override / a credential-less
-        // platform. Empty submit ⇒ inherit (planSecretFields drops it).
+        // A per-scope placeholder is set by the control after render; this is the
+        // fallback before that resolves.
         input.placeholder = alreadySet
           ? "•••••• set — type a new value to replace"
-          : (override.placeholder ?? "leave blank to use the platform / network login");
+          : (override.placeholder ?? "leave blank to inherit");
         if (alreadySet) row.classList.add("schema-form-row--secret-set");
         row.appendChild(input);
         // No trim: a credential may legitimately carry edge whitespace.
