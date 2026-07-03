@@ -3902,7 +3902,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
   let probeErr: unknown;
   try { await fetchNodeInfo(device); online = true; } catch (e) { online = false; probeErr = e; }
 
-  const status = resolveDeviceStatus(device, labState, online);
+  const status = resolveDeviceStatus(device, labState, online, isProvisioning(network));
   const labNode = labState?.nodes?.[device];
 
   body.textContent = "";
@@ -3961,10 +3961,15 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
     }
   }
 
+  if (status.state === "provisioning") {
+    body.appendChild(el("p", { className: "lifecycle-hint" },
+      `${device} is being provisioned — newtron is pushing config + restarting containers. Live reads pause until it completes; the status returns to running automatically.`));
+  }
+
   // Start/Stop — only meaningful for lab-managed VMs.
   if (labNode) {
     const actions = el("div", { className: "lifecycle-actions" });
-    if (status.state === "running" || status.state === "booting" || status.state === "unreachable") {
+    if (status.state === "running" || status.state === "booting" || status.state === "unreachable" || status.state === "provisioning") {
       const stop = el("button", { type: "button", className: "btn btn-danger btn-sm" }, "Stop VM");
       stop.addEventListener("click", async () => {
         const ok = await confirmInline({
@@ -5447,7 +5452,7 @@ function startTopologyPoll(args: PollArgs): void {
     args.onLabStateRefresh(labState);
     const fresh = new Map<string, DeviceStatus>();
     for (const name of args.deviceNames) {
-      fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name)));
+      fresh.set(name, resolveDeviceStatus(name, labState, args.onlineByDevice.get(name), isProvisioning(args.network)));
     }
     const palette = args.rebuildPalette(labState);
     const statusText = args.rebuildStatusText(labState);
@@ -5460,12 +5465,25 @@ function startTopologyPoll(args: PollArgs): void {
 // Orthogonal to the palette: the dot reads as "what stage of life is
 // this in" (booting pulses) while the outline reads as "is intent +
 // reality aligned" (palette state). Both update together on poll.
-const STATUS_CLASSES = ["running", "booting", "unreachable", "down", "unrealized"] as const;
+const STATUS_CLASSES = ["running", "booting", "provisioning", "unreachable", "down", "unrealized"] as const;
 const PALETTE_CLASSES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"] as const;
 
+// Networks with a console-initiated provision in flight. While a network is in
+// this set, its running lab devices read as "provisioning" (a known transition)
+// instead of flapping to "unreachable" when their live /info reads fail — which
+// they do for the whole provision (newtron reconfigures + restarts containers).
+// newtlab emits no provision events (newtron#373), so the console is the only
+// thing that knows a provision is running: the provision modal owns this set.
+const provisioningNetworks = new Set<string>();
+function isProvisioning(network: string): boolean {
+  return provisioningNetworks.has(network);
+}
+
 // Reachability probes (/info) are bounded so a HANGING newtron response resolves
-// as offline (→ the device shows "unreachable") rather than leaving it in limbo.
-const REACHABILITY_PROBE_TIMEOUT_MS = 8000;
+// as offline rather than leaving it in limbo. newtron#380 now fails the device
+// dial fast (~3s) during a provision, so 5s gives headroom above that without
+// making an already-stalled poll wait out a longer budget.
+const REACHABILITY_PROBE_TIMEOUT_MS = 5000;
 function withProbeTimeout<T>(p: Promise<T>): Promise<T> {
   return Promise.race([
     p,
@@ -5578,7 +5596,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     } catch { /* lab unknown — fall back to probe-only resolution */ }
     const statusByDevice = new Map<string, DeviceStatus>();
     for (const name of deviceNames) {
-      statusByDevice.set(name, resolveDeviceStatus(name, labState, onlineByDevice.get(name)));
+      statusByDevice.set(name, resolveDeviceStatus(name, labState, onlineByDevice.get(name), isProvisioning(activeNetwork())));
     }
 
     // Layered Topology views (slice #210.B/C/D) — pick the actuation
@@ -5703,6 +5721,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             title: `Provisioning "${network}"`,
             hint: "newtlab is pushing config + restarting containers on each device — this can take a few minutes. Progress streams below as newtlab reports it.",
             run: async ({ append, finish }) => {
+              // Mark the network as provisioning so the topology dots read
+              // "provisioning" (not "unreachable") while live reads fail for the
+              // duration. The 5s status poll picks it up on its next tick.
+              provisioningNetworks.add(network);
               append(`POST provision lab=${network}… (synchronous — waiting for newtlab)`);
               try {
                 await postLabProvision(network);
@@ -5710,6 +5732,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               } catch (err) {
                 append(`[error] provision failed: ${engineOpErrorBody(err)}`);
               } finally {
+                provisioningNetworks.delete(network);
                 finish();
               }
             },

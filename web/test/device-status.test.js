@@ -32,6 +32,26 @@ describe("resolveDeviceStatus() — running vs reachable", () => {
     assert.equal(s.state, "booting");
   });
 
+  test("lab running + provisioning flag → provisioning (known transition, not a fault)", () => {
+    const s = resolveDeviceStatus("switch1", lab({ status: "running", pid: 1 }), false, true);
+    assert.equal(s.state, "provisioning");
+    assert.match(s.detail, /provisioning/);
+  });
+
+  test("provisioning overrides a FAILED probe (would otherwise be unreachable)", () => {
+    const s = resolveDeviceStatus("switch1", lab({ status: "running", pid: 1, ssh_port: 22 }), false, true);
+    assert.equal(s.state, "provisioning", "a failed live read during provision is expected, not unreachable");
+  });
+
+  test("phase (booting) still wins over the provisioning flag", () => {
+    const s = resolveDeviceStatus("switch1", lab({ status: "running", phase: "boot", pid: 1 }), false, true);
+    assert.equal(s.state, "booting");
+  });
+
+  test("provisioning flag ignored when the VM is stopped", () => {
+    assert.equal(resolveDeviceStatus("switch1", lab({ status: "stopped" }), undefined, true).state, "down");
+  });
+
   test("lab stopped → down (regardless of probe)", () => {
     assert.equal(resolveDeviceStatus("switch1", lab({ status: "stopped" }), undefined).state, "down");
   });

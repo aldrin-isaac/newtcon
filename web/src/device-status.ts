@@ -5,10 +5,16 @@
 // hardware. States:
 //   running     — realized AND reachable (the operator can read live state)
 //   booting     — realized, mid-boot
-//   unreachable — realized (VM process up) but the live probe FAILED: newtron
-//                 can't read the device (stale deploy, mgmt down, mid-provision).
-//                 Distinct from "running" (the process is alive but useless for
-//                 reads) and from "down" (the VM isn't stopped).
+//   provisioning— realized (VM up) and a provision the console initiated is in
+//                 flight: newtron is pushing config + restarting containers, so
+//                 live reads legitimately fail for its duration. A KNOWN
+//                 transition, not a fault — distinct from "unreachable", an
+//                 unexplained probe failure. (newtron#380: /info now fails fast
+//                 ~3s during provision instead of hanging, so without this the
+//                 dots would flap to a red "unreachable" for the whole provision.)
+//   unreachable — realized (VM process up) but the live probe FAILED for no known
+//                 reason (stale deploy, mgmt down). Distinct from "running" (the
+//                 process is alive but useless for reads) and from "down".
 //   down        — the VM is stopped / errored
 //   unrealized  — exists in newtron's topology but no substrate realizes it
 //
@@ -24,7 +30,7 @@
 
 import type { LabState } from "./api/newtcon/lab.js";
 
-export type DeviceState = "running" | "booting" | "unreachable" | "down" | "unrealized";
+export type DeviceState = "running" | "booting" | "provisioning" | "unreachable" | "down" | "unrealized";
 
 export interface DeviceStatus {
   state: DeviceState;
@@ -36,12 +42,20 @@ export function resolveDeviceStatus(
   device: string,
   labState: LabState | null,
   online: boolean | undefined,
+  // provisioning: a provision the console initiated is in flight for this
+  // device's network. When set, a running VM reads as "provisioning" (a known
+  // transition) rather than green "running" or red "unreachable" — its live
+  // state is legitimately in flux while newtron reconciles it.
+  provisioning = false,
 ): DeviceStatus {
   const labNode = labState?.nodes?.[device];
   if (labNode) {
     if (labNode.status === "running") {
       if (labNode.phase) {
         return { state: "booting", detail: `lab VM — ${labNode.phase}` };
+      }
+      if (provisioning) {
+        return { state: "provisioning", detail: "provisioning — newtron is pushing config + restarting containers; live reads resume when it completes" };
       }
       const ports: string[] = [];
       if (labNode.ssh_port) ports.push(`ssh :${labNode.ssh_port}`);

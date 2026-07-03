@@ -82,6 +82,7 @@ export function resolveDevicePalette(
     case "unrealized":  return "spec-only";
     case "down":        return "actuated-down";
     case "booting":     return "unknown";
+    case "provisioning":return "unknown";
     case "unreachable": return "unknown";
     case "running":     return driftCount > 0 ? "drift" : "actuated-ok";
   }
