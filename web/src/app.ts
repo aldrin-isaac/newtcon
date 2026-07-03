@@ -5101,7 +5101,7 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
 // ---- Topology write forms ---------------------------------------------------
 
 // showCanvasContextMenu pops a small floating menu at (x, y) with a single
-// "Create node" entry. Used by the empty-canvas right-click handler. Reuses
+// "Add node" entry. Used by the empty-canvas right-click handler. Reuses
 // .topo-menu / .topo-menu-item CSS from the per-device menu so the visual
 // language is consistent.
 function showCanvasContextMenu(x: number, y: number, onCreated: () => void): void {
@@ -5113,7 +5113,7 @@ function showCanvasContextMenu(x: number, y: number, onCreated: () => void): voi
   const icon = el("span", { className: "topo-menu-item-icon" });
   icon.innerHTML = iconSVG("plus");
   item.appendChild(icon);
-  item.appendChild(el("span", { className: "topo-menu-item-label" }, "Create node"));
+  item.appendChild(el("span", { className: "topo-menu-item-label" }, "Add node"));
   item.addEventListener("click", (e) => {
     e.stopPropagation();
     menu.remove();
@@ -5175,14 +5175,15 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
 
   content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
   content.appendChild(el("h2", { className: "drawer-name" }, "Add node"));
+  content.appendChild(el("p", { className: "node-spec-intro" },
+    "Place a node you've defined into this topology. Nodes are created in Specs → Nodes; " +
+    "this drops an existing one onto the graph. Disconnected nodes are fine — links are added separately."));
 
-  // ── Path 1: add an existing Device Profile to the topology ───────────
-  // A profile can exist without a topology entry (authored in Specs, or a
-  // prior add that didn't land). Let the operator drop one onto the
-  // topology by name — no need to re-author the profile (which would
-  // collide). Stages only the topology entry.
+  // A node can be defined (in Specs) without a topology entry; this drops one
+  // onto the topology by name and stages only the topology entry (its
+  // setup-device step scaffolded from the spec). Node *creation* lives solely
+  // in Specs — there is no create path here.
   const existing = el("section", { className: "create-node-section" });
-  existing.appendChild(el("h3", { className: "create-node-section-title" }, "Add an existing node"));
   existing.appendChild(el("p", { className: "drawer-hint" },
     "Nodes that exist but aren't placed in the topology yet."));
   const existingRow = el("div", { className: "create-node-existing-row" });
@@ -5226,7 +5227,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
 
   // Populate with profiles that have no topology entry (and aren't already
   // queued for one). Best-effort: failure leaves the picker disabled and
-  // the operator can still create a new node below.
+  // (there is no create path here — nodes are defined in Specs).
   void (async () => {
     try {
       const [profiles, topo] = await Promise.all([fetchSpecList("nodes"), fetchTopology()]);
@@ -5239,7 +5240,7 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
       const unplaced = profiles.filter((p) => !placed.has(p));
       profileSelect.textContent = "";
       if (unplaced.length === 0) {
-        profileSelect.appendChild(new Option("(every node is already in the topology)", ""));
+        profileSelect.appendChild(new Option("(every defined node is already placed — define more in Specs → Nodes)", ""));
         profileSelect.disabled = true;
         addExistingBtn.disabled = true;
       } else {
@@ -5254,129 +5255,6 @@ function openCreateNodeDrawer(onSuccess: () => void): void {
     }
   })();
 
-  content.appendChild(el("p", { className: "create-node-divider" }, "or create a new node"));
-
-  content.appendChild(el("p", { className: "drawer-hint" },
-    "Stages two writes: a node (identity) and a topology entry (steps + ports). " +
-    "Both land on Save. Disconnected nodes are fine — links are added separately."));
-
-  // Build the form first; populate zone/platform dropdowns asynchronously so
-  // the drawer opens immediately. If newtron is unreachable, the dropdowns
-  // fall back to text inputs so the operator can still type.
-  const fields: FieldDef[] = [
-    { name: "name",         label: "Node name",         type: "text",   required: true, placeholder: "e.g. spine1" },
-    { name: "mgmt_ip",      label: "Management IP",     type: "text",   required: true, placeholder: "e.g. 192.168.1.1" },
-    { name: "loopback_ip",  label: "Loopback IP",       type: "text",   required: true, placeholder: "e.g. 10.0.0.1" },
-    { name: "zone",         label: "Zone",              type: "select", required: true, options: ["Loading…"] },
-    { name: "platform",     label: "Platform",          type: "select",                  options: [""] },
-    { name: "role",         label: "Device role",       type: "select", required: true, options: ["LeafRouter", "SpineRouter"],
-      help: "SONiC device role; drives the setup-device bring-up step so the node can host services." },
-    { name: "underlay_asn", label: "Underlay BGP ASN",  type: "number", required: true, min: 1, max: 4294967295, placeholder: "e.g. 65001",
-      help: "BGP ASN for the underlay fabric; required by the device's setup-device/configure-bgp step." },
-    { name: "ssh_user",     label: "SSH user (opt)",    type: "text",   placeholder: "e.g. admin" },
-  ];
-  const { form, getValues, validate } = buildFormFields(fields);
-  content.appendChild(form);
-
-  const errorOut = el("div", { className: "form-error-out" });
-  content.appendChild(errorOut);
-
-  const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Stage node");
-  content.appendChild(submitBtn);
-
-  // Populate dropdowns from live network specs.
-  void (async () => {
-    try {
-      const zones = await fetchSpecList("zones");
-      const zoneSelect = form.querySelector('select[name="zone"]') as HTMLSelectElement | null;
-      if (zoneSelect) {
-        zoneSelect.textContent = "";
-        if (zones.length === 0) {
-          zoneSelect.appendChild(new Option("(no zones defined — add one in Specs first)", ""));
-          zoneSelect.disabled = true;
-        } else {
-          zoneSelect.appendChild(new Option("Select a zone…", ""));
-          for (const z of zones) zoneSelect.appendChild(new Option(z, z));
-        }
-      }
-    } catch { /* leave the dropdown showing "Loading…"; submit will surface the error */ }
-    try {
-      const platforms = await fetchSpecList("platforms");
-      const platformSelect = form.querySelector('select[name="platform"]') as HTMLSelectElement | null;
-      if (platformSelect) {
-        platformSelect.textContent = "";
-        platformSelect.appendChild(new Option("(none)", ""));
-        for (const p of platforms) platformSelect.appendChild(new Option(p, p));
-      }
-    } catch { /* same — platform is optional */ }
-  })();
-
-  submitBtn.addEventListener("click", () => { void (async () => {
-    if (!validate()) return;
-    errorOut.textContent = "";
-    try {
-      const values = getValues();
-      const name        = String(values["name"] ?? "").trim();
-      const mgmtIP      = String(values["mgmt_ip"] ?? "").trim();
-      const loopbackIP  = String(values["loopback_ip"] ?? "").trim();
-      const zone        = String(values["zone"] ?? "").trim();
-      const platform    = String(values["platform"] ?? "").trim();
-      const role        = String(values["role"] ?? "LeafRouter").trim() || "LeafRouter";
-      const sshUser     = String(values["ssh_user"] ?? "").trim();
-      const asnRaw      = values["underlay_asn"];
-      const underlayAsn = typeof asnRaw === "number" ? asnRaw : parseInt(String(asnRaw ?? ""), 10);
-
-      if (!name || !mgmtIP || !loopbackIP || !zone) {
-        errorOut.appendChild(el("p", { className: "panel-error" },
-          "Node name, management IP, loopback IP, and zone are all required."));
-        return;
-      }
-      if (!Number.isFinite(underlayAsn) || underlayAsn <= 0) {
-        errorOut.appendChild(el("p", { className: "panel-error" }, "Underlay BGP ASN is required."));
-        return;
-      }
-
-      const profileBody: Record<string, unknown> = {
-        name,
-        mgmt_ip: mgmtIP,
-        loopback_ip: loopbackIP,
-        zone,
-        underlay_asn: underlayAsn,
-      };
-      if (platform) profileBody["platform"] = platform;
-      if (sshUser) profileBody["ssh_user"] = sshUser;
-
-      // hwsku from the chosen platform's inventory → the setup-device step, so
-      // the new node is provisionable + service-ready out of the box (#283).
-      let hwsku = "";
-      if (platform) {
-        const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
-        hwsku = (plat as { hwsku?: string } | null)?.hwsku ?? "";
-      }
-      const device = buildDeviceScaffold({ hostname: name, type: role, hwsku, bgpAsn: underlayAsn });
-
-      // Stage profile first (apply order runs spec creates before topology
-      // adds, so the profile lands before the topology entry references it
-      // by name).
-      enqueueSpecCreate("nodes", name, profileBody);
-      enqueueTopologyAddDevice(name, device as unknown as Record<string, unknown>);
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Staged";
-      content.insertBefore(
-        el("p", { className: "form-success" },
-          `Node "${name}" staged (profile + setup-device + topology). Click Save in the header to apply.`),
-        submitBtn,
-      );
-      onSuccess();
-      setTimeout(() => {
-        drawer.setAttribute("aria-hidden", "true");
-        drawer.classList.remove("open");
-      }, 1000);
-    } catch (err) {
-      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
-    }
-  })(); });
 }
 
 // openAddLinkDrawer opens the detail drawer with a form to add a link.
@@ -5834,7 +5712,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       if (viewMode === "spec") {
         // Spec authoring — Create node / Add link mutate the topology
         // spec. Lab + physical lifecycle live in their respective views.
-        const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Create node");
+        const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add node");
         createNodeBtn.addEventListener("click", () => {
           openCreateNodeDrawer(() => mountTopologyTab(root));
         });
@@ -5967,7 +5845,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // but it's only appended further down in the non-empty path — so on
     // an empty network we must append it HERE too, or the operator has
     // no way to add the first device (the empty-state copy tells them to
-    // "Create node" but there'd be no button). viewMode defaults to
+    // "Add node" but there'd be no button). viewMode defaults to
     // "spec" for a no-lab/no-device network, so renderToolbar() above
     // has already populated it with the spec-authoring buttons.
     if (deviceNames.length === 0 && pendingTopologyDeviceAdds().length === 0) {
@@ -6288,7 +6166,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     }
     (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
 
-    // Right-click on empty canvas → "Create node" affordance. Suppressed
+    // Right-click on empty canvas → "Add node" affordance. Suppressed
     // in observation views (no spec mutation there). Per-device
     // right-click is handled inside renderTopologySVG.
     graphSlot.addEventListener("contextmenu", (e) => {
