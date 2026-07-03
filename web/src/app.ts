@@ -1080,16 +1080,12 @@ async function renderSchemaDrivenCreate(
 // machinery and the ${secret:} store flow. Direct write (not staged) — substrate
 // config, applied immediately. The network-floor invariant is enforced upstream
 // (400 override-without-base / 409 clear-base-with-overrides), surfaced verbatim.
-async function openSSHLoginDrawer(): Promise<void> {
+// Rendered inline as the "SSH Login" facet under the Specs → General group (it's a
+// spec, not a topology action). Re-renders itself after set/clear to refresh context.
+async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   const network = activeNetwork();
-  const drawer = document.getElementById("detail-drawer");
-  const content = document.getElementById("drawer-content");
-  if (!drawer || !content) return;
-  drawer.setAttribute("aria-hidden", "false");
-  drawer.classList.add("open");
   content.textContent = "";
-  content.appendChild(el("p", { className: "drawer-kind" }, "Network"));
-  content.appendChild(el("h2", { className: "drawer-name" }, "SSH Login"));
+  content.appendChild(el("h2", { className: "spec-panel-title" }, "SSH Login"));
   content.appendChild(el("p", { className: "node-spec-intro" },
     "The login newtron uses to reach devices — resolved node > zone > network > platform > \"admin\". Set it once at network scope; override at zone/node for exceptions."));
 
@@ -1144,7 +1140,7 @@ async function openSSHLoginDrawer(): Promise<void> {
       if (!values["ssh_user"]) delete values["ssh_user"];
       await setSSHCredentials(network, values as unknown as SSHCredentialsWrite);
       showToast({ kind: "success", title: "SSH login set", body: `Login set at ${scope}${instance ? " " + instance : ""} scope.` });
-      closeDetail();
+      void renderSSHLoginInto(content); // refresh context + clear the masked field
     } catch (err) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Set login";
@@ -1165,7 +1161,7 @@ async function openSSHLoginDrawer(): Promise<void> {
     try {
       await clearSSHCredentials(network, scope, instance || undefined);
       showToast({ kind: "success", title: "Override cleared", body: `Cleared at ${scope}${instance ? " " + instance : ""} scope.` });
-      closeDetail();
+      void renderSSHLoginInto(content);
     } catch (err) {
       errOut.textContent = engineOpErrorBody(err);
     }
@@ -5828,11 +5824,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
         });
         toolbar.appendChild(addLinkBtn);
-
-        // Network SSH login (scoped scalar) — the login newtron dials devices with.
-        const sshLoginBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "SSH Login");
-        sshLoginBtn.addEventListener("click", () => { void openSSHLoginDrawer(); });
-        toolbar.appendChild(sshLoginBtn);
       } else if (viewMode === "spec-lab") {
         // Lab substrate lifecycle: Deploy → Provision → Destroy (newtlab's own
         // verbs). Blue (spec-only) devices become green via Deploy + Provision.
@@ -6462,6 +6453,10 @@ function resolveGroupings(): { id: string; label: string; kinds: SpecKind[] }[] 
 }
 
 let activeFacet: SpecKind = "services";
+// The "General" group holds network-wide scoped-singleton settings (the SSH login)
+// that aren't named-instance spec facets, so they sit outside the SpecKind/PANELS
+// list machinery. When true, the panel renders that control instead of a facet list.
+let sshLoginActive = false;
 
 async function mountSpecsView(root: HTMLElement): Promise<void> {
   root.textContent = "";
@@ -6521,6 +6516,7 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
           // IP-VPN create form) left open over the MAC-VPN facet is
           // stale. Mirrors the close-on-tab-switch behaviour.
           closeDetail();
+          sshLoginActive = false;
           activeFacet = kind;
           renderSubnav();
           renderActiveFacet();
@@ -6530,9 +6526,35 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
       section.appendChild(groupList);
       subnav.appendChild(section);
     }
+
+    // General — network-wide settings that aren't a named-instance spec facet
+    // (scoped singletons like the SSH login). Rendered inline, not via the list
+    // machinery, so it lives outside SPEC_GROUPS/PANELS.
+    const genSection = el("div", { className: "specs-subnav-section" });
+    genSection.appendChild(el("h3", { className: "specs-subnav-heading" }, "General"));
+    const genList = el("div", { className: "specs-subnav-list" });
+    const sshBtn = el("button", {
+      type: "button",
+      className: "specs-subnav-item" + (sshLoginActive ? " specs-subnav-item--active" : ""),
+      ariaSelected: sshLoginActive ? "true" : "false",
+    }, "SSH Login");
+    sshBtn.addEventListener("click", () => {
+      closeDetail();
+      sshLoginActive = true;
+      renderSubnav();
+      void renderActiveFacet();
+    });
+    genList.appendChild(sshBtn);
+    genSection.appendChild(genList);
+    subnav.appendChild(genSection);
   }
 
   async function renderActiveFacet(): Promise<void> {
+    if (sshLoginActive) {
+      main.textContent = "";
+      await renderSSHLoginInto(main);
+      return;
+    }
     const panel = PANELS.find((p) => p.kind === activeFacet);
     if (!panel) return;
     main.textContent = "";
