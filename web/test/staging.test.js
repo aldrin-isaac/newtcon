@@ -159,6 +159,34 @@ describe("sub-rule ops queue as flat mutations", () => {
     assert.equal(q[0].effect, "delete");
   });
 
+  test("plain sub-edit inverse restores the prior body at the same key", () => {
+    const p = enqueueSubUpdate("filters", "ACL", "rules", 10, { action: "deny" }, "10", { seq: 10, action: "permit" });
+    assert.ok(p.inverse);
+    assert.equal(p.inverse.method, "PUT");
+    assert.equal(p.inverse.path, "filters/ACL/rules/10");
+    assert.deepEqual(p.inverse.sub, { endpoint: "rules", key: 10 });
+    assert.deepEqual(p.inverse.body, { seq: 10, action: "permit" });
+  });
+
+  test("key-changing sub-edit (renumber) inverts by renumbering back, not restoring at the now-empty original key", () => {
+    // Renumber seq 10 → 20 via the Edit form (composeUpdateBody emits new_seq).
+    const p = enqueueSubUpdate("filters", "ACL", "rules", 10, { new_seq: 20, action: "deny" }, "10", { seq: 10, action: "permit" });
+    assert.ok(p.inverse);
+    assert.equal(p.inverse.method, "PUT");
+    // Inverse targets the NEW key (where the row now lives), not the old one.
+    assert.equal(p.inverse.path, "filters/ACL/rules/20");
+    assert.deepEqual(p.inverse.sub, { endpoint: "rules", key: 20 });
+    // Renumbers back to 10 and restores the other prior fields (not the key field).
+    assert.deepEqual(p.inverse.body, { new_seq: 10, action: "permit" });
+  });
+
+  test("renumber inverse works without preBody (renumber-back only)", () => {
+    const p = enqueueSubUpdate("filters", "ACL", "rules", 10, { new_seq: 20 }, "10");
+    assert.ok(p.inverse);
+    assert.equal(p.inverse.path, "filters/ACL/rules/20");
+    assert.deepEqual(p.inverse.body, { new_seq: 10 });
+  });
+
   test("pendingSubMutations scopes to the right collection", () => {
     enqueueSubCreate("filters", "ACL", "rules", 10, { seq: 10 }, "10");
     enqueueSubCreate("filters", "OTHER", "rules", 20, { seq: 20 }, "20");
