@@ -186,6 +186,14 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Network SSH login (scoped scalar). set/clear/show the login at
+	// network/zone/node scope — the scalar mirror of the ip-vpn override
+	// affordance; backs the "SSH Login" control. ssh_pass rides the secret store.
+	handlers.RegisterSSHCredentialsRoutes(mux, handlers.SSHCredentialsDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Spec-authoring schema metadata (newtron PR #240). Two global
 	// read-only endpoints (no /networks/{netID}/ prefix — the schema
 	// is per-install, not per-network). Frontend drives create-form
