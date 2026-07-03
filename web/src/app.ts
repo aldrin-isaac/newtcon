@@ -97,7 +97,7 @@ import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveKindToSlug, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
-import { planSecretFields, secretReference, isSecretReference } from "./secret-field.js";
+import { secretReference, isSecretReference } from "./secret-field.js";
 import { setSecret } from "./api/newtcon/secrets.js";
 import { showSSHCredentials, setSSHCredentials, clearSSHCredentials, type SSHCredentialsWrite } from "./api/newtcon/ssh-credentials.js";
 import {
@@ -323,27 +323,6 @@ function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
   return specForms[kind];
 }
 
-// applySecretFields writes any plaintext secret-field values (schema secret:true —
-// e.g. a node's ssh_pass) to the active network's secret store and returns the
-// body with ${secret:key} references in their place, so a credential never enters
-// a staged/authored spec body. No-op when the schema has no secret fields (every
-// kind but NodeSpec today). Call before enqueuing a schema-driven create/update;
-// the store write is a side effect that happens on submit, the spec change still
-// stages through Apply. Throws if a store write fails (caller aborts the enqueue).
-async function applySecretFields(
-  network: string,
-  specName: string,
-  schema: { fields: readonly { name: string; secret?: boolean }[] },
-  values: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const secretFields = schema.fields.filter((f) => f.secret).map((f) => f.name);
-  if (secretFields.length === 0) return values;
-  const { writes, body } = planSecretFields(specName, values, secretFields);
-  for (const w of writes) {
-    await setSecret(network, w.key, w.value);
-  }
-  return body;
-}
 
 // isEditableKind returns true when a spec kind has any top-level field
 // beyond the identifier — those are the kinds where the Edit button shows
@@ -467,27 +446,13 @@ async function renderSchemaDrivenEdit(
         delete values[f.name];
       }
     }
-    // Write any secret-field plaintext to the store first (keyed by this spec's
-    // name), so the staged body carries ${secret:key}, not the credential. An
-    // untouched secret field submits empty → planSecretFields drops it, keeping
-    // the existing store reference. No-op when the schema has no secret fields.
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Saving…";
-    let body: Record<string, unknown>;
-    try {
-      body = await applySecretFields(activeNetwork(), name, schema, values);
-    } catch (err) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Save";
-      errOut.textContent = `Failed to store credential: ${formatErrorBrief(err)}`;
-      return;
-    }
     // Queue the edit (PUT /update-<kind>) — it stages and applies through the
     // Save loop like create/delete, not instantly. The list shows the row as
     // pending-modified; the committed values stand until Apply. preBody (the
     // spec before the edit) lets undo restore it.
     const preBody = detail && typeof detail === "object" ? detail as Record<string, unknown> : undefined;
-    enqueueSpecUpdate(kind as StagingSpecKind, name, body, preBody);
+    enqueueSpecUpdate(kind as StagingSpecKind, name, values, preBody);
+    saveBtn.disabled = true;
     saveBtn.textContent = "Queued";
     content.insertBefore(
       el("p", { className: "form-success" },
@@ -1057,10 +1022,7 @@ async function renderSchemaDrivenCreate(
       // `identifier` field is the authoritative source).
       const idField = schema.identifier || "name";
       const name = String(values[idField] ?? "(unnamed)");
-      // Write any secret-field plaintext to the store first, so the staged body
-      // carries ${secret:key} references, not the credential (no-op sans secrets).
-      const body = await applySecretFields(activeNetwork(), name, schema, values);
-      enqueueSpecCreate(kind as StagingSpecKind, name, body);
+      enqueueSpecCreate(kind as StagingSpecKind, name, values);
       submitBtn.textContent = "Queued";
       const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, buttons);
@@ -1089,17 +1051,6 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   content.appendChild(el("p", { className: "node-spec-intro" },
     "The login newtron uses to reach devices — resolved node > zone > network > platform > \"admin\". Set it once at network scope; override at zone/node for exceptions."));
 
-  // Current network-scope login as read-only context.
-  const ctxBox = el("div", { className: "ssh-login-context" });
-  ctxBox.appendChild(el("p", { className: "spec-detail-empty-state" }, "Loading current login…"));
-  content.appendChild(ctxBox);
-  void showSSHCredentials(network, "network").then((cur) => {
-    ctxBox.textContent = "";
-    const user = cur.ssh_user || "(inherits)";
-    const pass = cur.ssh_pass ? (isSecretReference(cur.ssh_pass) ? `set — ${cur.ssh_pass}` : "set") : "(inherits)";
-    ctxBox.appendChild(el("p", { className: "lifecycle-hint" }, `Current network login — user: ${user}; password: ${pass}`));
-  }).catch(() => { ctxBox.textContent = ""; });
-
   const schema = await fetchSchema("SSHCredentials").catch((err) => {
     content.appendChild(el("p", { className: "panel-error" }, `SSH-login schema unavailable: ${formatErrorBrief(err)}`));
     return null;
@@ -1108,6 +1059,49 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
 
   const { form, getValues, validate } = await renderSchemaForm({ schema });
   content.appendChild(form);
+
+  // Scope-aware context: pre-fill the login AUTHORED at the selected scope, and for
+  // a chosen node also show the EFFECTIVE (resolved) login it dials with. Reaches
+  // into the rendered inputs by name and re-reads whenever scope/instance changes.
+  const scopeSel = form.querySelector<HTMLSelectElement>('[name="scope"]');
+  const instSel = form.querySelector<HTMLSelectElement>('[name="scope_instance"]');
+  const userInput = form.querySelector<HTMLInputElement>('[name="ssh_user"]');
+  const passInput = form.querySelector<HTMLInputElement>('[name="ssh_pass"]');
+  const ctxBox = el("div", { className: "ssh-login-context" });
+  content.appendChild(ctxBox);
+  const refreshContext = async (): Promise<void> => {
+    const scope = scopeSel?.value || "network";
+    const instance = instSel?.value || "";
+    if (scope !== "network" && !instance) { ctxBox.textContent = ""; return; }
+    try {
+      const authored = await showSSHCredentials(network, scope, instance || undefined);
+      // Pre-fill ssh_user from what's authored at this scope (blank when it inherits);
+      // never prefill the masked password — reflect its set/inherit state in the hint.
+      if (userInput) userInput.value = authored.ssh_user || "";
+      if (passInput) passInput.placeholder = authored.ssh_pass
+        ? (isSecretReference(authored.ssh_pass) ? "•••••• set — type to replace" : "•••••• set")
+        : "leave blank to inherit";
+      ctxBox.textContent = "";
+      const has = authored.ssh_user || authored.ssh_pass;
+      ctxBox.appendChild(el("p", { className: "lifecycle-hint" },
+        `Authored at ${scope}${instance ? " " + instance : ""}: ` +
+        (has ? `user ${authored.ssh_user || "(none)"}, password ${authored.ssh_pass ? "set" : "(none)"}`
+             : "nothing — inherits from the next scope up")));
+      if (scope === "node" && instance) {
+        void fetchSpecDetail("nodes", instance).then((node) => {
+          const n = node as { ssh_user?: string; ssh_pass?: string };
+          ctxBox.appendChild(el("p", { className: "lifecycle-hint lifecycle-hint--detail" },
+            `Effective login ${instance} dials with (resolved): user ${n.ssh_user || "admin"}, password ${n.ssh_pass ? "set" : "(none)"}`));
+        }).catch(() => { /* effective read is best-effort context */ });
+      }
+    } catch {
+      ctxBox.textContent = "";
+    }
+  };
+  scopeSel?.addEventListener("change", () => void refreshContext());
+  instSel?.addEventListener("change", () => void refreshContext());
+  void refreshContext();
+
   const errOut = el("div", { className: "form-error-out" });
   content.appendChild(errOut);
 
