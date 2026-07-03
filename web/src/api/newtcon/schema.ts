@@ -52,6 +52,12 @@ export interface SchemaField {
   // Unlike `immutable` (locked only in edit mode), a read_only field is
   // never editable and never submitted, in create or edit.
   read_only?: boolean;
+  // Sensitive value (newtron#371). true → the value is a credential: render a
+  // masked (password) input, never echo it back, and — instead of putting
+  // plaintext in this field — write it to the network secret store and set this
+  // field to "${secret:<key>}". A value read back is the reference, not the
+  // secret. Present on the node ssh_pass field (newtron#379).
+  secret?: boolean;
   // Conditional required (newtron #243). When the static `required` is
   // false AND the condition below evaluates true against the current
   // form values, the field becomes required. Structured tree, not a

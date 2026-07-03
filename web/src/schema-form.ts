@@ -30,6 +30,7 @@ import {
   type SchemaMeta,
 } from "./api/newtcon/schema.js";
 import { apiFetch } from "./api/newtcon/_transport.js";
+import { isSecretReference } from "./secret-field.js";
 import { activeNetwork } from "./network-switcher.js";
 import { apiPath } from "./api-path.js";
 import {
@@ -431,9 +432,29 @@ async function buildFieldRow(
   switch (field.type) {
     case "string": {
       const input = document.createElement("input");
-      input.type = "text";
       input.name = field.name;
       input.className = "schema-form-input" + (lockField ? " schema-form-input--readonly" : "");
+      if (field.secret) {
+        // Credential (newtron#371): masked, never prefilled with plaintext,
+        // never echoed. A ${secret:KEY} pointer coming back means "already set"
+        // — surface that and leave the box empty. Submit empty ⇒ the caller
+        // keeps the existing reference (or a platform/zone/network default);
+        // type a value ⇒ the caller writes it to the store + sets ${secret:key}
+        // (see planSecretFields). Not browser-required even when the schema
+        // marks it so — empty is a valid "use the inherited credential".
+        input.type = "password";
+        input.autocomplete = "new-password";
+        const alreadySet = isSecretReference(String(defaultValue));
+        input.placeholder = alreadySet
+          ? "•••••• set — type a new value to replace"
+          : (override.placeholder ?? "");
+        if (alreadySet) row.classList.add("schema-form-row--secret-set");
+        row.appendChild(input);
+        // No trim: a credential may legitimately carry edge whitespace.
+        read = () => input.value;
+        break;
+      }
+      input.type = "text";
       if (field.required) input.required = true;
       if (field.pattern && patternIsBrowserSafe(field.pattern)) input.pattern = field.pattern;
       if (override.placeholder !== undefined) input.placeholder = override.placeholder;
