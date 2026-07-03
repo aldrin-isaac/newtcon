@@ -6508,6 +6508,22 @@ async function mount(): Promise<void> {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeDetail();
   });
+
+  // Reflect the drawer's open/closed state onto <body> so the active view can make
+  // room for it. The drawer is a fixed overlay pinned to the right; without this,
+  // an open drawer sits ON TOP of the right half of the Topology canvas (including
+  // its centre), so pan/zoom/drag there hit the drawer instead of the SVG. The CSS
+  // shrinks the Topology view by the drawer's width so the whole graph stays
+  // interactive to the left of it. Observing the element covers every opener
+  // (node inspector, add-node, add-link, create/edit forms) centrally.
+  const drawerEl = document.getElementById("detail-drawer");
+  if (drawerEl) {
+    const syncDrawerBodyClass = (): void => {
+      document.body.classList.toggle("drawer-open", drawerEl.classList.contains("open"));
+    };
+    new MutationObserver(syncDrawerBodyClass).observe(drawerEl, { attributes: true, attributeFilter: ["class"] });
+    syncDrawerBodyClass();
+  }
 }
 
 // Gate the workspace mount on a successful sign-in so we don't fire /api/*

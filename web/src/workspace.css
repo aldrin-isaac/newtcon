@@ -112,6 +112,13 @@
 .spec-row-delete-btn:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 /* Topology */
+/* The detail drawer is a fixed overlay on the right. When it's open, shrink the
+ * Topology view by the drawer's width so the whole graph stays visible + pan/zoom-
+ * able to the left of it, instead of the drawer sitting on top of the canvas
+ * (which swallows pointer events over its half). Body class set from the drawer's
+ * state in app.ts. Scoped to the Topology view — other views are fine overlaid. */
+.view-topology { box-sizing: border-box; transition: padding-right var(--duration-base) var(--ease-standard); }
+body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .topology-canvas { display: flex; flex-direction: column; }
 .topology-graph-host { background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: var(--space-md); min-height: 360px; overflow: auto; }
 /* SVG fills its slot — pan/zoom is via viewBox, not via the element
