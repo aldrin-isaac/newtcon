@@ -178,6 +178,14 @@ func main() {
 		CorrelationID: server.CorrelationIDFromContext,
 	})
 
+	// Network-scoped secret store (newtron#371 et al.). Write-only credential
+	// authoring: the create-node form POSTs a masked value here and references
+	// it from a spec field as ${secret:<key>}; no route returns a value.
+	handlers.RegisterSecretsRoutes(mux, handlers.SecretsDeps{
+		Client:        nc,
+		CorrelationID: server.CorrelationIDFromContext,
+	})
+
 	// Spec-authoring schema metadata (newtron PR #240). Two global
 	// read-only endpoints (no /networks/{netID}/ prefix — the schema
 	// is per-install, not per-network). Frontend drives create-form
