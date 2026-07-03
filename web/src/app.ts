@@ -97,6 +97,8 @@ import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveKindToSlug, resolveSubRuleKind } from "./api/newtcon/schema.js";
 import { renderSchemaForm } from "./schema-form.js";
+import { planSecretFields } from "./secret-field.js";
+import { setSecret } from "./api/newtcon/secrets.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
@@ -320,6 +322,28 @@ function displaySchemaFor(kind: SpecKind): FieldDef[] | undefined {
   return specForms[kind];
 }
 
+// applySecretFields writes any plaintext secret-field values (schema secret:true —
+// e.g. a node's ssh_pass) to the active network's secret store and returns the
+// body with ${secret:key} references in their place, so a credential never enters
+// a staged/authored spec body. No-op when the schema has no secret fields (every
+// kind but NodeSpec today). Call before enqueuing a schema-driven create/update;
+// the store write is a side effect that happens on submit, the spec change still
+// stages through Apply. Throws if a store write fails (caller aborts the enqueue).
+async function applySecretFields(
+  network: string,
+  specName: string,
+  schema: { fields: readonly { name: string; secret?: boolean }[] },
+  values: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const secretFields = schema.fields.filter((f) => f.secret).map((f) => f.name);
+  if (secretFields.length === 0) return values;
+  const { writes, body } = planSecretFields(specName, values, secretFields);
+  for (const w of writes) {
+    await setSecret(network, w.key, w.value);
+  }
+  return body;
+}
+
 // isEditableKind returns true when a spec kind has any top-level field
 // beyond the identifier — those are the kinds where the Edit button shows
 // up in the detail drawer. For schema-driven kinds this resolves async
@@ -421,7 +445,7 @@ async function renderSchemaDrivenEdit(
     void openDetail(kind, kindTitle, name);
   });
 
-  saveBtn.addEventListener("click", () => {
+  saveBtn.addEventListener("click", async () => {
     if (!validate()) return;
     errOut.textContent = "";
     const values = getValues();
@@ -442,13 +466,27 @@ async function renderSchemaDrivenEdit(
         delete values[f.name];
       }
     }
+    // Write any secret-field plaintext to the store first (keyed by this spec's
+    // name), so the staged body carries ${secret:key}, not the credential. An
+    // untouched secret field submits empty → planSecretFields drops it, keeping
+    // the existing store reference. No-op when the schema has no secret fields.
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    let body: Record<string, unknown>;
+    try {
+      body = await applySecretFields(activeNetwork(), name, schema, values);
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      errOut.textContent = `Failed to store credential: ${formatErrorBrief(err)}`;
+      return;
+    }
     // Queue the edit (PUT /update-<kind>) — it stages and applies through the
     // Save loop like create/delete, not instantly. The list shows the row as
     // pending-modified; the committed values stand until Apply. preBody (the
     // spec before the edit) lets undo restore it.
     const preBody = detail && typeof detail === "object" ? detail as Record<string, unknown> : undefined;
-    enqueueSpecUpdate(kind as StagingSpecKind, name, values, preBody);
-    saveBtn.disabled = true;
+    enqueueSpecUpdate(kind as StagingSpecKind, name, body, preBody);
     saveBtn.textContent = "Queued";
     content.insertBefore(
       el("p", { className: "form-success" },
@@ -1005,11 +1043,11 @@ async function renderSchemaDrivenCreate(
     closeDetail();
   });
 
-  submitBtn.addEventListener("click", () => {
+  submitBtn.addEventListener("click", async () => {
     if (!validate()) return;
     errorOut.textContent = "";
     submitBtn.disabled = true;
-    submitBtn.textContent = "Queued";
+    submitBtn.textContent = "Saving…";
     try {
       const values = getValues();
       // Identifier comes from the schema-rendered field (per newtron's
@@ -1018,7 +1056,11 @@ async function renderSchemaDrivenCreate(
       // `identifier` field is the authoritative source).
       const idField = schema.identifier || "name";
       const name = String(values[idField] ?? "(unnamed)");
-      enqueueSpecCreate(kind as StagingSpecKind, name, values);
+      // Write any secret-field plaintext to the store first, so the staged body
+      // carries ${secret:key} references, not the credential (no-op sans secrets).
+      const body = await applySecretFields(activeNetwork(), name, schema, values);
+      enqueueSpecCreate(kind as StagingSpecKind, name, body);
+      submitBtn.textContent = "Queued";
       const ok = el("p", { className: "form-success" }, "Added to pending changes (green). Click Save in the header to apply.");
       content.insertBefore(ok, buttons);
       onSuccess();
@@ -1026,7 +1068,7 @@ async function renderSchemaDrivenCreate(
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Create";
-      errorOut.appendChild(el("p", { className: "panel-error" }, String(err)));
+      errorOut.appendChild(el("p", { className: "panel-error" }, formatErrorBrief(err)));
     }
   });
 }
