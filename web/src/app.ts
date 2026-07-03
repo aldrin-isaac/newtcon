@@ -1048,19 +1048,26 @@ async function renderSchemaDrivenCreate(
 // spec, not a topology action). Re-renders itself after set/clear to refresh context.
 async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   const network = activeNetwork();
-  content.textContent = "";
-  content.appendChild(el("h2", { className: "spec-panel-title" }, "SSH Login"));
-  content.appendChild(el("p", { className: "node-spec-intro" },
+  // Build into a DETACHED panel and swap it in atomically at the end. This facet
+  // re-renders on every pending-queue change (subscribePending), and the build
+  // awaits (fetchSchema / renderSchemaForm) — so two overlapping renders (open +
+  // a staging notify) would each clear-then-append and stack DUPLICATE forms.
+  // Replacing content in one shot at the end makes concurrent renders last-wins.
+  const panel = document.createElement("div");
+  panel.appendChild(el("h2", { className: "spec-panel-title" }, "SSH Login"));
+  panel.appendChild(el("p", { className: "node-spec-intro" },
     "The login newtron uses to reach devices — resolved node > zone > network > platform > \"admin\". Set it once at network scope; override at zone/node for exceptions."));
 
-  const schema = await fetchSchema("SSHCredentials").catch((err) => {
-    content.appendChild(el("p", { className: "panel-error" }, `SSH-login schema unavailable: ${formatErrorBrief(err)}`));
-    return null;
-  });
-  if (!schema) return;
+  let schema;
+  try {
+    schema = await fetchSchema("SSHCredentials");
+  } catch (err) {
+    content.replaceChildren(el("p", { className: "panel-error" }, `SSH-login schema unavailable: ${formatErrorBrief(err)}`));
+    return;
+  }
 
   const { form, getValues, validate } = await renderSchemaForm({ schema });
-  content.appendChild(form);
+  panel.appendChild(form);
 
   // Scope-aware context: pre-fill the login AUTHORED at the selected scope, and for
   // a chosen node also show the EFFECTIVE (resolved) login it dials with. Reaches
@@ -1070,7 +1077,7 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   const userInput = form.querySelector<HTMLInputElement>('[name="ssh_user"]');
   const passInput = form.querySelector<HTMLInputElement>('[name="ssh_pass"]');
   const ctxBox = el("div", { className: "ssh-login-context" });
-  content.appendChild(ctxBox);
+  panel.appendChild(ctxBox);
   const refreshContext = async (): Promise<void> => {
     const scope = scopeSel?.value || "network";
     const instance = instSel?.value || "";
@@ -1108,7 +1115,7 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   void refreshContext();
 
   const errOut = el("div", { className: "form-error-out" });
-  content.appendChild(errOut);
+  panel.appendChild(errOut);
 
   // Buttons match the spec-authoring pattern: Save stages an upsert, Clear stages
   // a delete-style removal. Both go into the pending queue → committed by the
@@ -1118,7 +1125,7 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   const clearBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Clear override");
   buttons.appendChild(saveBtn);
   buttons.appendChild(clearBtn);
-  content.appendChild(buttons);
+  panel.appendChild(buttons);
 
   const scopeLabel = (s: string, i: string): string => (s === "network" ? "network" : `${s} ${i}`);
   const stagedToast = (): void =>
@@ -1176,6 +1183,10 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
       errOut.textContent = engineOpErrorBody(err);
     }
   });
+
+  // Atomic swap — the ONLY mutation of `content`. Concurrent renders → last wins,
+  // never a stacked duplicate form.
+  content.replaceChildren(panel);
 }
 
 // One row in a spec panel: a spec definition at a given scope. The same
@@ -6450,7 +6461,8 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
 
   async function renderActiveFacet(): Promise<void> {
     if (sshLoginActive) {
-      main.textContent = "";
+      // renderSSHLoginInto swaps content atomically at the end — no pre-clear, so
+      // a re-render (on pending-queue change) doesn't flicker or stack forms.
       await renderSSHLoginInto(main);
       return;
     }
