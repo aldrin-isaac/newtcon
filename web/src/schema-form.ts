@@ -445,9 +445,13 @@ async function buildFieldRow(
         input.type = "password";
         input.autocomplete = "new-password";
         const alreadySet = isSecretReference(String(defaultValue));
+        // D (platform default, newtron#370/#379): a lab node created from a
+        // platform inherits its login, so the operator need not type one — say so.
+        // Only prompt for a value on an explicit override / a credential-less
+        // platform. Empty submit ⇒ inherit (planSecretFields drops it).
         input.placeholder = alreadySet
           ? "•••••• set — type a new value to replace"
-          : (override.placeholder ?? "");
+          : (override.placeholder ?? "leave blank to use the platform / network login");
         if (alreadySet) row.classList.add("schema-form-row--secret-set");
         row.appendChild(input);
         // No trim: a credential may legitimately carry edge whitespace.
