@@ -50,7 +50,10 @@ export type PendingInverse =
   | { group: "topology";  op: "add-link";      a?: string; z?: string; }
   | { group: "topology";  op: "remove-link";   device: string; iface: string; }
   | { group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
-  | { group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; };
+  | { group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; }
+  // SSH login (scoped scalar): set/clear at a scope. Its own group because it's an
+  // upsert/clear verb, not spec-CRUD-by-name. Inverse carries the prior scope value.
+  | { group: "ssh-login"; op: "set" | "clear"; scope: string; scopeInstance: string; body?: Record<string, unknown>; title: string; };
 
 export type Pending =
   | { id: string; group: "mutation"; method: "POST" | "PUT" | "DELETE"; path: string;
@@ -71,7 +74,8 @@ export type Pending =
   | { id: string; group: "topology";  op: "add-link";      a: string; z: string; inverse?: PendingInverse; }
   | { id: string; group: "topology";  op: "remove-link";   device: string; iface: string; inverse?: PendingInverse; }
   | { id: string; group: "device";    op: "action";    device: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; }
-  | { id: string; group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; };
+  | { id: string; group: "interface"; op: "action";    device: string; iface: string; actionId: string; label: string; danger?: boolean; body: Record<string, unknown>; inverse?: PendingInverse; }
+  | { id: string; group: "ssh-login"; op: "set" | "clear"; scope: string; scopeInstance: string; body?: Record<string, unknown>; title: string; inverse?: PendingInverse; };
 
 // ---- Store ---------------------------------------------------------------
 
@@ -572,6 +576,34 @@ export async function applyAll(): Promise<ApplyResult> {
   return result;
 }
 
+// ---- SSH login (scoped scalar) --------------------------------------------
+// set/clear stage like any spec mutation → committed via the header Save, with an
+// undo inverse that restores the prior AUTHORED value at the scope (a set of it,
+// or a clear when nothing was authored). Repeated edits at one scope coalesce.
+// prior is the login authored at the scope BEFORE this change (from ShowSSHCredentials).
+type SSHPrior = { ssh_user?: string; ssh_pass?: string } | null;
+
+function pushSSHLogin(p: Extract<Pending, { group: "ssh-login" }>): Pending {
+  const i = queue.findIndex((q) => q.group === "ssh-login" && q.scope === p.scope && q.scopeInstance === p.scopeInstance);
+  if (i >= 0) queue[i] = p; else queue.push(p);
+  notify();
+  return p;
+}
+
+export function enqueueSSHLoginSet(scope: string, scopeInstance: string, body: Record<string, unknown>, title: string, prior: SSHPrior): Pending {
+  const inverse: PendingInverse = prior && (prior.ssh_user || prior.ssh_pass)
+    ? { group: "ssh-login", op: "set", scope, scopeInstance, body: { ssh_user: prior.ssh_user ?? "", ssh_pass: prior.ssh_pass ?? "" }, title }
+    : { group: "ssh-login", op: "clear", scope, scopeInstance, title };
+  return pushSSHLogin({ id: String(nextID++), group: "ssh-login", op: "set", scope, scopeInstance, body, title, inverse });
+}
+
+export function enqueueSSHLoginClear(scope: string, scopeInstance: string, title: string, prior: SSHPrior): Pending {
+  const inverse: PendingInverse | undefined = prior && (prior.ssh_user || prior.ssh_pass)
+    ? { group: "ssh-login", op: "set", scope, scopeInstance, body: { ssh_user: prior.ssh_user ?? "", ssh_pass: prior.ssh_pass ?? "" }, title }
+    : undefined; // nothing authored → clear is a no-op, nothing to undo
+  return pushSSHLogin({ id: String(nextID++), group: "ssh-login", op: "clear", scope, scopeInstance, title, ...(inverse ? { inverse } : {}) });
+}
+
 async function applySubset(targets: readonly Pending[], mode: "default" | "topology"): Promise<ApplyResult> {
   // Order: spec creates → device adds → link adds → device-actions →
   // interface-actions → link removes → device removes → spec deletes
@@ -606,6 +638,10 @@ function groupOrder(p: Pending): number {
   if (p.group === "interface") return 5;
   if (p.group === "topology" && p.op === "remove-link") return 6;
   if (p.group === "topology" && p.op === "remove-device") return 7;
+  if (p.group === "ssh-login") {
+    if (p.op === "set") return p.scope === "network" ? 0.9 : 1.7;  // network base before zone/node overrides
+    return p.scope === "network" ? 8.1 : 7.6;                       // overrides cleared before the base
+  }
   return 9;
 }
 
@@ -623,6 +659,7 @@ export function pendingPath(p: Pending, mode: "default" | "topology" = "default"
   if (p.group === "topology" && p.op === "remove-link") return { method: "DELETE", path: `topology/links/${enc(p.device)}/${enc(p.iface)}` };
   if (p.group === "device" && p.op === "action") return { method: "POST", path: `nodes/${enc(p.device)}/rpc/${p.actionId}${modeQS}` };
   if (p.group === "interface" && p.op === "action") return { method: "POST", path: `nodes/${enc(p.device)}/interfaces/${enc(p.iface)}/rpc/${p.actionId}${modeQS}` };
+  if (p.group === "ssh-login") return { method: "POST", path: p.op === "set" ? "set-ssh-credentials" : "clear-ssh-credentials" };
   return { method: "?", path: "" };
 }
 
@@ -666,6 +703,13 @@ async function applyOne(p: Pending, mode: "default" | "topology"): Promise<void>
   }
   if (p.group === "device" && p.op === "action") {
     await postJSON(apiPath(`nodes/${encodeURIComponent(p.device)}/rpc/${p.actionId}${modeQS}`), p.body);
+    return;
+  }
+  if (p.group === "ssh-login") {
+    const body = p.op === "set"
+      ? { scope: p.scope, scope_instance: p.scopeInstance, ...(p.body ?? {}) }
+      : { scope: p.scope, scope_instance: p.scopeInstance };
+    await postJSON(apiPath(p.op === "set" ? "set-ssh-credentials" : "clear-ssh-credentials"), body);
     return;
   }
   if (p.group === "interface" && p.op === "action") {

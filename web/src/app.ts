@@ -99,7 +99,7 @@ import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveKindToSlug, res
 import { renderSchemaForm } from "./schema-form.js";
 import { secretReference, isSecretReference } from "./secret-field.js";
 import { setSecret } from "./api/newtcon/secrets.js";
-import { showSSHCredentials, setSSHCredentials, clearSSHCredentials, type SSHCredentialsWrite } from "./api/newtcon/ssh-credentials.js";
+import { showSSHCredentials } from "./api/newtcon/ssh-credentials.js";
 import {
   type PaletteState,
   resolveLabDevicePalette,
@@ -152,6 +152,8 @@ import {
   enqueueSubUpdate,
   enqueueSubDelete,
   enqueueSubReorder,
+  enqueueSSHLoginSet,
+  enqueueSSHLoginClear,
   pendingSpecCreateItems,
   pendingSubMutations,
   isSpecPendingDelete,
@@ -1105,12 +1107,19 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
   const errOut = el("div", { className: "form-error-out" });
   content.appendChild(errOut);
 
+  // Buttons match the spec-authoring pattern: Save stages an upsert, Clear stages
+  // a delete-style removal. Both go into the pending queue → committed by the
+  // header Save (Apply All), with preview + undo — like ip-vpn / filters / nodes.
   const buttons = el("div", { className: "form-button-row" });
-  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Set login");
-  const clearBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Clear this scope");
+  const saveBtn = el("button", { type: "button", className: "form-submit-btn" }, "Save");
+  const clearBtn = el("button", { type: "button", className: "form-cancel-btn" }, "Clear override");
   buttons.appendChild(saveBtn);
   buttons.appendChild(clearBtn);
   content.appendChild(buttons);
+
+  const scopeLabel = (s: string, i: string): string => (s === "network" ? "network" : `${s} ${i}`);
+  const stagedToast = (): void =>
+    showToast({ kind: "success", title: "Added to pending changes", body: "Click Save in the header to apply." });
 
   saveBtn.addEventListener("click", async () => {
     if (!validate()) return;
@@ -1119,25 +1128,29 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
     const scope = String(values["scope"] ?? "network");
     const instance = String(values["scope_instance"] ?? "");
     saveBtn.disabled = true;
-    saveBtn.textContent = "Saving…";
+    saveBtn.textContent = "Staging…";
     try {
-      // A plaintext password goes to the secret store, referenced as ${secret:KEY}
-      // (key: <instance>_ssh_pass, or "ssh_pass" at network). Empty ⇒ inherit.
+      // The plaintext password goes to the secret store NOW (a write-only side
+      // effect) — this keeps plaintext OUT of the staged body, which carries only
+      // the ${secret:KEY} reference (key: <instance>_ssh_pass, or "ssh_pass" at
+      // network). Empty password ⇒ inherit.
+      const body: Record<string, unknown> = {};
+      if (values["ssh_user"]) body["ssh_user"] = values["ssh_user"];
       const pass = String(values["ssh_pass"] ?? "");
       if (pass && !isSecretReference(pass)) {
         const key = scope === "network" ? "ssh_pass" : `${instance}_ssh_pass`;
         await setSecret(network, key, pass);
-        values["ssh_pass"] = secretReference(key);
-      } else if (!pass) {
-        delete values["ssh_pass"];
+        body["ssh_pass"] = secretReference(key);
+      } else if (isSecretReference(pass)) {
+        body["ssh_pass"] = pass;
       }
-      if (!values["ssh_user"]) delete values["ssh_user"];
-      await setSSHCredentials(network, values as unknown as SSHCredentialsWrite);
-      showToast({ kind: "success", title: "SSH login set", body: `Login set at ${scope}${instance ? " " + instance : ""} scope.` });
-      void renderSSHLoginInto(content); // refresh context + clear the masked field
+      // Prior authored value at this scope → the undo inverse.
+      const prior = await showSSHCredentials(network, scope, instance || undefined).catch(() => null);
+      enqueueSSHLoginSet(scope, instance, body, `SSH login — set at ${scopeLabel(scope, instance)}`, prior);
+      stagedToast();
     } catch (err) {
       saveBtn.disabled = false;
-      saveBtn.textContent = "Set login";
+      saveBtn.textContent = "Save";
       errOut.textContent = engineOpErrorBody(err);
     }
   });
@@ -1147,15 +1160,15 @@ async function renderSSHLoginInto(content: HTMLElement): Promise<void> {
     const scope = String(values["scope"] ?? "network");
     const instance = String(values["scope_instance"] ?? "");
     const ok = await confirmInline({
-      title: `Clear the SSH login at ${scope}${instance ? " " + instance : ""} scope?`,
-      body: "Removes both fields at this scope; it will inherit from the next scope up.",
+      title: `Clear the SSH login at ${scopeLabel(scope, instance)} scope?`,
+      body: "Stages removal of the override at this scope; it will inherit from the next scope up.",
       confirmLabel: "Clear",
     });
     if (!ok) return;
     try {
-      await clearSSHCredentials(network, scope, instance || undefined);
-      showToast({ kind: "success", title: "Override cleared", body: `Cleared at ${scope}${instance ? " " + instance : ""} scope.` });
-      void renderSSHLoginInto(content);
+      const prior = await showSSHCredentials(network, scope, instance || undefined).catch(() => null);
+      enqueueSSHLoginClear(scope, instance, `SSH login — clear at ${scopeLabel(scope, instance)}`, prior);
+      stagedToast();
     } catch (err) {
       errOut.textContent = engineOpErrorBody(err);
     }
