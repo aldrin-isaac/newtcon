@@ -3862,6 +3862,16 @@ function renderConfigDBTab(container: HTMLElement, device: string, tableMap: unk
 //   - Not realized     → guidance text pointing at "Deploy as lab"
 //   - Reachable via probe (not lab) → state pill only (start/stop n/a)
 //
+// engineOpErrorBody: for newtlab lifecycle ops (deploy / provision / destroy),
+// prefer newtron's real underlying error — e.g. a reconcile failure
+// "…DEVICE_METADATA|localhost not found in CONFIG_DB" (device booted but SONiC
+// config uninitialised, so Provision can't bootstrap it) — over newtcon's generic
+// "upstream unreachable" wrapper, which points the operator at the wrong thing.
+function engineOpErrorBody(err: unknown): string {
+  const reason = err instanceof ApiError ? extractUnderlyingMessage(err.details) : null;
+  return reason ?? (err instanceof Error ? err.message : String(err));
+}
+
 // Phase 4 may move this into a standalone module if the lifecycle surface
 // grows further (console viewer, log tail, etc.).
 async function renderLifecycleSection(host: HTMLElement, device: string, viewMode?: TopologyViewMode): Promise<void> {
@@ -3971,7 +3981,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
           .catch((err) => {
             stop.removeAttribute("disabled");
             stop.textContent = "Stop VM";
-            showToast({ kind: "error", title: "Stop failed", body: err instanceof Error ? err.message : String(err) });
+            showToast({ kind: "error", title: "Stop failed", body: engineOpErrorBody(err) });
           });
       });
       actions.appendChild(stop);
@@ -3986,7 +3996,7 @@ async function renderLifecycleSection(host: HTMLElement, device: string, viewMod
           .catch((err) => {
             start.removeAttribute("disabled");
             start.textContent = "Start VM";
-            showToast({ kind: "error", title: "Start failed", body: err instanceof Error ? err.message : String(err) });
+            showToast({ kind: "error", title: "Start failed", body: engineOpErrorBody(err) });
           });
       });
       actions.appendChild(start);
@@ -5342,7 +5352,7 @@ function openDeployModal(network: string): void {
       await postLabDeploy(network, {});
       append("accepted; streaming events…");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = engineOpErrorBody(err);
       append(`[error] deploy request failed: ${msg}`);
       return;
     }
@@ -5685,7 +5695,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             .catch((err) => {
               provisionBtn.removeAttribute("disabled");
               provisionBtn.textContent = "Provision";
-              const msg = err instanceof Error ? err.message : String(err);
+              const msg = engineOpErrorBody(err);
               showToast({ kind: "error", title: "Provision failed", body: msg });
             });
         });
@@ -5712,7 +5722,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             .catch((err) => {
               destroyBtn.removeAttribute("disabled");
               destroyBtn.textContent = "Destroy";
-              const msg = err instanceof Error ? err.message : String(err);
+              const msg = engineOpErrorBody(err);
               showToast({ kind: "error", title: "Destroy failed", body: msg });
             });
         });
@@ -5743,7 +5753,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             .catch((err) => {
               provisionBtn.removeAttribute("disabled");
               provisionBtn.textContent = "Provision";
-              const msg = err instanceof Error ? err.message : String(err);
+              const msg = engineOpErrorBody(err);
               showToast({ kind: "error", title: "Provision failed", body: msg });
             });
         });
