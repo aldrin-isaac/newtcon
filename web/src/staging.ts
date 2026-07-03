@@ -219,10 +219,28 @@ export function enqueueSubUpdate(
     notify();
     return queue[ui]!;
   }
-  const path = `${subBasePath(kind, spec, endpoint)}/${enc(String(key))}`;
-  const inverse: PendingInverse | undefined = preBody
-    ? { group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body: preBody }
-    : undefined;
+  const base = subBasePath(kind, spec, endpoint);
+  const path = `${base}/${enc(String(key))}`;
+  // Inverse. A plain field edit restores the prior body at the SAME key. But a
+  // key-changing edit — a renumber/rename, which composeUpdateBody emits as
+  // new_<keyField> — moves the row to newKey, so "restore preBody at the original
+  // key" would target a now-empty key. Invert by renumbering back: PUT
+  // .../{newKey} {new_<key>: originalKey, …prior other fields}. Mirrors
+  // enqueueSubReorder's inverse, for the Edit-form renumber path (the seq field
+  // is editable in the sub-rule Edit form, so a renumber can arrive here too).
+  const renumberField = Object.keys(body).find((k) => k.startsWith("new_"));
+  const newKey = renumberField ? body[renumberField] : undefined;
+  let inverse: PendingInverse | undefined;
+  if (renumberField && newKey !== undefined && newKey !== null) {
+    const invBody: Record<string, unknown> = { [renumberField]: key };
+    if (preBody) {
+      const keyName = renumberField.slice(4); // strip "new_"
+      for (const [k, v] of Object.entries(preBody)) if (k !== keyName) invBody[k] = v;
+    }
+    inverse = { group: "mutation", method: "PUT", path: `${base}/${enc(String(newKey as string | number))}`, effect: "update", kind, name: spec, sub: { endpoint, key: newKey as string | number }, title, body: invBody };
+  } else if (preBody) {
+    inverse = { group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body: preBody };
+  }
   return pushMutation({ group: "mutation", method: "PUT", path, effect: "update", kind, name: spec, sub: { endpoint, key }, title, body, ...(preBody ? { preBody } : {}), ...(inverse ? { inverse } : {}) });
 }
 
