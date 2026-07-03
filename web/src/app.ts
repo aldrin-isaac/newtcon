@@ -5304,28 +5304,32 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
 
 // ---- Deploy-as-lab modal ----------------------------------------------------
 
-// openDeployModal posts the deploy and streams newtlab's SSE phase events into
-// an in-place log panel. Phase 1 of unifying lab + physical substrate: this is
-// invoked from the Topology toolbar; future phases will fold the resulting
-// per-device status back into the SVG diagram so the operator never has to
-// switch tabs to see "is it running".
-function openDeployModal(network: string): void {
+// openLabOpModal runs a newtlab lifecycle op (deploy / provision) in a modal that
+// streams the per-lab SSE event stream (phase / complete / error) into a live log.
+// It doubles as the busy indicator for long ops: the title + hint show the work is
+// under way (not frozen) even when the engine emits no intermediate events — e.g.
+// Provision today (newtron#373), where completion comes from the POST resolving
+// rather than an SSE "complete". run() drives the op-specific POST + messaging; the
+// shared shell owns the DOM, the SSE subscription, and teardown.
+function openLabOpModal(
+  network: string,
+  opts: {
+    title: string;
+    hint: string;
+    completeLine?: string;
+    run: (ctx: { append: (line: string) => void; finish: () => void }) => Promise<void>;
+  },
+): void {
   const overlay = el("div", { className: "network-modal-overlay" });
   const modal = el("div", { className: "network-modal deploy-modal" });
-
-  const title = el("h2", { className: "network-modal-title" }, `Bringing up "${network}" as a lab`);
-  const hint = el("p", { className: "network-modal-hint" },
-    "newtlab is booting one VM per device in the topology. Streaming progress below — close this window once the deploy completes.");
+  const title = el("h2", { className: "network-modal-title" }, opts.title);
+  const hint = el("p", { className: "network-modal-hint" }, opts.hint);
   const logLines = el("pre", { className: "deploy-modal-log" });
-
-  // Always-enabled Close — the operator can dismiss whenever. Deploy continues
-  // at newtlab's pace regardless; phase 2 will surface running status back in
-  // the topology view, so losing the log stream isn't operationally fatal.
+  // Always-enabled Close — the operator can dismiss whenever; the op continues at
+  // newtlab's pace and its status surfaces back in the topology view.
   const closeBtn = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Close");
-
   const actions = el("div", { className: "network-modal-actions" });
   actions.appendChild(closeBtn);
-
   modal.appendChild(title);
   modal.appendChild(hint);
   modal.appendChild(logLines);
@@ -5337,54 +5341,60 @@ function openDeployModal(network: string): void {
     logLines.textContent += (logLines.textContent ? "\n" : "") + line;
     logLines.scrollTop = logLines.scrollHeight;
   };
-
-  const close = (): void => {
-    src?.close();
-    overlay.remove();
-  };
+  let src: EventSource | null = null;
+  const finish = (): void => { src?.close(); src = null; };
+  const close = (): void => { finish(); overlay.remove(); };
   closeBtn.addEventListener("click", close);
 
-  let src: EventSource | null = null;
-
-  const start = async (): Promise<void> => {
-    try {
-      append(`POST deploy lab=${network}…`);
-      await postLabDeploy(network, {});
-      append("accepted; streaming events…");
-    } catch (err) {
-      const msg = engineOpErrorBody(err);
-      append(`[error] deploy request failed: ${msg}`);
-      return;
-    }
-
-    src = labEvents(
-      network,
-      (eventType, data) => {
-        try {
-          const payload = JSON.parse(data) as Record<string, unknown>;
-          if (eventType === "phase") {
-            const phase = String(payload["phase"] ?? "");
-            const detail = payload["detail"] ? " — " + String(payload["detail"]) : "";
-            append(`${phase}${detail}`);
-          } else if (eventType === "complete") {
-            append("[done] deploy complete — devices are addressable through the topology view");
-            src?.close();
-          } else if (eventType === "error") {
-            append("[error] " + String(payload["message"] ?? data));
-            src?.close();
-          }
-        } catch {
-          append(data);
+  // Stream the per-lab SSE events. Deploy emits phase/complete/error; Provision
+  // emits nothing yet (newtron#373) — the subscription is harmless + ready for
+  // when it does. For ops with no SSE "complete" (synchronous Provision), run()
+  // signals completion itself via finish().
+  src = labEvents(
+    network,
+    (eventType, data) => {
+      try {
+        const payload = JSON.parse(data) as Record<string, unknown>;
+        if (eventType === "phase") {
+          const phase = String(payload["phase"] ?? "");
+          const detail = payload["detail"] ? " — " + String(payload["detail"]) : "";
+          append(`${phase}${detail}`);
+        } else if (eventType === "complete") {
+          append(opts.completeLine ?? "[done] complete");
+          finish();
+        } else if (eventType === "error") {
+          append("[error] " + String(payload["message"] ?? data));
+          finish();
         }
-      },
-      () => {
-        // Stream closed or errored. EventSource will normally try to reconnect
-        // on a clean close, so we don't auto-close the modal here — the
-        // operator stays in control via the always-enabled Close button.
-      },
-    );
-  };
-  void start();
+      } catch {
+        append(data);
+      }
+    },
+    () => {
+      // Stream closed or errored. EventSource normally reconnects on a clean
+      // close, so we don't auto-close the modal — the operator stays in control.
+    },
+  );
+
+  void opts.run({ append, finish });
+}
+
+// openDeployModal — async op: POST returns 202, the SSE "complete" ends it.
+function openDeployModal(network: string): void {
+  openLabOpModal(network, {
+    title: `Bringing up "${network}" as a lab`,
+    hint: "newtlab is booting one VM per device in the topology. Streaming progress below — close this window once the deploy completes.",
+    completeLine: "[done] deploy complete — devices are addressable through the topology view",
+    run: async ({ append }) => {
+      append(`POST deploy lab=${network}…`);
+      try {
+        await postLabDeploy(network, {});
+        append("accepted; streaming events…");
+      } catch (err) {
+        append(`[error] deploy request failed: ${engineOpErrorBody(err)}`);
+      }
+    },
+  });
 }
 
 // ---- Topology tab -----------------------------------------------------------
@@ -5685,19 +5695,25 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             confirmLabel: "Provision",
           });
           if (!ok) return;
-          provisionBtn.setAttribute("disabled", "");
-          provisionBtn.textContent = "Provisioning…";
-          postLabProvision(network)
-            .then(() => {
-              provisionBtn.removeAttribute("disabled");
-              provisionBtn.textContent = "Provision";
-            })
-            .catch((err) => {
-              provisionBtn.removeAttribute("disabled");
-              provisionBtn.textContent = "Provision";
-              const msg = engineOpErrorBody(err);
-              showToast({ kind: "error", title: "Provision failed", body: msg });
-            });
+          // Progress modal (busy indicator — provision is a long, currently
+          // event-less synchronous op; newtron#373 tracks emitting progress). It
+          // subscribes to the SSE stream too, so it lights up the moment newtlab
+          // reports; until then the title + hint make clear it's working, not frozen.
+          openLabOpModal(network, {
+            title: `Provisioning "${network}"`,
+            hint: "newtlab is pushing config + restarting containers on each device — this can take a few minutes. Progress streams below as newtlab reports it.",
+            run: async ({ append, finish }) => {
+              append(`POST provision lab=${network}… (synchronous — waiting for newtlab)`);
+              try {
+                await postLabProvision(network);
+                append("[done] provision complete");
+              } catch (err) {
+                append(`[error] provision failed: ${engineOpErrorBody(err)}`);
+              } finally {
+                finish();
+              }
+            },
+          });
         });
         toolbar.appendChild(provisionBtn);
 
