@@ -2023,6 +2023,7 @@
 }
 .lifecycle-pill--running    .lifecycle-pill-state { background: var(--color-success); }
 .lifecycle-pill--booting    .lifecycle-pill-state { background: var(--color-warning, #d97706); }
+.lifecycle-pill--provisioning .lifecycle-pill-state { background: var(--color-warning, #d97706); }
 .lifecycle-pill--unreachable .lifecycle-pill-state { background: var(--color-warning, #d97706); }
 .lifecycle-pill--down       .lifecycle-pill-state { background: var(--color-danger, #dc2626); }
 .lifecycle-pill--unrealized .lifecycle-pill-state { background: var(--color-text-muted); }
@@ -2067,6 +2068,9 @@
 }
 .topo-status-dot--running    { fill: var(--color-success); }
 .topo-status-dot--booting    { fill: var(--color-warning, #d97706); }
+/* Provisioning: solid amber + pulse (like booting) — the device is "in motion"
+ * while newtron reconfigures it. The pill/tooltip text disambiguates from booting. */
+.topo-status-dot--provisioning { fill: var(--color-warning, #d97706); animation: topo-booting-pulse 1.4s ease-in-out infinite; }
 /* Up but unreachable: hollow amber-ringed dot — the process is alive (has a
  * ring) but its interior is empty (can't confirm live state). Distinct from
  * solid-green running and pulsing-amber booting. */

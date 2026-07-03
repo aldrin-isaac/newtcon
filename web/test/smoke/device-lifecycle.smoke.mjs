@@ -105,7 +105,7 @@ try {
       detailText: pill.querySelector(".lifecycle-pill-detail")?.textContent?.trim(),
     };
   });
-  expect(lifecycleState !== null && ["lifecycle-pill--running", "lifecycle-pill--booting", "lifecycle-pill--unreachable", "lifecycle-pill--down", "lifecycle-pill--unrealized"].includes(lifecycleState?.stateClass),
+  expect(lifecycleState !== null && ["lifecycle-pill--running", "lifecycle-pill--booting", "lifecycle-pill--provisioning", "lifecycle-pill--unreachable", "lifecycle-pill--down", "lifecycle-pill--unrealized"].includes(lifecycleState?.stateClass),
     `lifecycle pill has a unified-state class: ${JSON.stringify(lifecycleState)}`);
   expect(typeof lifecycleState?.detailText === "string" && lifecycleState.detailText.length > 0,
     `lifecycle pill has detail text: "${lifecycleState?.detailText}"`);
@@ -133,7 +133,7 @@ try {
   } else if (stateClass === "lifecycle-pill--down") {
     expect(actionPlan.hasStart && !actionPlan.hasStop,
       `down state: Start button shown, Stop hidden. plan=${JSON.stringify(actionPlan)}`);
-  } else if (stateClass === "lifecycle-pill--running" || stateClass === "lifecycle-pill--booting" || stateClass === "lifecycle-pill--unreachable") {
+  } else if (stateClass === "lifecycle-pill--running" || stateClass === "lifecycle-pill--booting" || stateClass === "lifecycle-pill--provisioning" || stateClass === "lifecycle-pill--unreachable") {
     // The VM is up in all three → Stop, not Start. running + unreachable also
     // offer the SSH snippet (unreachable so you can log in and investigate).
     expect(actionPlan.hasStop && !actionPlan.hasStart,

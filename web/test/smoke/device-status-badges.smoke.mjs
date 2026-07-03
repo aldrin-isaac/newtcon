@@ -15,7 +15,7 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
 
-const VALID_STATES = ["running", "booting", "unreachable", "down", "unrealized"];   // status dot (lifecycle)
+const VALID_STATES = ["running", "booting", "provisioning", "unreachable", "down", "unrealized"];   // status dot (lifecycle)
 const PALETTE_STATES = ["spec-only", "actuated-ok", "actuated-down", "drift", "unknown"]; // <g> topo-elem (palette, #210)
 
 const browser = await puppeteer.launch({
