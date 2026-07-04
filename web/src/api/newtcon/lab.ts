@@ -48,10 +48,14 @@ export interface DeployRequest {
   parallel?: number;
 }
 
-// DeployResponse is the 202 body for POST /api/labs/{network_id}/deploy.
+// DeployResponse is the 202 ack for POST /api/labs/{network_id}/deploy. newtron
+// #373/#396 reshaped it to { op, network_id, started } (was { lab, started });
+// network_id IS the lab's identity. We stream /events, so we don't read this body,
+// but keep the type honest with the wire.
 export interface DeployResponse {
-  lab: string;
-  started: string;  // RFC3339
+  op: string;          // "deploy"
+  network_id: string;  // the lab's network-id
+  started: string;     // RFC3339
 }
 
 // fetchLabStatus returns the LabState for the lab with this network-id, from
