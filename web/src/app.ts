@@ -5850,7 +5850,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const resetPosBtn = el("button", {
       type: "button",
       className: "topology-zoom-btn topology-zoom-btn--reset",
-      title: "Reset node positions to auto layout",
+      title: "Re-run auto layout (discards manual moves)",
     }, "↺") as HTMLButtonElement;
     zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, resetPosBtn);
     graphSlot.appendChild(zoomToolbar);
@@ -5994,15 +5994,20 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       svgEl.setAttribute("viewBox", viewBoxStr(viewState));
     });
     resetPosBtn.addEventListener("click", async () => {
-      if (pinnedPositions.size === 0) return;
-      const ok = await confirmInline({
-        title: `Reset ${pinnedPositions.size} pinned node position${pinnedPositions.size === 1 ? "" : "s"}?`,
-        body: "Nodes will return to the grid layout.",
-        confirmLabel: "Reset",
-      });
-      if (!ok) return;
-      pinnedPositions.clear();
-      clearPositions(activeNet);
+      // Re-run the auto layout: discard any manual drags, recompute fresh, refit.
+      // Confirm only when there are manual positions to throw away.
+      if (pinnedPositions.size > 0) {
+        const ok = await confirmInline({
+          title: `Re-run layout — discard ${pinnedPositions.size} manual position${pinnedPositions.size === 1 ? "" : "s"}?`,
+          body: "Nodes return to the automatic layout.",
+          confirmLabel: "Re-run layout",
+        });
+        if (!ok) return;
+        pinnedPositions.clear();
+        clearPositions(activeNet);
+      }
+      topoLayoutCache = null;   // force a fresh layout pass
+      viewState = undefined;    // refit the viewport to the new layout
       renderGraph();
     });
 
