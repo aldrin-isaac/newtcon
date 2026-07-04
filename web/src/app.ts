@@ -73,6 +73,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
+import { deriveNodeLinks } from "./node-references.js";
 import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
@@ -1382,6 +1383,26 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
                     if (!ok) return;
                     force = true;
                   }
+                } else if (panel.kind === "nodes") {
+                  // newtron won't delete a node a link still wires to (409); detect
+                  // the links client-side and, on confirm, force-cascade them so the
+                  // node + its links are removed together.
+                  const topo = await fetchTopology().catch(() => null);
+                  const links = deriveNodeLinks(topo, r.name);
+                  if (links.length > 0) {
+                    const peers = [...new Set(links.map((l) => l.peer).filter(Boolean))];
+                    const shown = peers.slice(0, 6).join(", ");
+                    const more = peers.length > 6 ? `, +${peers.length - 6} more` : "";
+                    const n = links.length, s = n === 1 ? "" : "s";
+                    const ok = await confirmInline({
+                      title: `Force-delete node "${r.name}"?`,
+                      body: `${n} link${s} still wire to it (${shown}${more}). newtron won't delete a linked node; "Force delete" removes the node and cascades those ${n} link${s} from the topology.`,
+                      danger: true,
+                      confirmLabel: "Force delete",
+                    });
+                    if (!ok) return;
+                    force = true;
+                  }
                 }
                 enqueueSpecDelete(panel.kind as StagingSpecKind, r.name, undefined, undefined, force);
                 refreshPanel(panel, container);
@@ -2549,7 +2570,6 @@ interface TopologyRenderOpts {
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
   statusByDevice?: Map<string, DeviceStatus>;
-  onNodeDelete?: (name: string) => void;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
   // Staging overlays — render device cards in green/red according to queue state.
@@ -2954,39 +2974,10 @@ function renderTopologySVG(
       g.appendChild(badge);
     }
 
-    // Delete button: × shown on node hover (top-left corner).
-    if (opts.onNodeDelete) {
-      const onNodeDelete = opts.onNodeDelete;
-      const delBtn = svgEl("g", { "class": "topo-node-delete", "aria-label": `Remove ${node.name}` });
-      const bx = pos.cx - NODE_W / 2;
-      const by = pos.cy - NODE_H / 2;
-      delBtn.appendChild(svgEl("rect", {
-        x: String(bx),
-        y: String(by),
-        width: "16",
-        height: "16",
-        rx: "3",
-        "class": "topo-node-delete-bg",
-      }));
-      const delText = svgEl("text", {
-        x: String(bx + 8),
-        y: String(by + 8),
-        "text-anchor": "middle",
-        "dominant-baseline": "central",
-        "class": "topo-node-delete-x",
-      });
-      delText.textContent = "×";
-      delBtn.appendChild(delText);
-      const delTitle = svgEl("title");
-      delTitle.textContent = `Remove ${node.name}`;
-      delBtn.appendChild(delTitle);
-      const capturedName = node.name;
-      delBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onNodeDelete(capturedName);
-      });
-      g.appendChild(delBtn);
-    }
+    // No node-delete affordance on the canvas: node lifecycle (create AND delete)
+    // lives solely in Specs → Nodes. Creating a node is Specs-only (it auto-places
+    // here), so deleting is too — the canvas is for viewing + links + port editing,
+    // not authoring nodes.
 
     svg.appendChild(g);
   }
@@ -5984,10 +5975,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
                 onComplete: () => mountTopologyTab(root),
                 onInspect: () => openNodeDrawer(deviceName, viewMode),
               });
-            },
-            onNodeDelete: (deviceName: string) => {
-              enqueueSpecDelete("nodes", deviceName);
-              mountTopologyTab(root);
             },
           }
         : {};
