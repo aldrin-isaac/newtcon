@@ -73,7 +73,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
-import { deriveNodeLinks, availableInterfacesByDevice, hostLikeDevices } from "./node-references.js";
+import { deriveNodeLinks, hostLikeDevices } from "./node-references.js";
 import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
@@ -5191,9 +5191,23 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
 
 // ---- Topology write forms ---------------------------------------------------
 
-// openAddLinkDrawer opens the detail drawer with a form to add a link.
-// deviceNames populates the endpoint dropdowns.
-function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string, string[]>, hostLike: Set<string>, onSuccess: () => void): void {
+// AddLinkCtx — inputs for the Add-link drawer.
+interface AddLinkCtx {
+  deviceNames: string[];
+  topology: unknown;        // raw topology: nodes[dev].ports (configured) + links (wired)
+  pendingWired: string[];   // pending-link endpoints "device:iface"
+  hostLike: Set<string>;
+  onSuccess: () => void;
+}
+
+// openAddLinkDrawer opens the drawer to add a link. Each endpoint picker offers the
+// device's FREE (unwired) interfaces from its PLATFORM inventory — not just the
+// already-configured topology ports — so any platform interface is linkable. A
+// needs-config interface (in the platform, not yet in the node's ports) can be
+// configured with the platform defaults inline: submit stages the port config
+// (update-device, which applies before the link) alongside the link. Host-like
+// devices (no platform inventory — newtron#403) fall back to a free-text field.
+function openAddLinkDrawer(ctx: AddLinkCtx): void {
   const drawer = document.getElementById("detail-drawer");
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
@@ -5201,95 +5215,170 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
   drawer.setAttribute("aria-hidden", "false");
   drawer.classList.add("open");
   content.textContent = "";
-
   content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
   content.appendChild(el("h2", { className: "drawer-name" }, "Add link"));
 
-  // Helper to build a "device:interface" endpoint picker row.
-  const buildEndpointPicker = (label: string, idPrefix: string): HTMLDivElement => {
+  const raw = (ctx.topology && typeof ctx.topology === "object")
+    ? ctx.topology as { nodes?: Record<string, { ports?: Record<string, unknown> }>; links?: { a?: string; z?: string }[] }
+    : {};
+  const wired = new Set<string>(ctx.pendingWired);
+  for (const l of raw.links ?? []) { if (l?.a) wired.add(l.a); if (l?.z) wired.add(l.z); }
+  const configuredOf = (dev: string): Set<string> => new Set(Object.keys(raw.nodes?.[dev]?.ports ?? {}));
+  const platformCache = new Map<string, { inventory: string[]; template: Record<string, Record<string, unknown>> }>();
+  const deviceToPlatform = new Map<string, string>();
+
+  // One endpoint picker: device dropdown + an interface control that adapts to the
+  // device (switch → dropdown of free platform interfaces; host-like → free text),
+  // plus an inline "configure with defaults" affordance for a needs-config port.
+  // Returns resolve() for the submit.
+  interface Endpoint { device: string; iface: string; configure?: { iface: string; body: Record<string, unknown> }; }
+  const buildEndpointPicker = (label: string): { group: HTMLElement; resolve: () => Endpoint | null } => {
     const group = el("div", { className: "form-group" });
     group.appendChild(el("label", { className: "form-label" }, label));
-
-    const devSelect = el("select", { className: "form-control", id: idPrefix + "-device" }) as HTMLSelectElement;
+    const devSelect = el("select", { className: "form-control" }) as HTMLSelectElement;
     devSelect.appendChild(el("option", { value: "" }, "— select device —") as HTMLOptionElement);
-    for (const d of deviceNames) {
-      devSelect.appendChild(el("option", { value: d }, d) as HTMLOptionElement);
-    }
+    for (const d of ctx.deviceNames) devSelect.appendChild(el("option", { value: d }, d) as HTMLOptionElement);
     group.appendChild(devSelect);
 
-    // Interface control, swapped on device change so it fits the device kind.
-    // Whichever control is active carries id `{idPrefix}-iface` so the submit reads
-    // it uniformly:
-    //  - SWITCH: a dropdown of FREE (declared, unwired) interfaces — the operator
-    //    can't pick an undeclared port (newtron#401 500) or an already-wired one.
-    //  - HOST-like (HWSKU-less, no declared SONiC ports): a free-text field —
-    //    newtron accepts any interface (e.g. eth0) on a device with no ports map.
     const ifaceWrap = el("div", { className: "link-iface-wrap" });
-    const mkInput = (attrs: Record<string, string>): HTMLInputElement =>
-      el("input", { className: "form-control", id: idPrefix + "-iface", type: "text", autocomplete: "off", ...attrs }) as HTMLInputElement;
-    const renderIface = (): void => {
-      ifaceWrap.textContent = "";
-      const dev = devSelect.value;
-      if (!dev) {
-        const inp = mkInput({ placeholder: "select a device first" }); inp.disabled = true;
-        ifaceWrap.appendChild(inp);
-        return;
-      }
-      if (hostLike.has(dev)) {
-        ifaceWrap.appendChild(mkInput({ placeholder: "interface, e.g. eth0" }));
-        return;
-      }
-      const ifaces = interfacesByDevice.get(dev) ?? [];
-      if (ifaces.length === 0) {
-        const inp = mkInput({ placeholder: "no free interfaces — declare a port first" }); inp.disabled = true;
-        ifaceWrap.appendChild(inp);
-        return;
-      }
-      const sel = el("select", { className: "form-control", id: idPrefix + "-iface" }) as HTMLSelectElement;
-      sel.appendChild(el("option", { value: "" }, "— select interface —") as HTMLOptionElement);
-      for (const i of ifaces) sel.appendChild(el("option", { value: i }, i) as HTMLOptionElement);
-      ifaceWrap.appendChild(sel);
-    };
-    devSelect.addEventListener("change", renderIface);
-    renderIface();
-
+    const cfgWrap = el("div", { className: "link-configure-wrap" });
     group.appendChild(ifaceWrap);
-    return group;
+    group.appendChild(cfgWrap);
+
+    let ifaceCtrl: HTMLSelectElement | HTMLInputElement | null = null;
+    let hostFree = false;
+    let curTemplate: Record<string, Record<string, unknown>> = {};
+    let curConfigured = new Set<string>();
+    let cfgCheckbox: HTMLInputElement | null = null;
+
+    const renderConfigureOpt = (): void => {
+      cfgWrap.textContent = "";
+      cfgCheckbox = null;
+      if (hostFree || !ifaceCtrl || ifaceCtrl.tagName !== "SELECT") return;
+      const iface = ifaceCtrl.value;
+      if (!iface || curConfigured.has(iface)) return; // already configured — nothing to do
+      const lbl = el("label", { className: "link-configure-opt" });
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = true;
+      cfgCheckbox = cb;
+      lbl.appendChild(cb);
+      lbl.appendChild(el("span", {}, `Configure ${iface} with platform defaults — it isn't configured yet`));
+      cfgWrap.appendChild(lbl);
+    };
+
+    const renderIface = async (): Promise<void> => {
+      ifaceWrap.textContent = "";
+      cfgWrap.textContent = "";
+      ifaceCtrl = null; hostFree = false; cfgCheckbox = null;
+      const dev = devSelect.value;
+      const mkInput = (ph: string, disabled = false): HTMLInputElement => {
+        const inp = el("input", { className: "form-control", type: "text", autocomplete: "off", placeholder: ph }) as HTMLInputElement;
+        inp.disabled = disabled;
+        return inp;
+      };
+      if (!dev) { ifaceWrap.appendChild(mkInput("select a device first", true)); return; }
+      if (ctx.hostLike.has(dev)) {
+        hostFree = true;
+        ifaceCtrl = mkInput("interface, e.g. eth0");
+        ifaceWrap.appendChild(ifaceCtrl);
+        return;
+      }
+      ifaceWrap.appendChild(el("p", { className: "iface-view-loading" }, "Loading interfaces…"));
+      try {
+        let platform = deviceToPlatform.get(dev);
+        if (platform === undefined) {
+          platform = ((await fetchSpecDetail("nodes", dev)) as { platform?: string }).platform ?? "";
+          deviceToPlatform.set(dev, platform);
+        }
+        let pc = platformCache.get(platform);
+        if (!pc) {
+          const [pd, tmpl] = await Promise.all([
+            fetchSpecDetail("platforms", platform).catch(() => null),
+            fetchPlatformPorts(platform).catch(() => ({})),
+          ]);
+          const inventory = ((pd as { ports?: { name?: string }[] } | null)?.ports ?? [])
+            .map((p) => p.name ?? "").filter(Boolean).sort(comparePorts);
+          pc = { inventory, template: tmpl as Record<string, Record<string, unknown>> };
+          platformCache.set(platform, pc);
+        }
+        if (devSelect.value !== dev) return; // selection changed while awaiting
+        curTemplate = pc.template;
+        curConfigured = configuredOf(dev);
+        const available = pc.inventory.filter((i) => !wired.has(`${dev}:${i}`));
+        ifaceWrap.textContent = "";
+        if (available.length === 0) {
+          ifaceWrap.appendChild(mkInput(pc.inventory.length ? "every interface is already wired" : "platform declares no interfaces (newtron#403)", true));
+          return;
+        }
+        const sel = el("select", { className: "form-control" }) as HTMLSelectElement;
+        sel.appendChild(el("option", { value: "" }, "— select interface —") as HTMLOptionElement);
+        for (const i of available) {
+          sel.appendChild(el("option", { value: i }, curConfigured.has(i) ? i : `${i} · needs config`) as HTMLOptionElement);
+        }
+        sel.addEventListener("change", renderConfigureOpt);
+        ifaceCtrl = sel;
+        ifaceWrap.appendChild(sel);
+      } catch {
+        ifaceWrap.textContent = "";
+        hostFree = true; // fall back to free-text on fetch failure
+        ifaceCtrl = mkInput("interface name");
+        ifaceWrap.appendChild(ifaceCtrl);
+      }
+    };
+    devSelect.addEventListener("change", () => void renderIface());
+    void renderIface();
+
+    const resolve = (): Endpoint | null => {
+      const device = devSelect.value;
+      const iface = (ifaceCtrl?.value ?? "").trim();
+      if (!device || !iface) return null;
+      const ep: Endpoint = { device, iface };
+      if (!hostFree && !curConfigured.has(iface) && cfgCheckbox?.checked) {
+        ep.configure = { iface, body: { ...(curTemplate[iface] ?? {}) } };
+      }
+      return ep;
+    };
+    return { group, resolve };
   };
 
-  const aGroup = buildEndpointPicker("Endpoint A (device + interface)", "link-a");
-  const zGroup = buildEndpointPicker("Endpoint Z (device + interface)", "link-z");
-  content.appendChild(aGroup);
-  content.appendChild(zGroup);
+  const aPick = buildEndpointPicker("Endpoint A (device + interface)");
+  const zPick = buildEndpointPicker("Endpoint Z (device + interface)");
+  content.appendChild(aPick.group);
+  content.appendChild(zPick.group);
 
   const errorOut = el("div", { className: "form-error-out" });
   content.appendChild(errorOut);
-
   const submitBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add link");
   content.appendChild(submitBtn);
 
-  submitBtn.addEventListener("click", async () => {
+  submitBtn.addEventListener("click", () => {
     errorOut.textContent = "";
-    const aDevice = (content.querySelector("#link-a-device") as HTMLSelectElement)?.value ?? "";
-    const aIface = ((content.querySelector("#link-a-iface") as HTMLInputElement)?.value ?? "").trim();
-    const zDevice = (content.querySelector("#link-z-device") as HTMLSelectElement)?.value ?? "";
-    const zIface = ((content.querySelector("#link-z-iface") as HTMLInputElement)?.value ?? "").trim();
-
-    if (!aDevice || !aIface || !zDevice || !zIface) {
+    const a = aPick.resolve();
+    const z = zPick.resolve();
+    if (!a || !z) {
       errorOut.appendChild(el("p", { className: "panel-error" }, "Both endpoints (device and interface) are required."));
       return;
     }
-
     submitBtn.disabled = true;
     submitBtn.textContent = "Queued";
     try {
-      enqueueTopologyAddLink(`${aDevice}:${aIface}`, `${zDevice}:${zIface}`);
-      content.insertBefore(el("p", { className: "form-success" }, "Link queued (green). Click Save in the header to apply."), submitBtn);
-      onSuccess();
+      // Stage the port config for any needs-config endpoint first (update-device
+      // applies before the link), then the link itself.
+      const configured: string[] = [];
+      for (const e of [a, z]) {
+        if (e.configure) {
+          enqueuePortConfig(e.device, e.configure.iface, e.configure.body, (raw.nodes?.[e.device] as Record<string, unknown>) ?? {});
+          configured.push(`${e.device}:${e.configure.iface}`);
+        }
+      }
+      enqueueTopologyAddLink(`${a.device}:${a.iface}`, `${z.device}:${z.iface}`);
+      const note = configured.length ? ` — configured ${configured.join(", ")}` : "";
+      content.insertBefore(el("p", { className: "form-success" }, `Link queued${note}. Click Save in the header to apply.`), submitBtn);
+      ctx.onSuccess();
       setTimeout(() => {
         drawer.setAttribute("aria-hidden", "true");
         drawer.classList.remove("open");
-      }, 800);
+      }, 900);
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.textContent = "Add link";
@@ -5699,12 +5788,13 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Lab + physical lifecycle live in their respective views.
         const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
         addLinkBtn.addEventListener("click", () => {
-          // Free (declared, unwired) interfaces per device — also excluding ports
-          // already staged in a pending link — so the picker offers real choices.
-          const pendingWired = pendingTopologyLinkAdds().flatMap((l) => [l.a, l.z]);
-          const avail = availableInterfacesByDevice(data, pendingWired);
-          const hostLike = hostLikeDevices(data);
-          openAddLinkDrawer(deviceNames, avail, hostLike, () => mountTopologyTab(root));
+          openAddLinkDrawer({
+            deviceNames,
+            topology: data,
+            pendingWired: pendingTopologyLinkAdds().flatMap((l) => [l.a, l.z]),
+            hostLike: hostLikeDevices(data),
+            onSuccess: () => mountTopologyTab(root),
+          });
         });
         toolbar.appendChild(addLinkBtn);
       } else if (viewMode === "spec-lab") {
