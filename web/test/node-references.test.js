@@ -44,3 +44,41 @@ describe("deriveNodeLinks", () => {
     assert.deepEqual(deriveNodeLinks({ links: "nope" }, "x"), []);
   });
 });
+
+import { availableInterfacesByDevice } from "../dist/node-references.js";
+
+const FAB = {
+  nodes: {
+    switch1: { ports: { Ethernet0: {}, Ethernet4: {}, Ethernet31: {} } },
+    switch2: { ports: { Ethernet0: {}, Ethernet4: {} } },
+    host1: {}, // no ports
+  },
+  links: [
+    { a: "switch1:Ethernet0", z: "switch2:Ethernet0" },
+    { a: "switch1:Ethernet4", z: "switch2:Ethernet4" },
+  ],
+};
+
+describe("availableInterfacesByDevice", () => {
+  test("returns declared ports that aren't already wired", () => {
+    const m = availableInterfacesByDevice(FAB);
+    assert.deepEqual(m.get("switch1"), ["Ethernet31"]); // 0 + 4 wired, 31 free
+    assert.deepEqual(m.get("switch2"), []);             // both ports wired
+    assert.deepEqual(m.get("host1"), []);               // no declared ports
+  });
+
+  test("also excludes endpoints wired by pending (extraWired) links", () => {
+    const m = availableInterfacesByDevice(FAB, ["switch1:Ethernet31"]);
+    assert.deepEqual(m.get("switch1"), []); // 31 now pending-wired
+  });
+
+  test("sorts interfaces numerically (Ethernet2 before Ethernet10)", () => {
+    const topo = { nodes: { s: { ports: { Ethernet10: {}, Ethernet2: {}, Ethernet1: {} } } }, links: [] };
+    assert.deepEqual(availableInterfacesByDevice(topo).get("s"), ["Ethernet1", "Ethernet2", "Ethernet10"]);
+  });
+
+  test("tolerates malformed topology", () => {
+    assert.equal(availableInterfacesByDevice(null).size, 0);
+    assert.equal(availableInterfacesByDevice({}).size, 0);
+  });
+});
