@@ -2512,10 +2512,10 @@ const NODE_H = 52;
 const H_GAP = 80;
 const V_GAP = 60;
 
-// Module-level cache for the connectivity-aware auto layout. Keyed by a signature
-// of the graph (node names + host flags + link pairs) so re-renders that don't
-// change the graph — the 5s status poll, staging changes — reuse the exact same
-// arrangement instead of re-running the force sim (which would jitter the nodes).
+// Module-level cache for the layered auto layout. Keyed by a signature of the
+// graph (node names + host flags + link pairs) so re-renders that don't change the
+// graph — the 5s status poll, staging changes — reuse the exact same arrangement
+// instead of re-running the layout (deterministic, but recompute is wasted work).
 let topoLayoutCache: { sig: string; pos: Map<string, { cx: number; cy: number }> } | null = null;
 
 function svgEl<K extends keyof SVGElementTagNameMap>(
@@ -2604,12 +2604,12 @@ function renderTopologySVG(
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
   const selected = opts.selected ?? new Set<string>();
 
-  // Connectivity-aware layout (topology-layout.ts): a node sits closest to its
-  // directly-connected neighbours, farther by hop count; hosts are pinned to the
-  // bottom; no boxes overlap. The auto layout is a pure function of the graph, so
-  // cache it by graph signature — re-renders that don't change the graph (status
-  // poll, staging) reuse the exact same arrangement instead of re-solving (no
-  // jitter). Operator-dragged (pinned) positions override the auto layout.
+  // Layered fabric layout (topology-layout.ts): rank by tier (BFS from hosts →
+  // hosts on the bottom line, leaves above, spines on top), pods kept contiguous,
+  // crossings minimised, no boxes overlap. The auto layout is a pure function of
+  // the graph, so cache it by graph signature — re-renders that don't change the
+  // graph (status poll, staging) reuse the exact same arrangement. Operator-dragged
+  // (pinned) positions override the auto layout.
   const layoutInputs = nodes.map((nd) => ({ name: nd.name, isHost: nd.type === "host" }));
   const layoutEdges = links
     .filter((l) => l.local_device && l.remote_device)
