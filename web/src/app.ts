@@ -36,6 +36,7 @@ import {
   loadPositions,
   savePosition,
 } from "./topology-positions.js";
+import { computeTopologyLayout } from "./topology-layout.js";
 import {
   fetchLabStatus,
   postLabDeploy,
@@ -2511,42 +2512,11 @@ const NODE_H = 52;
 const H_GAP = 80;
 const V_GAP = 60;
 
-// layoutNodes assigns (cx, cy) to each node in a deterministic grid.
-// Up to 4 nodes per row; rows stacked with V_GAP spacing. cellW lets the
-// caller widen the column when interface bands are expanded.
-function layoutNodes(
-  nodes: TopoNode[],
-  cellW: number,
-  perRowExtraH: number[],
-  pinned?: Map<string, PinnedPosition>,
-): Map<string, { cx: number; cy: number }> {
-  const cols = Math.min(nodes.length, 4);
-  const positions = new Map<string, { cx: number; cy: number }>();
-  // Track the cumulative y-offset added by each row's tallest expansion band.
-  let yCursor = V_GAP / 2;
-  for (let r = 0; r * cols < nodes.length; r++) {
-    const rowExtra = perRowExtraH[r] ?? 0;
-    for (let c = 0; c < cols; c++) {
-      const i = r * cols + c;
-      if (i >= nodes.length) break;
-      const name = nodes[i].name;
-      // Pinned position wins when present; otherwise fall back to the
-      // grid slot. Pinned positions persist across re-renders via
-      // localStorage (loaded by mountTopologyTab).
-      const pin = pinned?.get(name);
-      if (pin) {
-        positions.set(name, { cx: pin.cx, cy: pin.cy });
-      } else {
-        positions.set(name, {
-          cx: (cellW + H_GAP) * c + cellW / 2 + H_GAP / 2,
-          cy: yCursor + NODE_H / 2,
-        });
-      }
-    }
-    yCursor += NODE_H + rowExtra + V_GAP;
-  }
-  return positions;
-}
+// Module-level cache for the connectivity-aware auto layout. Keyed by a signature
+// of the graph (node names + host flags + link pairs) so re-renders that don't
+// change the graph — the 5s status poll, staging changes — reuse the exact same
+// arrangement instead of re-running the force sim (which would jitter the nodes).
+let topoLayoutCache: { sig: string; pos: Map<string, { cx: number; cy: number }> } | null = null;
 
 function svgEl<K extends keyof SVGElementTagNameMap>(
   tag: K,
@@ -2621,6 +2591,9 @@ interface TopologyRenderResult {
   positions: Map<string, { cx: number; cy: number }>;
   width: number;
   height: number;
+  // Actual content bounds (node-box extents) in SVG coordinates — the force
+  // layout has no fixed origin, so callers must frame these, not (0,0,w,h).
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 function renderTopologySVG(
@@ -2631,14 +2604,52 @@ function renderTopologySVG(
   const links: TopoLink[] = Array.isArray(data.links) ? data.links : [];
   const selected = opts.selected ?? new Set<string>();
 
-  const cols = Math.min(nodes.length || 1, 4);
-  const rowCount = nodes.length === 0 ? 1 : Math.ceil(nodes.length / cols);
-  const perRowExtraH: number[] = new Array(rowCount).fill(0);
-  const cellW = NODE_W;
-  const svgW = (cellW + H_GAP) * cols + H_GAP;
-  const svgH = (NODE_H + V_GAP) * rowCount + V_GAP;
+  // Connectivity-aware layout (topology-layout.ts): a node sits closest to its
+  // directly-connected neighbours, farther by hop count; hosts are pinned to the
+  // bottom; no boxes overlap. The auto layout is a pure function of the graph, so
+  // cache it by graph signature — re-renders that don't change the graph (status
+  // poll, staging) reuse the exact same arrangement instead of re-solving (no
+  // jitter). Operator-dragged (pinned) positions override the auto layout.
+  const layoutInputs = nodes.map((nd) => ({ name: nd.name, isHost: nd.type === "host" }));
+  const layoutEdges = links
+    .filter((l) => l.local_device && l.remote_device)
+    .map((l) => ({ a: l.local_device as string, z: l.remote_device as string }));
+  const sig = JSON.stringify([
+    layoutInputs.map((i) => i.name + (i.isHost ? "H" : "")).sort(),
+    layoutEdges.map((e) => [e.a, e.z].sort().join("")).sort(),
+  ]);
+  let autoPos: Map<string, { cx: number; cy: number }>;
+  if (topoLayoutCache && topoLayoutCache.sig === sig) {
+    autoPos = topoLayoutCache.pos;
+  } else {
+    autoPos = computeTopologyLayout(layoutInputs, layoutEdges, {
+      nodeW: NODE_W, nodeH: NODE_H, hGap: H_GAP, vGap: V_GAP,
+    });
+    topoLayoutCache = { sig, pos: autoPos };
+  }
 
-  const naturalViewBox = `0 0 ${svgW} ${svgH}`;
+  const positions = new Map<string, { cx: number; cy: number }>();
+  for (const nd of nodes) {
+    const pin = opts.pinnedPositions?.get(nd.name);
+    positions.set(nd.name, pin ? { cx: pin.cx, cy: pin.cy } : (autoPos.get(nd.name) ?? { cx: 0, cy: 0 }));
+  }
+
+  // Fit the viewBox to the actual layout bounds — the force layout has no fixed
+  // origin and positions can be negative. MARGIN keeps boxes off the edge.
+  const MARGIN = Math.max(NODE_W, NODE_H);
+  let minX = 0, minY = 0, maxX = NODE_W, maxY = NODE_H;
+  if (positions.size > 0) {
+    minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+    for (const p of positions.values()) {
+      minX = Math.min(minX, p.cx - NODE_W / 2);
+      minY = Math.min(minY, p.cy - NODE_H / 2);
+      maxX = Math.max(maxX, p.cx + NODE_W / 2);
+      maxY = Math.max(maxY, p.cy + NODE_H / 2);
+    }
+  }
+  const svgW = (maxX - minX) + MARGIN * 2;
+  const svgH = (maxY - minY) + MARGIN * 2;
+  const naturalViewBox = `${minX - MARGIN} ${minY - MARGIN} ${svgW} ${svgH}`;
   const initialViewBox = opts.viewState ? viewBoxStr(opts.viewState) : naturalViewBox;
 
   // No width/height attrs — CSS sizes the SVG to fill its slot, and
@@ -2654,8 +2665,6 @@ function renderTopologySVG(
     role: "img",
     "aria-label": "Network topology diagram",
   });
-
-  const positions = layoutNodes(nodes, cellW, perRowExtraH, opts.pinnedPositions);
 
   // Draw links first (under nodes). When onLinkClick is wired, each
   // visible line gets a wider invisible hit-target sibling so clicking
@@ -3050,7 +3059,7 @@ function renderTopologySVG(
     });
   }
 
-  return { svg, positions, width: svgW, height: svgH };
+  return { svg, positions, width: svgW, height: svgH, bounds: { minX, minY, maxX, maxY } };
 }
 
 // ---- Node inspector drawer --------------------------------------------------
@@ -5841,7 +5850,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const resetPosBtn = el("button", {
       type: "button",
       className: "topology-zoom-btn topology-zoom-btn--reset",
-      title: "Reset node positions to grid layout",
+      title: "Reset node positions to auto layout",
     }, "↺") as HTMLButtonElement;
     zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, resetPosBtn);
     graphSlot.appendChild(zoomToolbar);
@@ -5934,7 +5943,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       // Remember the natural width so the toolbar handlers can compute
       // zoom bounds + fit relative to a stable reference.
       lastNaturalWidth = result.width;
-      lastResultBounds = { minX: 0, minY: 0, maxX: result.width, maxY: result.height };
+      lastResultBounds = result.bounds;
 
       // First-mount fit: the SVG uses preserveAspectRatio="xMidYMid meet",
       // so a viewBox whose aspect differs from the slot's aspect would
