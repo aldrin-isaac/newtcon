@@ -73,7 +73,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
-import { deriveNodeLinks, availableInterfacesByDevice } from "./node-references.js";
+import { deriveNodeLinks, availableInterfacesByDevice, hostLikeDevices } from "./node-references.js";
 import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
@@ -5193,7 +5193,7 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
 
 // openAddLinkDrawer opens the detail drawer with a form to add a link.
 // deviceNames populates the endpoint dropdowns.
-function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string, string[]>, onSuccess: () => void): void {
+function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string, string[]>, hostLike: Set<string>, onSuccess: () => void): void {
   const drawer = document.getElementById("detail-drawer");
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
@@ -5217,31 +5217,43 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     }
     group.appendChild(devSelect);
 
-    // Interface picker: a dropdown of the selected device's FREE (declared,
-    // unwired) interfaces, repopulated whenever the device changes. Offering only
-    // free declared ports means the operator can't pick an undeclared interface
-    // (newtron 500 — see newtron#401) or an already-wired one (409).
-    const ifaceSelect = el("select", { className: "form-control", id: idPrefix + "-iface" }) as HTMLSelectElement;
-    const fillIfaces = (): void => {
-      ifaceSelect.textContent = "";
+    // Interface control, swapped on device change so it fits the device kind.
+    // Whichever control is active carries id `{idPrefix}-iface` so the submit reads
+    // it uniformly:
+    //  - SWITCH: a dropdown of FREE (declared, unwired) interfaces — the operator
+    //    can't pick an undeclared port (newtron#401 500) or an already-wired one.
+    //  - HOST-like (HWSKU-less, no declared SONiC ports): a free-text field —
+    //    newtron accepts any interface (e.g. eth0) on a device with no ports map.
+    const ifaceWrap = el("div", { className: "link-iface-wrap" });
+    const mkInput = (attrs: Record<string, string>): HTMLInputElement =>
+      el("input", { className: "form-control", id: idPrefix + "-iface", type: "text", autocomplete: "off", ...attrs }) as HTMLInputElement;
+    const renderIface = (): void => {
+      ifaceWrap.textContent = "";
       const dev = devSelect.value;
-      const ifaces = interfacesByDevice.get(dev) ?? [];
       if (!dev) {
-        ifaceSelect.appendChild(el("option", { value: "" }, "— select a device first —") as HTMLOptionElement);
-        ifaceSelect.disabled = true;
-      } else if (ifaces.length === 0) {
-        ifaceSelect.appendChild(el("option", { value: "" }, "no free interfaces — declare a port first") as HTMLOptionElement);
-        ifaceSelect.disabled = true;
-      } else {
-        ifaceSelect.appendChild(el("option", { value: "" }, "— select interface —") as HTMLOptionElement);
-        for (const i of ifaces) ifaceSelect.appendChild(el("option", { value: i }, i) as HTMLOptionElement);
-        ifaceSelect.disabled = false;
+        const inp = mkInput({ placeholder: "select a device first" }); inp.disabled = true;
+        ifaceWrap.appendChild(inp);
+        return;
       }
+      if (hostLike.has(dev)) {
+        ifaceWrap.appendChild(mkInput({ placeholder: "interface, e.g. eth0" }));
+        return;
+      }
+      const ifaces = interfacesByDevice.get(dev) ?? [];
+      if (ifaces.length === 0) {
+        const inp = mkInput({ placeholder: "no free interfaces — declare a port first" }); inp.disabled = true;
+        ifaceWrap.appendChild(inp);
+        return;
+      }
+      const sel = el("select", { className: "form-control", id: idPrefix + "-iface" }) as HTMLSelectElement;
+      sel.appendChild(el("option", { value: "" }, "— select interface —") as HTMLOptionElement);
+      for (const i of ifaces) sel.appendChild(el("option", { value: i }, i) as HTMLOptionElement);
+      ifaceWrap.appendChild(sel);
     };
-    devSelect.addEventListener("change", fillIfaces);
-    fillIfaces();
+    devSelect.addEventListener("change", renderIface);
+    renderIface();
 
-    group.appendChild(ifaceSelect);
+    group.appendChild(ifaceWrap);
     return group;
   };
 
@@ -5259,9 +5271,9 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
   submitBtn.addEventListener("click", async () => {
     errorOut.textContent = "";
     const aDevice = (content.querySelector("#link-a-device") as HTMLSelectElement)?.value ?? "";
-    const aIface = (content.querySelector("#link-a-iface") as HTMLSelectElement)?.value ?? "";
+    const aIface = ((content.querySelector("#link-a-iface") as HTMLInputElement)?.value ?? "").trim();
     const zDevice = (content.querySelector("#link-z-device") as HTMLSelectElement)?.value ?? "";
-    const zIface = (content.querySelector("#link-z-iface") as HTMLSelectElement)?.value ?? "";
+    const zIface = ((content.querySelector("#link-z-iface") as HTMLInputElement)?.value ?? "").trim();
 
     if (!aDevice || !aIface || !zDevice || !zIface) {
       errorOut.appendChild(el("p", { className: "panel-error" }, "Both endpoints (device and interface) are required."));
@@ -5691,7 +5703,8 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           // already staged in a pending link — so the picker offers real choices.
           const pendingWired = pendingTopologyLinkAdds().flatMap((l) => [l.a, l.z]);
           const avail = availableInterfacesByDevice(data, pendingWired);
-          openAddLinkDrawer(deviceNames, avail, () => mountTopologyTab(root));
+          const hostLike = hostLikeDevices(data);
+          openAddLinkDrawer(deviceNames, avail, hostLike, () => mountTopologyTab(root));
         });
         toolbar.appendChild(addLinkBtn);
       } else if (viewMode === "spec-lab") {

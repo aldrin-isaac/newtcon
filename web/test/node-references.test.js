@@ -82,3 +82,26 @@ describe("availableInterfacesByDevice", () => {
     assert.equal(availableInterfacesByDevice({}).size, 0);
   });
 });
+
+import { hostLikeDevices } from "../dist/node-references.js";
+
+describe("hostLikeDevices", () => {
+  test("a device with a setup-device step is a switch (not host-like)", () => {
+    const topo = { nodes: {
+      switch1: { steps: [{ url: "/setup-device", params: {} }], ports: { Ethernet0: {} } },
+      host1: {},                                   // empty entry — host
+      host2: { steps: [] },                        // no setup-device step — host
+      server1: { ports: { eth0: {} } },            // ports but no setup-device — host-like
+    } };
+    const hosts = hostLikeDevices(topo);
+    assert.ok(!hosts.has("switch1"), "switch1 has setup-device → not host-like");
+    assert.ok(hosts.has("host1"), "empty entry → host-like");
+    assert.ok(hosts.has("host2"), "no setup-device step → host-like");
+    assert.ok(hosts.has("server1"), "no setup-device step → host-like");
+  });
+
+  test("tolerates malformed topology", () => {
+    assert.equal(hostLikeDevices(null).size, 0);
+    assert.equal(hostLikeDevices({}).size, 0);
+  });
+});
