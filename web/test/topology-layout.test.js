@@ -82,6 +82,27 @@ describe("computeTopologyLayout (layered)", () => {
     assertNoOverlap(p);
   });
 
+  test("aligns a straight chain into one vertical column (shortest links)", () => {
+    // host — leaf — spine, nothing else pulling: all three should share an x.
+    const nodes = [
+      { name: "spine", isHost: false }, { name: "leaf", isHost: false }, { name: "host", isHost: true },
+    ];
+    const p = computeTopologyLayout(nodes, [{ a: "host", z: "leaf" }, { a: "leaf", z: "spine" }], OPTS);
+    assert.ok(Math.abs(p.get("host").cx - p.get("leaf").cx) < 1, "host aligned under leaf");
+    assert.ok(Math.abs(p.get("leaf").cx - p.get("spine").cx) < 1, "leaf aligned under spine");
+  });
+
+  test("a node centres between its two upper neighbours", () => {
+    const nodes = [
+      { name: "spine1", isHost: false }, { name: "spine2", isHost: false },
+      { name: "leaf", isHost: false }, { name: "host", isHost: true },
+    ];
+    const edges = [{ a: "leaf", z: "spine1" }, { a: "leaf", z: "spine2" }, { a: "host", z: "leaf" }];
+    const p = computeTopologyLayout(nodes, edges, OPTS);
+    const mid = (p.get("spine1").cx + p.get("spine2").cx) / 2;
+    assert.ok(Math.abs(p.get("leaf").cx - mid) < 1, "leaf centred under its two spines");
+  });
+
   test("is deterministic — same graph yields identical positions", () => {
     const nodes = [
       { name: "s1", isHost: false }, { name: "l1", isHost: false },

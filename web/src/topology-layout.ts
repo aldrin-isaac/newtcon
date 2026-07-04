@@ -179,35 +179,61 @@ export function computeTopologyLayout(
     refreshPodOrder();
   }
 
-  // ── 4. Coordinates — spaced by order, then barycentre-straightened + min-gap ──
+  // ── 4. x-coordinates — minimise link length (median targets, L1-isotonic place)
+  // Order within ranks is fixed (crossing-min above). Each node wants to sit at the
+  // MEDIAN x of its neighbours in the adjacent tiers — the median minimises the
+  // total link length (Σ|Δx|), i.e. the shortest links up to the tier above and
+  // down to the tier below. Placing an ordered rank as close as possible to those
+  // targets while keeping the min-gap is L1 isotonic regression, solved exactly by
+  // pool-adjacent-violators (PAV). Sweep bottom-up (starting at the hosts) then
+  // top-down, repeatedly, so the alignment propagates through every tier — one pass
+  // isn't enough because moving a tier changes its neighbours' targets.
+  const median = (arr: number[]): number => {
+    const s = [...arr].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    // True median (mean of the two middles when even) — still an L1 minimiser, and
+    // it centres symmetric cases (a leaf under N spines sits mid-block, not hugging
+    // one side) instead of picking a lopsided endpoint.
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  // L1 isotonic regression: the non-decreasing y[] minimising Σ|y − d|, via PAV.
+  const isotonicL1 = (d: number[]): number[] => {
+    const blocks: number[][] = [];
+    const meds: number[] = [];
+    for (const di of d) {
+      let members = [di];
+      let med = di;
+      while (meds.length && meds[meds.length - 1] > med) {
+        members = (blocks.pop() as number[]).concat(members);
+        meds.pop();
+        med = median(members);
+      }
+      blocks.push(members);
+      meds.push(med);
+    }
+    const y: number[] = [];
+    for (let b = 0; b < blocks.length; b++) for (let k = 0; k < blocks[b].length; k++) y.push(meds[b]);
+    return y;
+  };
   const x = new Array<number>(n).fill(0);
   for (const lvl of levels) {
     const sorted = [...lvl].sort((a, b) => order[a] - order[b]);
     sorted.forEach((i, pos) => (x[i] = pos * colGap));
-    const mean = sorted.reduce((sm, i) => sm + x[i], 0) / (sorted.length || 1);
-    for (const i of sorted) x[i] -= mean; // centre each rank on 0
   }
-  for (let pass = 0; pass < 6; pass++) {
-    const downward = pass % 2 === 0;
-    const dseq = downward ? range(1, maxDepth) : range(maxDepth - 1, 0);
-    for (const d of dseq) {
-      if (d < 0 || d > maxDepth) continue;
-      const refDepth = downward ? d - 1 : d + 1;
-      const sorted = [...levels[d]].sort((a, b) => order[a] - order[b]);
-      for (const i of sorted) {
-        let s = 0;
-        let c = 0;
-        for (const v of nbr[i]) if (depth[v] === refDepth) { s += x[v]; c++; }
-        if (c) x[i] = s / c; // pull toward the mean x of the reference-tier neighbours
-      }
-      // Restore order + minimum gap (left-to-right), then re-centre the rank.
-      for (let k = 1; k < sorted.length; k++) {
-        const a = sorted[k - 1];
-        const b = sorted[k];
-        if (x[b] - x[a] < colGap) x[b] = x[a] + colGap;
-      }
-      const mean = sorted.reduce((sm, i) => sm + x[i], 0) / (sorted.length || 1);
-      for (const i of sorted) x[i] -= mean;
+  const PASSES = 16;
+  for (let pass = 0; pass < PASSES; pass++) {
+    const seq = pass % 2 === 0 ? range(0, maxDepth) : range(maxDepth, 0); // bottom-up first (hosts)
+    for (const d of seq) {
+      const lvl = [...levels[d]].sort((a, b) => order[a] - order[b]);
+      if (lvl.length === 0) continue;
+      const target = lvl.map((i) => {
+        const xs: number[] = [];
+        for (const v of nbr[i]) if (depth[v] === d - 1 || depth[v] === d + 1) xs.push(x[v]);
+        return xs.length ? median(xs) : x[i];
+      });
+      // Solve for the min-gap-respecting placement closest to the targets.
+      const y = isotonicL1(target.map((t, k) => t - k * colGap));
+      lvl.forEach((i, k) => (x[i] = y[k] + k * colGap));
     }
   }
 
