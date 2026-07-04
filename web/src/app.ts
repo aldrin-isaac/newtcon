@@ -2549,7 +2549,6 @@ interface TopologyRenderOpts {
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
   statusByDevice?: Map<string, DeviceStatus>;
-  onNodeDelete?: (name: string) => void;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
   // Staging overlays — render device cards in green/red according to queue state.
@@ -2954,39 +2953,10 @@ function renderTopologySVG(
       g.appendChild(badge);
     }
 
-    // Delete button: × shown on node hover (top-left corner).
-    if (opts.onNodeDelete) {
-      const onNodeDelete = opts.onNodeDelete;
-      const delBtn = svgEl("g", { "class": "topo-node-delete", "aria-label": `Remove ${node.name}` });
-      const bx = pos.cx - NODE_W / 2;
-      const by = pos.cy - NODE_H / 2;
-      delBtn.appendChild(svgEl("rect", {
-        x: String(bx),
-        y: String(by),
-        width: "16",
-        height: "16",
-        rx: "3",
-        "class": "topo-node-delete-bg",
-      }));
-      const delText = svgEl("text", {
-        x: String(bx + 8),
-        y: String(by + 8),
-        "text-anchor": "middle",
-        "dominant-baseline": "central",
-        "class": "topo-node-delete-x",
-      });
-      delText.textContent = "×";
-      delBtn.appendChild(delText);
-      const delTitle = svgEl("title");
-      delTitle.textContent = `Remove ${node.name}`;
-      delBtn.appendChild(delTitle);
-      const capturedName = node.name;
-      delBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onNodeDelete(capturedName);
-      });
-      g.appendChild(delBtn);
-    }
+    // No node-delete affordance on the canvas: node lifecycle (create AND delete)
+    // lives solely in Specs → Nodes. Creating a node is Specs-only (it auto-places
+    // here), so deleting is too — the canvas is for viewing + links + port editing,
+    // not authoring nodes.
 
     svg.appendChild(g);
   }
@@ -5984,10 +5954,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
                 onComplete: () => mountTopologyTab(root),
                 onInspect: () => openNodeDrawer(deviceName, viewMode),
               });
-            },
-            onNodeDelete: (deviceName: string) => {
-              enqueueSpecDelete("nodes", deviceName);
-              mountTopologyTab(root);
             },
           }
         : {};
