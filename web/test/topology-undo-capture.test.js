@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 
 import {
   captureTopologyBodies,
-  extractRemoveDeviceBody,
   extractRemoveLinkEndpoints,
 } from "../dist/topology-undo-capture.js";
 
@@ -21,27 +20,6 @@ const TOPO = {
     { a: "r2:eth1", z: "host-a:eth0" },
   ],
 };
-
-describe("extractRemoveDeviceBody()", () => {
-  test("returns the device record when name matches", () => {
-    const body = extractRemoveDeviceBody(TOPO, "r1");
-    assert.deepEqual(body, { ports: { eth0: {} }, steps: [{ type: "switch" }] });
-  });
-
-  test("returns null when name is absent", () => {
-    assert.equal(extractRemoveDeviceBody(TOPO, "nope"), null);
-  });
-
-  test("returns null on missing nodes key", () => {
-    assert.equal(extractRemoveDeviceBody({ nodes: undefined }, "r1"), null);
-    assert.equal(extractRemoveDeviceBody({}, "r1"), null);
-  });
-
-  test("empty device body still returns it (empty != absent)", () => {
-    const body = extractRemoveDeviceBody(TOPO, "host-a");
-    assert.deepEqual(body, {});
-  });
-});
 
 describe("extractRemoveLinkEndpoints()", () => {
   test("matches on A endpoint", () => {
@@ -76,22 +54,20 @@ describe("extractRemoveLinkEndpoints()", () => {
 });
 
 describe("captureTopologyBodies()", () => {
-  test("captures bodies for remove-device + remove-link items in the queue", () => {
+  test("captures bodies for remove-link items in the queue", () => {
     const queue = [
-      { id: "1", group: "topology", op: "remove-device", name: "r1" },
       { id: "2", group: "topology", op: "remove-link", device: "r2", iface: "eth1" },
     ];
     const map = captureTopologyBodies(TOPO, queue);
-    assert.equal(map.size, 2);
-    assert.deepEqual(map.get("1"), TOPO.nodes["r1"]);
+    assert.equal(map.size, 1);
     assert.deepEqual(map.get("2"), { a: "r2:eth1", z: "host-a:eth0" });
   });
 
-  test("skips queue items that aren't topology removals", () => {
+  test("skips queue items that aren't topology remove-link ops", () => {
     const queue = [
       { id: "1", group: "spec", kind: "services", op: "delete", name: "x" },
-      { id: "2", group: "topology", op: "add-device", name: "r3", body: {} },
-      { id: "3", group: "topology", op: "remove-device", name: "r1" },
+      { id: "2", group: "topology", op: "update-device", name: "r3", body: {} },
+      { id: "3", group: "topology", op: "remove-link", device: "r1", iface: "eth0" },
     ];
     const map = captureTopologyBodies(TOPO, queue);
     assert.equal(map.size, 1);
@@ -100,10 +76,9 @@ describe("captureTopologyBodies()", () => {
     assert.ok(!map.has("2"));
   });
 
-  test("skips removals that don't match anything in the topology", () => {
+  test("skips remove-link ops that don't match anything in the topology", () => {
     const queue = [
-      { id: "1", group: "topology", op: "remove-device", name: "ghost" },
-      { id: "2", group: "topology", op: "remove-link", device: "r1", iface: "eth9" },
+      { id: "1", group: "topology", op: "remove-link", device: "r1", iface: "eth9" },
     ];
     const map = captureTopologyBodies(TOPO, queue);
     assert.equal(map.size, 0);

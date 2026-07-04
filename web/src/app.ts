@@ -122,7 +122,6 @@ import {
 // instead, so we don't import them here.
 import { NODE_ACTIONS } from "./topology-actions.js";
 import { showContextMenu } from "./topology-actions-ui.js";
-import { iconSVG } from "./icons.js";
 import { comparePorts } from "./port-config.js";
 import {
   buildDeviceInterfaceView,
@@ -135,7 +134,6 @@ import {
   type PlatformPort,
 } from "./device-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
-import { buildDeviceScaffold } from "./device-scaffold.js";
 import {
   deviceServiceUsage, countServiceInstances, shapeResourceRows, isHealthCheckList,
   VRF_COLUMNS, VLAN_COLUMNS, ACL_COLUMNS, LAG_COLUMNS, HEALTH_COLUMNS, BGP_NEIGHBOR_COLUMNS,
@@ -144,8 +142,6 @@ import {
 import {
   enqueueSpecCreate,
   enqueueSpecDelete,
-  enqueueTopologyAddDevice,
-  enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
   enqueueSpecUpdate,
   enqueueSubCreate,
@@ -159,8 +155,6 @@ import {
   isSpecPendingDelete,
   isSpecPendingUpdate,
   removeFromQueue,
-  pendingTopologyDeviceAdds,
-  isDevicePendingRemove,
   pendingTopologyLinkAdds,
   enqueueInterfaceAction,
   enqueuePortConfig,
@@ -5111,163 +5105,6 @@ async function renderHistoryTab(container: HTMLElement, device: string): Promise
 
 // ---- Topology write forms ---------------------------------------------------
 
-// showCanvasContextMenu pops a small floating menu at (x, y) with a single
-// "Add node" entry. Used by the empty-canvas right-click handler. Reuses
-// .topo-menu / .topo-menu-item CSS from the per-device menu so the visual
-// language is consistent.
-function showCanvasContextMenu(x: number, y: number, onCreated: () => void): void {
-  // Remove any prior canvas menu.
-  document.querySelectorAll(".topo-menu--canvas").forEach((m) => m.remove());
-
-  const menu = el("div", { className: "topo-menu topo-menu--canvas", role: "menu" });
-  const item = el("button", { type: "button", className: "topo-menu-item" });
-  const icon = el("span", { className: "topo-menu-item-icon" });
-  icon.innerHTML = iconSVG("plus");
-  item.appendChild(icon);
-  item.appendChild(el("span", { className: "topo-menu-item-label" }, "Add node"));
-  item.addEventListener("click", (e) => {
-    e.stopPropagation();
-    menu.remove();
-    openCreateNodeDrawer(onCreated);
-  });
-  menu.appendChild(item);
-
-  document.body.appendChild(menu);
-
-  // Position with viewport-bound clamp (mirror positionMenu in topology-actions-ui).
-  const margin = 8;
-  const rect = menu.getBoundingClientRect();
-  const left = Math.min(x, window.innerWidth - rect.width - margin);
-  const top = Math.min(y, window.innerHeight - rect.height - margin);
-  menu.style.left = `${Math.max(margin, left)}px`;
-  menu.style.top = `${Math.max(margin, top)}px`;
-
-  // Auto-dismiss on outside click or Escape.
-  const dismiss = (): void => {
-    menu.remove();
-    document.removeEventListener("click", outsideClick, true);
-    document.removeEventListener("keydown", onEsc, true);
-  };
-  const outsideClick = (ev: MouseEvent): void => {
-    if (ev.target instanceof Node && menu.contains(ev.target)) return;
-    dismiss();
-  };
-  const onEsc = (ev: KeyboardEvent): void => {
-    if (ev.key === "Escape") dismiss();
-  };
-  // Defer so the contextmenu event that opened us doesn't immediately close.
-  setTimeout(() => {
-    document.addEventListener("click", outsideClick, true);
-    document.addEventListener("keydown", onEsc, true);
-  }, 0);
-}
-
-// openCreateNodeDrawer opens the detail drawer with a form to create a node.
-//
-// A node is a single operator-domain concept that newtron stores in two
-// places: (a) `topology.json` as a topology node entry (steps + ports —
-// initially empty) and (b) `nodes/{name}.json` as a NodeSpec
-// (mgmt_ip + loopback_ip + zone, plus optional platform/ssh_user). The
-// drawer stages BOTH writes so every node always has a spec — newtron
-// matches them by name. The staging queue's apply order already runs spec
-// creates before topology adds, so the node lands first.
-//
-// Zone is a required dropdown — newtron's NodeSpec.Zone must reference
-// an existing entry in network.json zones; freeform input would let the
-// operator queue an invalid profile that fails on Save.
-function openCreateNodeDrawer(onSuccess: () => void): void {
-  const drawer = document.getElementById("detail-drawer");
-  const content = document.getElementById("drawer-content");
-  if (!drawer || !content) return;
-
-  drawer.setAttribute("aria-hidden", "false");
-  drawer.classList.add("open");
-  content.textContent = "";
-
-  content.appendChild(el("p", { className: "drawer-kind" }, "Topology"));
-  content.appendChild(el("h2", { className: "drawer-name" }, "Add node"));
-  content.appendChild(el("p", { className: "node-spec-intro" },
-    "Place a node you've defined into this topology. Nodes are created in Specs → Nodes; " +
-    "this drops an existing one onto the graph. Disconnected nodes are fine — links are added separately."));
-
-  // A node can be defined (in Specs) without a topology entry; this drops one
-  // onto the topology by name and stages only the topology entry (its
-  // setup-device step scaffolded from the spec). Node *creation* lives solely
-  // in Specs — there is no create path here.
-  const existing = el("section", { className: "create-node-section" });
-  existing.appendChild(el("p", { className: "drawer-hint" },
-    "Nodes that exist but aren't placed in the topology yet."));
-  const existingRow = el("div", { className: "create-node-existing-row" });
-  const profileSelect = el("select", { className: "form-control" }) as HTMLSelectElement;
-  profileSelect.appendChild(new Option("Loading…", ""));
-  profileSelect.disabled = true;
-  const addExistingBtn = el("button", { type: "button", className: "form-submit-btn" }, "Add to topology");
-  addExistingBtn.disabled = true;
-  existingRow.appendChild(profileSelect);
-  existingRow.appendChild(addExistingBtn);
-  existing.appendChild(existingRow);
-  const existingError = el("div", { className: "form-error-out" });
-  existing.appendChild(existingError);
-  content.appendChild(existing);
-
-  profileSelect.addEventListener("change", () => {
-    addExistingBtn.disabled = profileSelect.value === "";
-  });
-  addExistingBtn.addEventListener("click", () => { void (async () => {
-    const name = profileSelect.value;
-    if (!name) return;
-    existingError.textContent = "";
-    addExistingBtn.disabled = true;
-    // Scaffold the setup-device step from the existing profile (platform→hwsku,
-    // underlay_asn) so the dropped-in node is service-ready like a new one (#283).
-    const prof = await fetchSpecDetail("nodes", name).catch(() => null);
-    const platform = (prof as { platform?: string } | null)?.platform ?? "";
-    const underlayAsn = (prof as { underlay_asn?: number } | null)?.underlay_asn;
-    let hwsku = "";
-    if (platform) {
-      const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
-      hwsku = (plat as { hwsku?: string } | null)?.hwsku ?? "";
-    }
-    const device = buildDeviceScaffold({ hostname: name, type: "LeafRouter", hwsku, ...(underlayAsn !== undefined ? { bgpAsn: underlayAsn } : {}) });
-    enqueueTopologyAddDevice(name, device as unknown as Record<string, unknown>);
-    existing.appendChild(el("p", { className: "form-success" },
-      `Node "${name}" staged (topology entry + setup-device). Click Save in the header to apply.`));
-    onSuccess();
-    setTimeout(() => { closeDetail(); }, 1000);
-  })(); });
-
-  // Populate with profiles that have no topology entry (and aren't already
-  // queued for one). Best-effort: failure leaves the picker disabled and
-  // (there is no create path here — nodes are defined in Specs).
-  void (async () => {
-    try {
-      const [profiles, topo] = await Promise.all([fetchSpecList("nodes"), fetchTopology()]);
-      const placed = new Set<string>();
-      const nodes = adaptTopology(topo).nodes;
-      for (const n of Array.isArray(nodes) ? nodes : []) {
-        if (typeof n.name === "string") placed.add(n.name);
-      }
-      for (const a of pendingTopologyDeviceAdds()) placed.add(a.name);
-      const unplaced = profiles.filter((p) => !placed.has(p));
-      profileSelect.textContent = "";
-      if (unplaced.length === 0) {
-        profileSelect.appendChild(new Option("(every defined node is already placed — define more in Specs → Nodes)", ""));
-        profileSelect.disabled = true;
-        addExistingBtn.disabled = true;
-      } else {
-        profileSelect.appendChild(new Option("Select a node…", ""));
-        for (const p of unplaced) profileSelect.appendChild(new Option(p, p));
-        profileSelect.disabled = false;
-      }
-    } catch {
-      profileSelect.textContent = "";
-      profileSelect.appendChild(new Option("(couldn't load nodes)", ""));
-      profileSelect.disabled = true;
-    }
-  })();
-
-}
-
 // openAddLinkDrawer opens the detail drawer with a form to add a link.
 // deviceNames populates the endpoint dropdowns.
 function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string, string[]>, onSuccess: () => void): void {
@@ -5724,14 +5561,8 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const renderToolbar = (): void => {
       toolbar.textContent = "";
       if (viewMode === "spec") {
-        // Spec authoring — Create node / Add link mutate the topology
-        // spec. Lab + physical lifecycle live in their respective views.
-        const createNodeBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add node");
-        createNodeBtn.addEventListener("click", () => {
-          openCreateNodeDrawer(() => mountTopologyTab(root));
-        });
-        toolbar.appendChild(createNodeBtn);
-
+        // Spec authoring — Add link mutates the topology spec.
+        // Lab + physical lifecycle live in their respective views.
         const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
         addLinkBtn.addEventListener("click", () => {
           openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
@@ -5867,17 +5698,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     renderToolbar();
 
     // Teaching empty state (slice #169.B). When the topology has zero
-    // committed devices AND no pending add-device in the queue, skip
-    // the graph + filter + panel and render an explanatory block.
-    //
-    // The toolbar carries the action buttons (Create node / Add link),
-    // but it's only appended further down in the non-empty path — so on
-    // an empty network we must append it HERE too, or the operator has
-    // no way to add the first device (the empty-state copy tells them to
-    // "Add node" but there'd be no button). viewMode defaults to
-    // "spec" for a no-lab/no-device network, so renderToolbar() above
-    // has already populated it with the spec-authoring buttons.
-    if (deviceNames.length === 0 && pendingTopologyDeviceAdds().length === 0) {
+    // committed devices, skip the graph + filter + panel and render
+    // an explanatory block. The toolbar (Add link) is still appended
+    // so the operator has a visible entry point once nodes appear via
+    // Specs → Nodes → Save.
+    if (deviceNames.length === 0) {
       root.appendChild(toolbar);
       root.appendChild(renderTopologyEmptyState());
       return;
@@ -6036,11 +5861,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const interfacesByDevice: Map<string, string[]> = new Map();
     const rawData = (data ?? {}) as { nodes?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
     const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.nodes ?? {}) };
-    // Overlay pending topology additions so the diagram shows them in green.
-    const pendingDeviceAdds = pendingTopologyDeviceAdds();
-    for (const p of pendingDeviceAdds) {
-      if (!(p.name in rawDevices)) rawDevices[p.name] = (p.body as { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> });
-    }
     // Merge pending-link adds into topoData.links so the graph draws them.
     for (const ln of pendingTopologyLinkAdds()) {
       topoData.links = topoData.links ?? [];
@@ -6050,13 +5870,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         local_device: aDev, local_interface: aIf,
         remote_device: zDev, remote_interface: zIf,
       });
-    }
-    // Add pending-device nodes (green) to topoData.nodes.
-    topoData.nodes = topoData.nodes ?? [];
-    for (const p of pendingDeviceAdds) {
-      if (!topoData.nodes.some((n) => n.name === p.name)) {
-        topoData.nodes.push({ name: p.name, type: "queued" });
-      }
     }
     for (const [name, dev] of Object.entries(rawDevices)) {
       interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort(comparePorts));
@@ -6089,7 +5902,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
               });
             },
             onNodeDelete: (deviceName: string) => {
-              enqueueTopologyRemoveDevice(deviceName);
+              enqueueSpecDelete("nodes", deviceName);
               mountTopologyTab(root);
             },
           }
@@ -6105,8 +5918,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         driftByDevice,
         statusByDevice,
         selected: new Set<string>(),
-        isPendingAdd: (n) => pendingDeviceAdds.some((p) => p.name === n),
-        isPendingRemove: (n) => isDevicePendingRemove(n),
         viewState,
         onViewStateChange: (next) => { viewState = next; },
         pinnedPositions,
@@ -6194,17 +6005,6 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
       (root as unknown as { _topoUnsub?: () => void })._topoUnsub!();
     }
     (root as unknown as { _topoUnsub?: () => void })._topoUnsub = unsub;
-
-    // Right-click on empty canvas → "Add node" affordance. Suppressed
-    // in observation views (no spec mutation there). Per-device
-    // right-click is handled inside renderTopologySVG.
-    graphSlot.addEventListener("contextmenu", (e) => {
-      if (viewMode !== "spec") return;
-      const tag = (e.target as Element).tagName?.toLowerCase();
-      if (e.target !== graphSlot && tag !== "svg") return;
-      e.preventDefault();
-      showCanvasContextMenu(e.clientX, e.clientY, () => mountTopologyTab(root));
-    });
 
     renderGraph();
 

@@ -169,7 +169,6 @@ export function buildEntry(args: {
 function backfilledInverse(inv: PendingInverse, prior?: Record<string, unknown>): PendingInverse {
   if (!prior) return inv;
   if (inv.group === "mutation" && inv.body === undefined) return { ...inv, body: prior };
-  if (inv.group === "topology" && inv.op === "add-device" && inv.body === undefined) return { ...inv, body: prior };
   if (inv.group === "topology" && inv.op === "add-link" && (inv.a === undefined || inv.z === undefined)
     && typeof prior.a === "string" && typeof prior.z === "string") return { ...inv, a: prior.a, z: prior.z };
   return inv;
@@ -189,10 +188,9 @@ function isItemUndoable(item: HistoryItem): boolean {
 function inverseReady(inv: PendingInverse): boolean {
   if (inv.group === "mutation") return inv.effect === "delete" || inv.body !== undefined;
   if (inv.group === "topology") {
-    if (inv.op === "add-device") return inv.body !== undefined && Object.keys(inv.body).length > 0;
     if (inv.op === "update-device") return inv.body !== undefined; // pre-edit device restore
     if (inv.op === "add-link") return typeof inv.a === "string" && typeof inv.z === "string";
-    return true; // remove-device / remove-link need no prior state
+    return true; // remove-link needs no prior state
   }
   return true; // device / interface action inverses are self-contained
 }

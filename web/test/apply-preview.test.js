@@ -10,10 +10,8 @@ const specCreate  = (id, name, kind = "services") =>
   ({ id, group: "mutation", method: "POST", path: kind, effect: "create", kind, name, title: name, body: { name } });
 const specDelete  = (id, name, kind = "services") =>
   ({ id, group: "mutation", method: "DELETE", path: `${kind}/${name}`, effect: "delete", kind, name, title: name });
-const addDevice   = (id, name) =>
-  ({ id, group: "topology", op: "add-device", name, body: {} });
-const removeDevice = (id, name) =>
-  ({ id, group: "topology", op: "remove-device", name });
+const updateDevice = (id, name) =>
+  ({ id, group: "topology", op: "update-device", name, body: {} });
 const addLink     = (id, a, z) =>
   ({ id, group: "topology", op: "add-link", a, z });
 const removeLink  = (id, device, iface) =>
@@ -36,7 +34,7 @@ describe("previewQueue() — basics", () => {
   test("totals reflect the input length, even with mixed kinds", () => {
     const p = previewQueue([
       specCreate("1", "a"), specDelete("2", "b"),
-      addDevice("3", "r1"), addLink("4", "r1:e0", "r2:e0"),
+      updateDevice("3", "r1"), addLink("4", "r1:e0", "r2:e0"),
     ]);
     assert.equal(p.total, 4);
     assert.equal(p.items.length, 4);
@@ -44,19 +42,18 @@ describe("previewQueue() — basics", () => {
 });
 
 describe("previewQueue() — apply ordering", () => {
-  test("orders by apply phase: spec creates → add device → add link → device action → interface action → remove link → remove device → spec delete", () => {
+  test("orders by apply phase: spec creates → update device → add link → device action → interface action → remove link → spec delete", () => {
     const input = [
-      specDelete("8", "old"),
-      removeDevice("7", "r-old"),
+      specDelete("7", "old"),
       removeLink("6", "r1", "eth9"),
       ifaceAction("5", "r1", "eth0", "set MTU"),
       deviceAction("4", "r1", "reboot"),
       addLink("3", "r1:e0", "r2:e0"),
-      addDevice("2", "r1"),
+      updateDevice("2", "r1"),
       specCreate("1", "new"),
     ];
     const p = previewQueue(input);
-    assert.deepEqual(p.items.map((i) => i.id), ["1","2","3","4","5","6","7","8"]);
+    assert.deepEqual(p.items.map((i) => i.id), ["1","2","3","4","5","6","7"]);
   });
 });
 
@@ -98,11 +95,6 @@ describe("previewQueue() — per-kind shape", () => {
     assert.equal(p.items[0].effect, "delete");
   });
 
-  test("remove-device is flagged danger", () => {
-    const p = previewQueue([removeDevice("1", "r-old")]);
-    assert.equal(p.items[0].danger, true);
-  });
-
   test("device action preserves its danger flag", () => {
     const safe = previewQueue([deviceAction("1", "r1", "show config")]);
     assert.equal(safe.items[0].danger, false);
@@ -120,7 +112,7 @@ describe("previewQueue() — counts + flags", () => {
   test("counts.create / delete / action partition the input", () => {
     const p = previewQueue([
       specCreate("1", "a"), specCreate("2", "b"),
-      specDelete("3", "c"), removeDevice("4", "r1"),
+      specDelete("3", "c"), removeLink("4", "r1", "eth0"),
       deviceAction("5", "r2", "act"),
     ]);
     assert.deepEqual(p.counts, { create: 2, update: 0, delete: 2, action: 1, danger: 2 });
@@ -137,7 +129,7 @@ describe("previewQueue() — counts + flags", () => {
   });
 
   test("hasDangerous / hasDeletes flags", () => {
-    const safe = previewQueue([specCreate("1", "a"), addDevice("2", "r1")]);
+    const safe = previewQueue([specCreate("1", "a"), updateDevice("2", "r1")]);
     assert.equal(safe.hasDangerous, false);
     assert.equal(safe.hasDeletes, false);
     const mixed = previewQueue([specCreate("1", "a"), specDelete("2", "b")]);
