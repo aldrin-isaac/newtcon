@@ -6140,7 +6140,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
           const rect = result.svg.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0) {
             viewState = fitToBounds(lastResultBounds, rect.width, rect.height);
-            result.svg.setAttribute("viewBox", viewBoxStr(viewState));
+            // Re-render with the fit viewState — NOT just setAttribute. Pan/zoom is
+            // only wired when renderTopologySVG receives a defined viewState (the
+            // SVG is recreated each render), so without this re-render the first
+            // mount shows the fit view but the wheel/drag handlers never attach.
+            renderGraph();
           }
         });
       }
