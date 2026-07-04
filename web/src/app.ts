@@ -5290,17 +5290,19 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
 
 // openLabOpModal runs a newtlab lifecycle op (deploy / provision) in a modal that
 // streams the per-lab SSE event stream (phase / complete / error) into a live log.
-// It doubles as the busy indicator for long ops: the title + hint show the work is
-// under way (not frozen) even when the engine emits no intermediate events — e.g.
-// Provision today (newtron#373), where completion comes from the POST resolving
-// rather than an SSE "complete". run() drives the op-specific POST + messaging; the
-// shared shell owns the DOM, the SSE subscription, and teardown.
+// Both ops are async (newtron#373): the POST returns 202 immediately and the SSE
+// "complete"/"error" ends it. run() fires the op-specific POST + first messages; the
+// shared shell owns the DOM, the SSE subscription, teardown, and the settle hook.
+// onSettle fires exactly once when the op finishes — SSE complete/error, or the
+// operator closing the panel — for callers that hold op-scoped state (e.g. the
+// provisioning marker that tints the topology dots).
 function openLabOpModal(
   network: string,
   opts: {
     title: string;
     hint: string;
     completeLine?: string;
+    onSettle?: () => void;
     run: (ctx: { append: (line: string) => void; finish: () => void }) => Promise<void>;
   },
 ): void {
@@ -5329,14 +5331,14 @@ function openLabOpModal(
     logLines.scrollTop = logLines.scrollHeight;
   };
   let src: EventSource | null = null;
+  let settled = false;
   const finish = (): void => { src?.close(); src = null; };
-  const close = (): void => { finish(); modal.remove(); };
+  const settle = (): void => { if (settled) return; settled = true; opts.onSettle?.(); };
+  const close = (): void => { finish(); settle(); modal.remove(); };
   closeBtn.addEventListener("click", close);
 
-  // Stream the per-lab SSE events. Deploy emits phase/complete/error; Provision
-  // emits nothing yet (newtron#373) — the subscription is harmless + ready for
-  // when it does. For ops with no SSE "complete" (synchronous Provision), run()
-  // signals completion itself via finish().
+  // Stream the per-lab SSE events (newtron#373: deploy AND provision both emit
+  // phase → complete/error). The terminal event ends the stream + settles.
   src = labEvents(
     network,
     (eventType, data) => {
@@ -5349,9 +5351,11 @@ function openLabOpModal(
         } else if (eventType === "complete") {
           append(opts.completeLine ?? "[done] complete");
           finish();
+          settle();
         } else if (eventType === "error") {
           append("[error] " + String(payload["message"] ?? data));
           finish();
+          settle();
         }
       } catch {
         append(data);
@@ -5379,6 +5383,29 @@ function openDeployModal(network: string): void {
         append("accepted; streaming events…");
       } catch (err) {
         append(`[error] deploy request failed: ${engineOpErrorBody(err)}`);
+      }
+    },
+  });
+}
+
+// openProvisionModal — async provision (newtron#373): POST 202, the SSE stream
+// drives the log + completion, exactly like deploy. Marks the network provisioning
+// (topology dots read "provisioning" while devices reconcile) and clears the marker
+// when the op settles. `physical` only varies the title (same backend pass today).
+function openProvisionModal(network: string, opts: { physical?: boolean } = {}): void {
+  provisioningNetworks.add(network);
+  openLabOpModal(network, {
+    title: opts.physical ? `Provisioning physical substrate for "${network}"` : `Provisioning "${network}"`,
+    hint: "newtlab is reconciling each device to the network spec — this can take a few minutes. Streaming progress below; close this window once it completes.",
+    completeLine: "[done] provision complete — devices reconciled to the network spec",
+    onSettle: () => provisioningNetworks.delete(network),
+    run: async ({ append }) => {
+      append(`POST provision lab=${network}…`);
+      try {
+        await postLabProvision(network);
+        append("accepted; streaming events…");
+      } catch (err) {
+        append(`[error] provision request failed: ${engineOpErrorBody(err)}`);
       }
     },
   });
@@ -5700,30 +5727,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             confirmLabel: "Provision",
           });
           if (!ok) return;
-          // Progress modal (busy indicator — provision is a long, currently
-          // event-less synchronous op; newtron#373 tracks emitting progress). It
-          // subscribes to the SSE stream too, so it lights up the moment newtlab
-          // reports; until then the title + hint make clear it's working, not frozen.
-          openLabOpModal(network, {
-            title: `Provisioning "${network}"`,
-            hint: "newtlab is pushing config + restarting containers on each device — this can take a few minutes. Progress streams below as newtlab reports it.",
-            run: async ({ append, finish }) => {
-              // Mark the network as provisioning so the topology dots read
-              // "provisioning" (not "unreachable") while live reads fail for the
-              // duration. The 5s status poll picks it up on its next tick.
-              provisioningNetworks.add(network);
-              append(`POST provision lab=${network}… (synchronous — waiting for newtlab)`);
-              try {
-                await postLabProvision(network);
-                append("[done] provision complete");
-              } catch (err) {
-                append(`[error] provision failed: ${engineOpErrorBody(err)}`);
-              } finally {
-                provisioningNetworks.delete(network);
-                finish();
-              }
-            },
-          });
+          openProvisionModal(network);
         });
         toolbar.appendChild(provisionBtn);
 
@@ -5770,22 +5774,7 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             confirmLabel: "Provision",
           });
           if (!ok) return;
-          provisionBtn.setAttribute("disabled", "");
-          provisionBtn.textContent = "Provisioning…";
-          // newtcon currently routes both lab and physical provisioning
-          // through the same backend pass. If newtron later splits the
-          // primitives, swap this call for the physical-specific one.
-          postLabProvision(network)
-            .then(() => {
-              provisionBtn.removeAttribute("disabled");
-              provisionBtn.textContent = "Provision";
-            })
-            .catch((err) => {
-              provisionBtn.removeAttribute("disabled");
-              provisionBtn.textContent = "Provision";
-              const msg = engineOpErrorBody(err);
-              showToast({ kind: "error", title: "Provision failed", body: msg });
-            });
+          openProvisionModal(network, { physical: true });
         });
         toolbar.appendChild(provisionBtn);
       }
