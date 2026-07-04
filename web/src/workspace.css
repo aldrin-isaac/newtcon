@@ -1177,7 +1177,11 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.topology-toolbar-btn:hover { background: var(--color-surface-hover); }
+.topology-toolbar-btn:hover:not(:disabled) { background: var(--color-surface-hover); }
+/* Inactive = not meaningful in the current state (e.g. Provision before Deploy).
+ * Fade it (design-system disabled convention) + not-allowed cursor so it reads as
+ * blocked, not just unstyled; the button's title says why. */
+.topology-toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Deploy-as-lab modal log panel (reuses .network-modal chrome) */
 .deploy-modal {
