@@ -83,3 +83,24 @@ export function availableInterfacesByDevice(
   }
   return out;
 }
+
+// hostLikeDevices returns devices whose topology entry has NO /setup-device step —
+// hosts (HWSKU-less platform, no SONiC bring-up) and bare nodes. newtron doesn't
+// require declared ports for a device with no ports map, so their link interfaces
+// are free-text (e.g. eth0), not a dropdown of declared SONiC ports. Switch nodes
+// carry a setup-device step and constrain to declared ports.
+export function hostLikeDevices(topology: unknown): Set<string> {
+  const out = new Set<string>();
+  const nodes = (topology && typeof topology === "object")
+    ? (topology as { nodes?: unknown }).nodes
+    : undefined;
+  if (!nodes || typeof nodes !== "object") return out;
+  for (const [dev, def] of Object.entries(nodes as Record<string, unknown>)) {
+    const steps = (def && typeof def === "object") ? (def as { steps?: unknown }).steps : undefined;
+    const hasSetup = Array.isArray(steps) && steps.some(
+      (s) => s && typeof s === "object" && (s as { url?: unknown }).url === "/setup-device",
+    );
+    if (!hasSetup) out.add(dev);
+  }
+  return out;
+}
