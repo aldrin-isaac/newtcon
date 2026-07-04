@@ -134,6 +134,16 @@ export function computeTopologyLayout(
     lvl.forEach((i, pos) => (order[i] = pos));
   }
 
+  // Only MULTI-node pods constrain ordering. A singleton pod — which every host in
+  // a 2-tier fabric is, since removing the switch tier isolates it — must NOT pin
+  // its node's position, or the pod key freezes the initial order and defeats the
+  // barycentre crossing-min (e.g. a host uplinked to switch1 stranded on the far
+  // right next to switch2's hosts). Singleton-pod nodes order purely by barycentre,
+  // like the top tier.
+  const podSize = new Map<number, number>();
+  for (let i = 0; i < n; i++) if (podId[i] >= 0) podSize.set(podId[i], (podSize.get(podId[i]) ?? 0) + 1);
+  const grouped = (i: number): boolean => podId[i] >= 0 && (podSize.get(podId[i]) as number) > 1;
+
   const podOrder = new Map<number, number>();
   const refreshPodOrder = (): void => {
     const sum = new Map<number, number>();
@@ -169,8 +179,8 @@ export function computeTopologyLayout(
         bary.set(i, b === null ? order[i] : b);
       }
       lvl.sort((a, b) => {
-        const pa = podId[a] >= 0 ? (podOrder.get(podId[a]) as number) : (bary.get(a) as number);
-        const pb = podId[b] >= 0 ? (podOrder.get(podId[b]) as number) : (bary.get(b) as number);
+        const pa = grouped(a) ? (podOrder.get(podId[a]) as number) : (bary.get(a) as number);
+        const pb = grouped(b) ? (podOrder.get(podId[b]) as number) : (bary.get(b) as number);
         return pa - pb || (bary.get(a) as number) - (bary.get(b) as number) ||
           (nodes[a].name < nodes[b].name ? -1 : 1);
       });

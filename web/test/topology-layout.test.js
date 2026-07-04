@@ -103,6 +103,24 @@ describe("computeTopologyLayout (layered)", () => {
     assert.ok(Math.abs(p.get("leaf").cx - mid) < 1, "leaf centred under its two spines");
   });
 
+  test("2-tier: a host groups under its own switch (no singleton-pod freeze)", () => {
+    // switch1 uplinks host1,2,3,7; switch2 uplinks host4,5,6,8. Every host is its
+    // own pod (removing the switch tier isolates it), so the crossing-min must fall
+    // back to barycentre — host7 belongs beside switch1's hosts, not stranded right.
+    const nodes = [{ name: "switch1", isHost: false }, { name: "switch2", isHost: false }];
+    for (let i = 1; i <= 8; i++) nodes.push({ name: `host${i}`, isHost: true });
+    const edges = [
+      { a: "switch1", z: "switch2" },
+      { a: "switch1", z: "host1" }, { a: "switch1", z: "host2" }, { a: "switch1", z: "host3" }, { a: "switch1", z: "host7" },
+      { a: "switch2", z: "host4" }, { a: "switch2", z: "host5" }, { a: "switch2", z: "host6" }, { a: "switch2", z: "host8" },
+    ];
+    const p = computeTopologyLayout(nodes, edges, OPTS);
+    const order = ["host1", "host2", "host3", "host4", "host5", "host6", "host7", "host8"]
+      .sort((a, b) => p.get(a).cx - p.get(b).cx);
+    const side = order.map((h) => ["1", "2", "3", "7"].includes(h.replace("host", "")) ? "A" : "B").join("");
+    assert.ok(side === "AAAABBBB" || side === "BBBBAAAA", `hosts interleave across switches: ${side}`);
+  });
+
   test("is deterministic — same graph yields identical positions", () => {
     const nodes = [
       { name: "s1", isHost: false }, { name: "l1", isHost: false },
