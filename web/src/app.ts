@@ -5738,6 +5738,17 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Lab substrate lifecycle: Deploy → Provision → Destroy (newtlab's own
         // verbs). Blue (spec-only) devices become green via Deploy + Provision.
         // Convention: lab name == active network ID (newtron#116 / PR #121).
+        //
+        // Gate each verb on the lab's actual state so the operator can't fire a
+        // transition that means nothing — no Provision/Destroy without a deployed
+        // lab, no Deploy over one that already exists. labStateRef is the poll-
+        // synced lab status (null = not deployed / no lab); the toolbar re-renders
+        // when that deployed-ness flips (see onLabStateRefresh).
+        const deployed = labStateRef != null;
+        const gate = (btn: HTMLElement, enabled: boolean, why: string): void => {
+          if (enabled) { btn.removeAttribute("disabled"); btn.removeAttribute("title"); }
+          else { btn.setAttribute("disabled", ""); btn.title = why; }
+        };
         const deployBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "Deploy");
         deployBtn.addEventListener("click", async () => {
           const network = activeNetwork();
@@ -5813,6 +5824,10 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
             });
         });
         toolbar.appendChild(destroyBtn);
+
+        gate(deployBtn, !deployed, "Already deployed — Destroy the lab first to redeploy.");
+        gate(provisionBtn, deployed, "Deploy the lab first — provisioning needs running VMs.");
+        gate(destroyBtn, deployed, "Nothing to destroy — this lab isn't deployed.");
       } else {
         // Physical substrate — only Provision (no deploy / destroy
         // because physical hardware isn't lifecycle-managed by newtcon).
@@ -6208,7 +6223,12 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         return statusTextByDevice;
       },
       onLabStateRefresh: (lab) => {
+        // Re-gate the lab toolbar when deployment state flips (deploy brought the
+        // lab up / destroy tore it down) so Deploy/Provision/Destroy enable-state
+        // tracks reality. Only when the boolean actually changes — no per-poll churn.
+        const was = labStateRef != null;
         labStateRef = lab;
+        if (was !== (lab != null) && viewMode === "spec-lab") renderToolbar();
       },
     });
 
