@@ -40,8 +40,8 @@ describe("planUndo() — replays the carried inverse (op-agnostic)", () => {
   });
 
   test("topology inverse passes through", () => {
-    const inverse = { group: "topology", op: "add-device", name: "r1", body: { ports: {} } };
-    const plan = planUndo(entry([histItem({ kind: "device", effect: "delete", title: "r1", inverse })]), idGen);
+    const inverse = { group: "topology", op: "add-link", a: "r1:eth0", z: "r2:eth0" };
+    const plan = planUndo(entry([histItem({ kind: "link", effect: "delete", title: "r1:eth0", inverse })]), idGen);
     assert.deepEqual(plan.items[0].inverse, { id: "undo-0", ...inverse });
   });
 

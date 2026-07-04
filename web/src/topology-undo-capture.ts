@@ -1,9 +1,8 @@
 // topology-undo-capture.ts — pure helpers that walk a fetched
 // topology payload + the staged pending queue to extract the
-// pre-apply state needed for topology.remove-device and
-// topology.remove-link undo (slice #175.C.1 polish).
+// pre-apply state needed for topology.remove-link undo
+// (slice #175.C.1 polish).
 //
-// remove-device needs the device's body so add-device can recreate it.
 // remove-link needs BOTH endpoints (the queued op only carries one);
 // the link is identified by walking topology.links.
 
@@ -14,21 +13,6 @@ export interface RawTopology {
   nodes?: Record<string, Record<string, unknown>>;
   links?: Array<{ a?: string; z?: string }>;
   [k: string]: unknown;
-}
-
-/**
- * extractRemoveDeviceBody pulls the device's body from the topology
- * by name. Returns null when the device isn't in the topology — the
- * row will surface as not-undoable honestly.
- */
-export function extractRemoveDeviceBody(
-  topology: RawTopology,
-  name: string,
-): Record<string, unknown> | null {
-  const devices = topology.nodes ?? {};
-  const body = devices[name];
-  if (!body || typeof body !== "object") return null;
-  return body;
 }
 
 /**
@@ -63,11 +47,10 @@ export function extractRemoveLinkEndpoints(
 
 /**
  * captureTopologyBodies walks the queue and the topology together to
- * produce the preBody Map for topology.remove-device + topology.remove-link
- * items. Pure — no I/O. Returns an empty map when the queue has no
- * topology removals or when the topology has nothing matching.
+ * produce the preBody Map for topology.remove-link items. Pure — no I/O.
+ * Returns an empty map when the queue has no topology removals or when
+ * the topology has nothing matching.
  *
- * For remove-device the body is the raw device record.
  * For remove-link the body is `{a, z}` so the planner can stage an
  * add-link with the original endpoints.
  */
@@ -77,10 +60,7 @@ export function captureTopologyBodies(
 ): Map<string, Record<string, unknown>> {
   const out = new Map<string, Record<string, unknown>>();
   for (const p of queue) {
-    if (p.group === "topology" && p.op === "remove-device") {
-      const body = extractRemoveDeviceBody(topology, p.name);
-      if (body) out.set(p.id, body);
-    } else if (p.group === "topology" && p.op === "remove-link") {
+    if (p.group === "topology" && p.op === "remove-link") {
       const endpoints = extractRemoveLinkEndpoints(topology, p.device, p.iface);
       if (endpoints) out.set(p.id, endpoints);
     }

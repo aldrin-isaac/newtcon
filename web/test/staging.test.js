@@ -15,8 +15,6 @@ import {
   enqueueSubReorder,
   enqueueSSHLoginSet,
   enqueueSSHLoginClear,
-  enqueueTopologyAddDevice,
-  enqueueTopologyRemoveDevice,
   enqueueTopologyAddLink,
   enqueueTopologyRemoveLink,
   enqueueDeviceAction,
@@ -248,16 +246,6 @@ describe("mutations carry their own inverse (born together)", () => {
 describe("topology + action ops carry their own inverse", () => {
   beforeEach(() => discardAll());
 
-  test("topology add-device → inverse remove-device", () => {
-    const p = enqueueTopologyAddDevice("r1", { ports: {} });
-    assert.deepEqual(p.inverse, { group: "topology", op: "remove-device", name: "r1" });
-  });
-
-  test("topology remove-device → inverse add-device (body backfilled at apply)", () => {
-    const p = enqueueTopologyRemoveDevice("r1");
-    assert.deepEqual(p.inverse, { group: "topology", op: "add-device", name: "r1" });
-  });
-
   test("topology add-link → inverse remove-link by the A endpoint", () => {
     const p = enqueueTopologyAddLink("r1:eth0", "r2:eth0");
     assert.deepEqual(p.inverse, { group: "topology", op: "remove-link", device: "r1", iface: "eth0" });
@@ -326,21 +314,9 @@ describe("enqueuePortConfig() — port edits fold into one whole-device update",
     assert.deepEqual(q[0].inverse.body.ports, { Ethernet0: { mtu: 9100 } });
   });
 
-  test("editing a port on a still-pending new device folds into the add (one POST)", () => {
-    enqueueTopologyAddDevice("spine1", { steps: [], ports: {} });
-    enqueuePortConfig("spine1", "Ethernet0", { admin_status: "up" }, {});
-    const q = getQueue();
-    assert.equal(q.length, 1, "still a single add-device");
-    assert.equal(q[0].op, "add-device");
-    assert.deepEqual(q[0].body.ports, { Ethernet0: { admin_status: "up" } });
-  });
-
-  test("pendingPortConfigs surfaces staged ports (update + add paths)", () => {
+  test("pendingPortConfigs surfaces staged ports from an update-device op", () => {
     enqueuePortConfig("switch1", "Ethernet4", { admin_status: "up" }, dev());
     assert.deepEqual(pendingPortConfigs("switch1").Ethernet4, { admin_status: "up" });
-    discardAll();
-    enqueueTopologyAddDevice("spine1", { steps: [], ports: { Ethernet0: { mtu: 1500 } } });
-    assert.deepEqual(pendingPortConfigs("spine1").Ethernet0, { mtu: 1500 });
   });
 
   test("deviceQueue includes the update-device op so the per-device panel sees it", () => {

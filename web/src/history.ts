@@ -27,9 +27,7 @@ import {
   enqueueSubCreate,
   enqueueSubUpdate,
   enqueueSubDelete,
-  enqueueTopologyAddDevice,
   enqueueTopologyAddLink,
-  enqueueTopologyRemoveDevice,
   enqueueTopologyRemoveLink,
 } from "./staging.js";
 
@@ -151,12 +149,6 @@ function renderEntryUndoBar(entry: HistoryEntry, plan: UndoPlan): HTMLElement {
       } else if (inv.group === "mutation" && inv.effect === "update") {
         enqueueSpecUpdate(inv.kind, inv.name, inv.body ?? {});
         queuedNames.push(`~ ${inv.kind} ${inv.name}`);
-      } else if (inv.group === "topology" && inv.op === "add-device") {
-        enqueueTopologyAddDevice(inv.name, inv.body);
-        queuedNames.push(`+ device ${inv.name}`);
-      } else if (inv.group === "topology" && inv.op === "remove-device") {
-        enqueueTopologyRemoveDevice(inv.name);
-        queuedNames.push(`− device ${inv.name}`);
       } else if (inv.group === "topology" && inv.op === "add-link") {
         enqueueTopologyAddLink(inv.a, inv.z);
         queuedNames.push(`+ link ${inv.a} ↔ ${inv.z}`);

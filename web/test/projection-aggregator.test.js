@@ -71,7 +71,7 @@ describe("groupByDevice()", () => {
 
   test("topology mutations are excluded (no device-mapping yet)", () => {
     const r = groupByDevice([
-      { id: "1", group: "topology", op: "add-device", name: "r1", body: {} },
+      { id: "1", group: "topology", op: "update-device", name: "r1", body: {} },
       { id: "2", group: "topology", op: "add-link", a: "r1:e0", z: "r2:e0" },
       deviceAction("3", "r2", "x"),
     ]);

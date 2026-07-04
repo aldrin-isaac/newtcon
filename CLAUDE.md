@@ -91,7 +91,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     device-status.ts          → unified-substrate state resolver (PR #137)
     staging.ts                → workspace-level pending-changes queue
     topology-actions.ts       → declarative action specs (per-port: mode + service; NODE_ACTIONS empty post-#210) + INTERFACE_ACTIONS used by the drawer Interfaces tab
-    topology-actions-ui.ts    → floating right-click context menu (Inspect / delete / canvas Create-node)
+    topology-actions-ui.ts    → floating right-click context menu (Inspect / delete)
     icons.ts                  → inline-SVG icon set (Lucide)
     render-error.ts           → translateErrorKind + formatAuthorizationDetails + formatErrorBrief (shared error-rendering helpers; slice 2.1)
     form-error-binding.ts     → extractFieldFromValidationError + attachServerValidationToForm + clearFieldErrors (per-field server-error display; slice #172.B)
@@ -120,7 +120,6 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     device-interfaces.ts      → buildDeviceInterfaceView + deriveDeviceBindings + linksForDevice + countView + applyFilter — pure join that turns a device's scattered facts (platform inventory + topology port config + live interface read + service-binding/configure steps + topology links) into one sorted InterfaceRow per port; backs the device drawer's unified Interfaces table (configured AND available ports, role/status/service/link, inline apply)
     device-resources.ts       → deviceServiceUsage + countServiceInstances + shapeResourceRows + isHealthCheckList (+ VRF/VLAN/ACL/LAG/HEALTH/BGP_NEIGHBOR_COLUMNS) — pure resource-lens + State-table helpers: groups a topology device's apply-service steps by service → interfaces (the inverse of the interface table); shapeResourceRows turns a State resource list into curated columns (with derived cells + status flags); backs the State-tab "Services" section + every tailored State table (VRFs/VLANs/ACLs/LAGs/Neighbors/BGP neighbors)
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
-    device-scaffold.ts        → buildSetupDeviceStep + buildDeviceScaffold — pure helper that builds a fresh topology device entry (a /setup-device bring-up step: hwsku + hostname + role + underlay ASN; empty ports) so "Add node" produces a service-ready node out of the box (#283)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
       services.ts             → /api/networks/{netID}/services

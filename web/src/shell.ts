@@ -451,19 +451,17 @@ function setupPendingBar(): void {
 //
 // Covered:
 //   spec.delete             fetchSpecDetail per item
-//   topology.remove-device  body extracted from one fetchTopology()
-//   topology.remove-link    {a, z} endpoints extracted from same
+//   topology.remove-link    {a, z} endpoints extracted from fetchTopology()
 //
-// The topology fetch fires only when the queue actually has a
-// topology removal — no point pulling the whole topology for a
-// spec-only batch.
+// The topology fetch fires only when the queue actually has a remove-link
+// — no point pulling the whole topology for a spec-only batch.
 
 async function capturePreApplyBodies(queue: readonly Pending[]): Promise<Map<string, Record<string, unknown>>> {
   const out = new Map<string, Record<string, unknown>>();
   // Spec-delete bodies.
   const specTargets = queue.filter((p) => p.group === "mutation" && !p.sub && p.effect === "delete");
   const topologyTargets = queue.filter((p) =>
-    p.group === "topology" && (p.op === "remove-device" || p.op === "remove-link"));
+    p.group === "topology" && p.op === "remove-link");
   await Promise.all([
     ...specTargets.map(async (p) => {
       if (p.group !== "mutation" || p.sub || p.effect !== "delete") return;

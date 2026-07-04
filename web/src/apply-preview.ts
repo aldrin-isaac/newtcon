@@ -115,13 +115,11 @@ function orderOf(p: Pending): number {
     return sub ? 7.7 : 8.0;
   }
   switch (`${p.group}.${p.op}`) {
-    case "topology.add-device": return 2;
     case "topology.update-device": return 2.5;
     case "topology.add-link": return 3;
     case "device.action": return 4;
     case "interface.action": return 5;
     case "topology.remove-link": return 6;
-    case "topology.remove-device": return 7;
     default: return 9;
   }
 }
@@ -178,20 +176,6 @@ function previewBase(p: Pending): Omit<PendingPreview, "method" | "path"> {
       scope: p.scope === "network" ? "network" : `${p.scope} ${p.scopeInstance}`,
       danger: p.op === "clear",
       body: p.body ?? null,
-    };
-  }
-  if (p.group === "topology" && p.op === "add-device") {
-    return {
-      id: p.id, effect: "create", kind: "device",
-      title: p.name, scope: "topology",
-      danger: false, body: p.body,
-    };
-  }
-  if (p.group === "topology" && p.op === "remove-device") {
-    return {
-      id: p.id, effect: "delete", kind: "device",
-      title: p.name, scope: "topology",
-      danger: true, body: null,
     };
   }
   if (p.group === "topology" && p.op === "update-device") {
