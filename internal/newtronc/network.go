@@ -378,6 +378,43 @@ func (c *Client) UpdateQoSQueue(ctx context.Context, network string, body any) (
 // singular create-/delete- verb suffix (e.g. "profile") — newtron's mux
 // will 404. The handler caller in internal/handlers/network.go passes the
 // plural form from the (url, newtronKind) pair.
+// PlatformPorts returns newtron's default topology-port config template for a
+// platform (map[portName]PortConfig) from GET .../platforms/{name}/ports. The
+// values are the newtron-owned defaults (admin_status/mtu/…) directly assignable
+// to a topology node's ports; forwarded verbatim so the console relays them
+// without embedding any SONiC convention of its own (newtron #301).
+func (c *Client) PlatformPorts(ctx context.Context, network, platform string) (json.RawMessage, error) {
+	url := fmt.Sprintf("%s/networks/%s/platforms/%s/ports", c.newtronBase(), network, platform)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("building request: %v", err)}
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &UnavailableError{Cause: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("reading response body: %v", err)}
+	}
+	if err := classifyResponse(resp.StatusCode, body, http.StatusOK); err != nil {
+		return nil, err
+	}
+
+	var apiResp newtronAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, &UnavailableError{Cause: fmt.Sprintf("decoding envelope: %v", err)}
+	}
+	if apiResp.Error != "" {
+		return nil, &UnavailableError{Cause: apiResp.Error}
+	}
+	return apiResp.Data, nil
+}
+
 func (c *Client) ShowSpec(ctx context.Context, network, kind, name string) (json.RawMessage, error) {
 	url := fmt.Sprintf("%s/networks/%s/%s/%s", c.newtronBase(), network, kind, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

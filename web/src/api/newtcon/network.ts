@@ -55,6 +55,18 @@ export async function fetchSpecDetail(kind: SpecKind, name: string, network?: st
   return apiFetch(pathFor(`${kind}/${encodeURIComponent(name)}`, network), { cache: "no-store" });
 }
 
+// PortConfigMap — newtron's default topology-port config template for a platform
+// (name → PortConfig). The console relays these values verbatim into a node's
+// ports; it assigns them no meaning of its own (newtron owns the convention).
+export type PortConfigMap = Record<string, Record<string, unknown>>;
+
+// fetchPlatformPorts returns the platform's default port template from
+// GET .../platforms/{name}/ports (newtron #301). Empty {} for a host / HWSKU-less
+// platform; 404 for an unknown platform.
+export async function fetchPlatformPorts(platform: string, network?: string): Promise<PortConfigMap> {
+  return (await apiFetch(pathFor(`platforms/${encodeURIComponent(platform)}/ports`, network), { cache: "no-store" })) as PortConfigMap;
+}
+
 // ============================================================================
 // Write helpers
 // ============================================================================
