@@ -127,6 +127,26 @@ func RegisterNetworkRoutes(mux *http.ServeMux, deps NetworkDeps) {
 		}))
 	}
 
+	// Platform default-port template (newtron #301): GET .../platforms/{name}/ports
+	// → map[portName]PortConfig, newtron's defaults for freshly-authored ports.
+	// Forwarded verbatim; the console relays these values into a topology node's
+	// ports (it holds no port-config convention of its own). More specific than the
+	// platforms/{name} detail route above, so it matches first.
+	mux.Handle("GET /api/networks/{netID}/platforms/{name}/ports", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		netID := r.PathValue("netID")
+		name := r.PathValue("name")
+		payload, err := c.PlatformPorts(ctx, netID, name)
+		if err != nil {
+			writeUpstreamError(w, cid(ctx), err,
+				"platform ports at /api/networks/"+netID+"/platforms/"+name+"/ports", nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+
 	// Register write routes (create, delete, sub-rules).
 	registerWriteRoutes(mux, c, cid)
 }

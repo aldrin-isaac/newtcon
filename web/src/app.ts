@@ -7,6 +7,7 @@ import {
   fetchSpecList,
   fetchSpecInstances,
   fetchSpecDetail,
+  fetchPlatformPorts,
   type SpecKind,
 } from "./api/newtcon/network.js";
 import { ApiError } from "./api/newtcon/services.js";
@@ -3446,7 +3447,14 @@ function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[
   const search = el("input", { type: "search", className: "iface-search form-control", placeholder: "Filter ports…" }) as HTMLInputElement;
   search.addEventListener("input", () => { query = search.value; renderRows(); });
   controls.appendChild(search);
+  // Populate default ports from the platform template (newtron #301). Bulk bring-up
+  // for a freshly-created node whose ports are empty — the operator picks the subset.
+  const populateBtn = el("button", { type: "button", className: "btn btn-secondary btn-sm iface-populate-btn" }, "Populate default ports");
+  controls.appendChild(populateBtn);
   host.appendChild(controls);
+  const populateHost = el("div", { className: "iface-populate-host" });
+  host.appendChild(populateHost);
+  populateBtn.addEventListener("click", () => void openPopulateDefaultPorts(populateHost, device, reload));
 
   // Table.
   const table = el("table", { className: "iface-table" });
@@ -3659,6 +3667,84 @@ async function openPortPropsForm(formHost: HTMLElement, device: string, port: st
     showToast({ kind: "success", title: "Queued", body: `Port properties on ${port} — Save to apply.` });
     reload();
   });
+}
+
+// openPopulateDefaultPorts fetches the platform's default port template (newtron
+// #301), lists the node's UN-configured ports, and lets the operator pick which to
+// fill with newtron's defaults. Chosen ports fold into one whole-device update
+// (enqueuePortConfig → PUT topology/nodes on Save). The console relays newtron's
+// template values verbatim — it holds no port-config convention of its own.
+async function openPopulateDefaultPorts(host: HTMLElement, device: string, reload: () => void): Promise<void> {
+  host.textContent = "";
+  host.appendChild(el("p", { className: "iface-action-form-loading" }, "Loading default port template…"));
+  let template: Record<string, Record<string, unknown>>;
+  let currentDevice: Record<string, unknown>;
+  let topoPorts: Record<string, unknown>;
+  try {
+    const node = await fetchSpecDetail("nodes", device);
+    const platform = (node as { platform?: string }).platform ?? "";
+    if (!platform) {
+      host.textContent = "";
+      host.appendChild(el("p", { className: "iface-view-offline-note" },
+        "This node has no platform, so there's no default-port template to apply."));
+      return;
+    }
+    const [tmpl, topo] = await Promise.all([fetchPlatformPorts(platform), fetchTopology()]);
+    template = tmpl;
+    currentDevice = ((topo as { nodes?: Record<string, Record<string, unknown>> } | null)?.nodes ?? {})[device] ?? {};
+    topoPorts = (currentDevice.ports as Record<string, unknown>) ?? {};
+  } catch (err) {
+    host.textContent = "";
+    host.appendChild(el("p", { className: "panel-error" }, `Couldn't load the default port template: ${formatErrorBrief(err)}`));
+    return;
+  }
+
+  const unconfigured = Object.keys(template).filter((p) => !(p in topoPorts)).sort(comparePorts);
+  host.textContent = "";
+  if (unconfigured.length === 0) {
+    host.appendChild(el("p", { className: "iface-view-offline-note" },
+      Object.keys(template).length === 0
+        ? "This platform exposes no default-port template."
+        : "Every port in the platform template is already configured."));
+    return;
+  }
+
+  const wrap = el("div", { className: "iface-action-form iface-populate-form" });
+  wrap.appendChild(el("p", { className: "iface-action-form-title" }, `Populate default ports · ${unconfigured.length} available`));
+  wrap.appendChild(el("p", { className: "iface-populate-hint" },
+    "Applies the platform's default config (from newtron) to the ports you select. Uncheck any you don't want."));
+  const list = el("div", { className: "iface-populate-list" });
+  const boxes = new Map<string, HTMLInputElement>();
+  for (const p of unconfigured) {
+    const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+    cb.checked = true;
+    boxes.set(p, cb);
+    const label = el("label", { className: "iface-populate-item" });
+    label.appendChild(cb);
+    label.appendChild(el("span", {}, p));
+    list.appendChild(label);
+  }
+  wrap.appendChild(list);
+
+  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
+  cancel.addEventListener("click", () => { host.textContent = ""; });
+  const add = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Add ports") as HTMLButtonElement;
+  const selected = (): string[] => unconfigured.filter((p) => boxes.get(p)?.checked);
+  const sync = (): void => { const n = selected().length; add.textContent = `Add ${n} port${n === 1 ? "" : "s"}`; add.disabled = n === 0; };
+  for (const cb of boxes.values()) cb.addEventListener("change", sync);
+  sync();
+  add.addEventListener("click", () => {
+    const chosen = selected();
+    for (const p of chosen) enqueuePortConfig(device, p, { ...(template[p] ?? {}) }, currentDevice);
+    showToast({ kind: "success", title: "Queued", body: `${chosen.length} default port${chosen.length === 1 ? "" : "s"} on ${device} — Save to apply.` });
+    host.textContent = "";
+    reload();
+  });
+  btnRow.appendChild(cancel);
+  btnRow.appendChild(add);
+  wrap.appendChild(btnRow);
+  host.appendChild(wrap);
 }
 
 // findIfaceAction locates an INTERFACE_ACTIONS def by group + id (+ optional
