@@ -1,18 +1,26 @@
-// topology-layout.ts — connectivity-aware placement for the Topology graph.
+// topology-layout.ts — layered (Sugiyama-style) placement for DC fabrics.
 //
-// Places nodes so that:
-//   1. a node sits closest to its directly-connected neighbours, and farther from
-//      others in proportion to hop distance — a force-directed spring embedding
-//      (springs pull neighbours to a rest length; repulsion pushes everything
-//      apart, so 2-hop nodes settle ~2× the neighbour distance away, etc.);
-//   2. host nodes are always at the bottom — pulled down during the simulation and
-//      then hard-constrained below every switch;
-//   3. no two node boxes overlap — repulsion during the sim + a final separation
-//      pass that enforces a minimum box gap.
+// A Clos / spine-leaf fabric is inherently *tiered*, and operators read it that
+// way — spines on top, leaves in the middle, hosts on a line at the bottom. So we
+// draw it as a layered graph, not a force blob:
 //
-// Pure + deterministic (fixed seed-free init + fixed iteration count) so the same
-// graph always yields the same layout — no jitter across re-renders. Pinned nodes
-// (operator-dragged) are held fixed and everything else settles around them.
+//   1. RANK by tier — multi-source BFS hop-distance from the hosts. Hosts are the
+//      bottom line (rank 0); a switch's rank is its hops to the nearest host, so
+//      leaves land one tier up, spines above them, super-spines above those.
+//      (No hosts? seed BFS from the highest-degree node so switch-only meshes still
+//      layer sensibly.)
+//   2. GROUP into pods — the connected components left after removing the top tier.
+//      A pod's leaves + hosts stay contiguous within their ranks, so crossings stay
+//      local to a pod instead of smearing across the whole diagram.
+//   3. MINIMISE CROSSINGS — order nodes within each rank by the iterated barycentre
+//      heuristic (down/up sweeps), constrained to keep pods together.
+//   4. ASSIGN COORDINATES — x by barycentre alignment with an enforced minimum gap
+//      (straight uplinks, no overlap); y = rank line (hosts on one bottom line).
+//
+// Pure + deterministic (no RNG, fixed sweep count) so the same graph always lays
+// out identically. Operator-dragged (pinned) positions are applied by the renderer
+// as overrides on top of this auto layout, so this module stays a pure function of
+// the graph.
 
 export interface LayoutNodeInput {
   name: string;
@@ -27,16 +35,21 @@ export interface LayoutOptions {
   nodeH: number;
   hGap: number;
   vGap: number;
+  // Accepted for signature stability; ignored here (pins are renderer overrides).
   pinned?: Map<string, { cx: number; cy: number }>;
-  iterations?: number;
 }
 export interface LayoutPoint {
   cx: number;
   cy: number;
 }
 
-// Golden angle — spreads the deterministic initial ring evenly with no RNG.
-const GOLDEN_ANGLE = 2.399963229728653;
+// Inclusive integer range, ascending or descending.
+function range(from: number, to: number): number[] {
+  const out: number[] = [];
+  if (from <= to) for (let i = from; i <= to; i++) out.push(i);
+  else for (let i = from; i >= to; i--) out.push(i);
+  return out;
+}
 
 export function computeTopologyLayout(
   nodes: LayoutNodeInput[],
@@ -47,17 +60,11 @@ export function computeTopologyLayout(
   const n = nodes.length;
   if (n === 0) return out;
 
-  const { nodeW, nodeH, hGap, vGap } = opts;
-  const pinned = opts.pinned ?? new Map<string, { cx: number; cy: number }>();
-  const iterations = opts.iterations ?? 500;
-  const L = nodeW + hGap;          // desired neighbour spacing (centre-to-centre)
-  const minSepX = nodeW + hGap;    // min centre distance to keep boxes apart in x
-  const minSepY = nodeH + vGap;    // …and in y
+  const colGap = opts.nodeW + opts.hGap; // min centre-to-centre x within a rank
+  const layerH = opts.nodeH + opts.vGap; // rank-to-rank y
 
   const idx = new Map<string, number>();
   nodes.forEach((nd, i) => idx.set(nd.name, i));
-
-  // Adjacency (known nodes only, no self-loops, deduped).
   const adj: Set<number>[] = nodes.map(() => new Set<number>());
   for (const e of edges) {
     const a = idx.get(e.a);
@@ -66,180 +73,146 @@ export function computeTopologyLayout(
     adj[a].add(z);
     adj[z].add(a);
   }
+  const nbr = adj.map((s) => [...s]);
+  const degree = nbr.map((a) => a.length);
 
-  const xs = new Array<number>(n).fill(0);
-  const ys = new Array<number>(n).fill(0);
-  const fixed = new Array<boolean>(n).fill(false);
+  // ── 1. Rank by BFS hop-distance from hosts (hosts = rank 0 / bottom) ─────────
+  const depth = new Array<number>(n).fill(-1);
+  const bfs = (seeds: number[]): void => {
+    const q = [...seeds];
+    for (const s of seeds) depth[s] = 0;
+    let head = 0;
+    while (head < q.length) {
+      const u = q[head++];
+      for (const v of nbr[u]) if (depth[v] === -1) { depth[v] = depth[u] + 1; q.push(v); }
+    }
+  };
+  const hostSeeds: number[] = [];
+  for (let i = 0; i < n; i++) if (nodes[i].isHost) hostSeeds.push(i);
+  if (hostSeeds.length) bfs(hostSeeds);
+  // Cover any component the host-BFS didn't reach (incl. host-less graphs): seed
+  // each remaining component from its highest-degree node.
+  for (;;) {
+    let seed = -1;
+    let best = -1;
+    for (let i = 0; i < n; i++) if (depth[i] === -1 && degree[i] > best) { best = degree[i]; seed = i; }
+    if (seed === -1) break;
+    bfs([seed]);
+  }
+  const maxDepth = Math.max(...depth);
 
-  // Anchor the un-pinned ring on the centroid of the pinned nodes (so new nodes
-  // start near the existing drawing), else on the origin.
-  let anchorX = 0;
-  let anchorY = 0;
-  let pinCount = 0;
+  // ── 2. Pods — components after removing the top (max-depth) tier ─────────────
+  // Pods interconnect only through the spines; drop the top tier and the graph
+  // falls into one component per pod. Top-tier nodes span all pods (podId -1).
+  const podId = new Array<number>(n).fill(-1);
+  const isTop = (i: number): boolean => maxDepth > 0 && depth[i] === maxDepth;
+  {
+    const seen = new Array<boolean>(n).fill(false);
+    let pod = 0;
+    for (let i = 0; i < n; i++) {
+      if (seen[i] || isTop(i)) continue;
+      const q = [i];
+      seen[i] = true;
+      podId[i] = pod;
+      let head = 0;
+      while (head < q.length) {
+        const u = q[head++];
+        for (const v of nbr[u]) if (!seen[v] && !isTop(v)) { seen[v] = true; podId[v] = pod; q.push(v); }
+      }
+      pod++;
+    }
+  }
+
+  // ── 3. Order within ranks — pod-contiguous barycentre crossing reduction ─────
+  const levels: number[][] = [];
+  for (let i = 0; i < n; i++) (levels[depth[i]] ||= []).push(i);
+  for (let d = 0; d <= maxDepth; d++) levels[d] ||= [];
+
+  const order = new Array<number>(n).fill(0);
+  for (const lvl of levels) {
+    lvl.sort((a, b) => (podId[a] - podId[b]) || (nodes[a].name < nodes[b].name ? -1 : 1));
+    lvl.forEach((i, pos) => (order[i] = pos));
+  }
+
+  const podOrder = new Map<number, number>();
+  const refreshPodOrder = (): void => {
+    const sum = new Map<number, number>();
+    const cnt = new Map<number, number>();
+    for (let i = 0; i < n; i++) {
+      const p = podId[i];
+      if (p < 0) continue;
+      sum.set(p, (sum.get(p) ?? 0) + order[i]);
+      cnt.set(p, (cnt.get(p) ?? 0) + 1);
+    }
+    for (const p of sum.keys()) podOrder.set(p, (sum.get(p) as number) / (cnt.get(p) as number));
+  };
+  refreshPodOrder();
+
+  const baryFrom = (i: number, refDepth: number): number | null => {
+    let s = 0;
+    let c = 0;
+    for (const v of nbr[i]) if (depth[v] === refDepth) { s += order[v]; c++; }
+    return c ? s / c : null;
+  };
+
+  const SWEEPS = 10;
+  for (let sw = 0; sw < SWEEPS; sw++) {
+    const downward = sw % 2 === 0;
+    const dseq = downward ? range(1, maxDepth) : range(maxDepth - 1, 0);
+    for (const d of dseq) {
+      if (d < 0 || d > maxDepth) continue;
+      const refDepth = downward ? d - 1 : d + 1;
+      const lvl = levels[d];
+      const bary = new Map<number, number>();
+      for (const i of lvl) {
+        const b = baryFrom(i, refDepth);
+        bary.set(i, b === null ? order[i] : b);
+      }
+      lvl.sort((a, b) => {
+        const pa = podId[a] >= 0 ? (podOrder.get(podId[a]) as number) : (bary.get(a) as number);
+        const pb = podId[b] >= 0 ? (podOrder.get(podId[b]) as number) : (bary.get(b) as number);
+        return pa - pb || (bary.get(a) as number) - (bary.get(b) as number) ||
+          (nodes[a].name < nodes[b].name ? -1 : 1);
+      });
+      lvl.forEach((i, pos) => (order[i] = pos));
+    }
+    refreshPodOrder();
+  }
+
+  // ── 4. Coordinates — spaced by order, then barycentre-straightened + min-gap ──
+  const x = new Array<number>(n).fill(0);
+  for (const lvl of levels) {
+    const sorted = [...lvl].sort((a, b) => order[a] - order[b]);
+    sorted.forEach((i, pos) => (x[i] = pos * colGap));
+    const mean = sorted.reduce((sm, i) => sm + x[i], 0) / (sorted.length || 1);
+    for (const i of sorted) x[i] -= mean; // centre each rank on 0
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    const downward = pass % 2 === 0;
+    const dseq = downward ? range(1, maxDepth) : range(maxDepth - 1, 0);
+    for (const d of dseq) {
+      if (d < 0 || d > maxDepth) continue;
+      const refDepth = downward ? d - 1 : d + 1;
+      const sorted = [...levels[d]].sort((a, b) => order[a] - order[b]);
+      for (const i of sorted) {
+        let s = 0;
+        let c = 0;
+        for (const v of nbr[i]) if (depth[v] === refDepth) { s += x[v]; c++; }
+        if (c) x[i] = s / c; // pull toward the mean x of the reference-tier neighbours
+      }
+      // Restore order + minimum gap (left-to-right), then re-centre the rank.
+      for (let k = 1; k < sorted.length; k++) {
+        const a = sorted[k - 1];
+        const b = sorted[k];
+        if (x[b] - x[a] < colGap) x[b] = x[a] + colGap;
+      }
+      const mean = sorted.reduce((sm, i) => sm + x[i], 0) / (sorted.length || 1);
+      for (const i of sorted) x[i] -= mean;
+    }
+  }
+
   for (let i = 0; i < n; i++) {
-    const pin = pinned.get(nodes[i].name);
-    if (pin) {
-      anchorX += pin.cx;
-      anchorY += pin.cy;
-      pinCount++;
-    }
+    out.set(nodes[i].name, { cx: x[i], cy: (maxDepth - depth[i]) * layerH });
   }
-  if (pinCount > 0) {
-    anchorX /= pinCount;
-    anchorY /= pinCount;
-  }
-
-  const ringR = L * Math.max(1, Math.sqrt(n));
-  let seq = 0;
-  for (let i = 0; i < n; i++) {
-    const pin = pinned.get(nodes[i].name);
-    if (pin) {
-      xs[i] = pin.cx;
-      ys[i] = pin.cy;
-      fixed[i] = true;
-    } else {
-      const rad = (ringR * Math.sqrt(seq + 1)) / Math.sqrt(n);
-      xs[i] = anchorX + Math.cos(seq * GOLDEN_ANGLE) * rad;
-      ys[i] = anchorY + Math.sin(seq * GOLDEN_ANGLE) * rad;
-      seq++;
-    }
-  }
-
-  const kRep = L * L * 0.9;         // repulsion strength
-  const kSpring = 0.09;            // spring stiffness
-  const kHostGravity = L * 0.05;   // steady downward pull on hosts
-  const kCenterX = 0.01;          // mild horizontal centring (keeps it compact)
-
-  for (let it = 0; it < iterations; it++) {
-    const cooling = 1 - it / iterations; // 1 → 0
-    const fx = new Array<number>(n).fill(0);
-    const fy = new Array<number>(n).fill(0);
-
-    // Repulsion between every pair (inverse-square).
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        let dx = xs[i] - xs[j];
-        let dy = ys[i] - ys[j];
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 1) {
-          // Perfectly coincident — nudge deterministically by index.
-          dx = (i - j) || 1;
-          dy = 1;
-          d2 = dx * dx + dy * dy;
-        }
-        const d = Math.sqrt(d2);
-        const f = kRep / d2;
-        const ux = dx / d;
-        const uy = dy / d;
-        fx[i] += ux * f;
-        fy[i] += uy * f;
-        fx[j] -= ux * f;
-        fy[j] -= uy * f;
-      }
-    }
-
-    // Springs on edges (Hooke toward rest length L).
-    for (let i = 0; i < n; i++) {
-      for (const j of adj[i]) {
-        if (j < i) continue; // each edge once
-        const dx = xs[j] - xs[i];
-        const dy = ys[j] - ys[i];
-        const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const f = kSpring * (d - L);
-        const ux = dx / d;
-        const uy = dy / d;
-        fx[i] += ux * f;
-        fy[i] += uy * f;
-        fx[j] -= ux * f;
-        fy[j] -= uy * f;
-      }
-    }
-
-    // Host gravity (down) + horizontal centring toward the mean x.
-    let sumX = 0;
-    for (let i = 0; i < n; i++) sumX += xs[i];
-    const meanX = sumX / n;
-    for (let i = 0; i < n; i++) {
-      if (nodes[i].isHost) fy[i] += kHostGravity;
-      fx[i] += (meanX - xs[i]) * kCenterX;
-    }
-
-    // Integrate (cooling step, capped per-iteration displacement).
-    const step = 0.9 * cooling + 0.08;
-    const maxStep = L;
-    for (let i = 0; i < n; i++) {
-      if (fixed[i]) continue;
-      const mag = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]);
-      if (mag > maxStep) {
-        fx[i] = (fx[i] / mag) * maxStep;
-        fy[i] = (fy[i] / mag) * maxStep;
-      }
-      xs[i] += fx[i] * step;
-      ys[i] += fy[i] * step;
-    }
-  }
-
-  // Collision resolution — enforce a minimum box gap (rule 3). Push apart along
-  // the axis of least overlap; a fixed node doesn't move, so its partner takes
-  // the full shift.
-  for (let pass = 0; pass < 80; pass++) {
-    let moved = false;
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const dx = xs[j] - xs[i];
-        const dy = ys[j] - ys[i];
-        const ox = minSepX - Math.abs(dx);
-        const oy = minSepY - Math.abs(dy);
-        if (ox <= 0 || oy <= 0) continue; // boxes clear on at least one axis
-        moved = true;
-        const useX = ox < oy;
-        const amt = useX ? ox : oy;
-        const dir = useX ? (dx < 0 ? -1 : 1) : (dy < 0 ? -1 : 1);
-        const iFixed = fixed[i];
-        const jFixed = fixed[j];
-        if (iFixed && jFixed) continue;
-        if (useX) {
-          if (iFixed) xs[j] += dir * amt;
-          else if (jFixed) xs[i] -= dir * amt;
-          else { xs[i] -= (dir * amt) / 2; xs[j] += (dir * amt) / 2; }
-        } else {
-          if (iFixed) ys[j] += dir * amt;
-          else if (jFixed) ys[i] -= dir * amt;
-          else { ys[i] -= (dir * amt) / 2; ys[j] += (dir * amt) / 2; }
-        }
-      }
-    }
-    if (!moved) break;
-  }
-
-  // Hard host-bottom constraint (rule 2): every un-pinned host sits in a band
-  // below the lowest switch, keeping its settled x (so it stays under its uplink
-  // neighbour), then spread horizontally so hosts don't overlap each other.
-  let lowestSwitchY = -Infinity;
-  let hasSwitch = false;
-  for (let i = 0; i < n; i++) {
-    if (!nodes[i].isHost) {
-      hasSwitch = true;
-      if (ys[i] > lowestSwitchY) lowestSwitchY = ys[i];
-    }
-  }
-  if (hasSwitch) {
-    const bandY = lowestSwitchY + minSepY;
-    const hostIdx: number[] = [];
-    for (let i = 0; i < n; i++) {
-      if (nodes[i].isHost && !fixed[i]) {
-        ys[i] = bandY;
-        hostIdx.push(i);
-      }
-    }
-    hostIdx.sort((a, b) => xs[a] - xs[b]);
-    for (let k = 1; k < hostIdx.length; k++) {
-      const prev = hostIdx[k - 1];
-      const cur = hostIdx[k];
-      if (xs[cur] - xs[prev] < minSepX) xs[cur] = xs[prev] + minSepX;
-    }
-  }
-
-  for (let i = 0; i < n; i++) out.set(nodes[i].name, { cx: xs[i], cy: ys[i] });
   return out;
 }

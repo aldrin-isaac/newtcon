@@ -1,6 +1,6 @@
-// test/topology-layout.test.js — unit tests for the connectivity-aware topology
-// layout: neighbours close, distance grows with hops, hosts at the bottom, no
-// overlaps, pinned nodes fixed.
+// test/topology-layout.test.js — unit tests for the pod-aware layered (Sugiyama)
+// topology layout: rank by tier, hosts on the bottom line, pods kept contiguous,
+// no overlaps.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -8,102 +8,88 @@ import assert from "node:assert/strict";
 import { computeTopologyLayout } from "../dist/topology-layout.js";
 
 const OPTS = { nodeW: 120, nodeH: 52, hGap: 80, vGap: 60 };
-const dist = (a, b) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
-// Two boxes overlap only if they're inside BOTH the min x and min y separation.
 const overlap = (a, b) =>
   Math.abs(a.cx - b.cx) < OPTS.nodeW + OPTS.hGap - 0.5 &&
   Math.abs(a.cy - b.cy) < OPTS.nodeH + OPTS.vGap - 0.5;
+const assertNoOverlap = (pos) => {
+  const names = [...pos.keys()];
+  for (let i = 0; i < names.length; i++)
+    for (let j = i + 1; j < names.length; j++)
+      assert.ok(!overlap(pos.get(names[i]), pos.get(names[j])), `${names[i]} & ${names[j]} overlap`);
+};
 
-describe("computeTopologyLayout", () => {
+describe("computeTopologyLayout (layered)", () => {
   test("empty input yields an empty map", () => {
     assert.equal(computeTopologyLayout([], [], OPTS).size, 0);
   });
 
-  test("directly-connected neighbours end up closer than unconnected nodes", () => {
-    // a-b linked; c is isolated. dist(a,b) should be < dist(a,c).
+  test("leaf-spine: spines on top, leaves middle, hosts on the bottom line", () => {
     const nodes = [
-      { name: "a", isHost: false },
-      { name: "b", isHost: false },
-      { name: "c", isHost: false },
-    ];
-    const pos = computeTopologyLayout(nodes, [{ a: "a", z: "b" }], OPTS);
-    const ab = dist(pos.get("a"), pos.get("b"));
-    const ac = dist(pos.get("a"), pos.get("c"));
-    assert.ok(ab < ac, `neighbour dist ${ab.toFixed(0)} should be < isolated dist ${ac.toFixed(0)}`);
-  });
-
-  test("distance grows with hop count (a-b-c line: a..c farther than a..b)", () => {
-    const nodes = [
-      { name: "a", isHost: false },
-      { name: "b", isHost: false },
-      { name: "c", isHost: false },
-    ];
-    const pos = computeTopologyLayout(nodes, [{ a: "a", z: "b" }, { a: "b", z: "c" }], OPTS);
-    const ab = dist(pos.get("a"), pos.get("b"));
-    const ac = dist(pos.get("a"), pos.get("c"));
-    assert.ok(ac > ab * 1.3, `2-hop a..c ${ac.toFixed(0)} should clearly exceed 1-hop a..b ${ab.toFixed(0)}`);
-  });
-
-  test("hosts are placed below every switch", () => {
-    const nodes = [
-      { name: "spine1", isHost: false },
-      { name: "leaf1", isHost: false },
-      { name: "leaf2", isHost: false },
-      { name: "host1", isHost: true },
-      { name: "host2", isHost: true },
+      { name: "spine1", isHost: false }, { name: "spine2", isHost: false },
+      { name: "leaf1", isHost: false }, { name: "leaf2", isHost: false },
+      { name: "host1", isHost: true }, { name: "host2", isHost: true },
     ];
     const edges = [
-      { a: "spine1", z: "leaf1" },
-      { a: "spine1", z: "leaf2" },
-      { a: "leaf1", z: "host1" },
-      { a: "leaf2", z: "host2" },
+      { a: "leaf1", z: "spine1" }, { a: "leaf1", z: "spine2" },
+      { a: "leaf2", z: "spine1" }, { a: "leaf2", z: "spine2" },
+      { a: "host1", z: "leaf1" }, { a: "host2", z: "leaf2" },
     ];
-    const pos = computeTopologyLayout(nodes, edges, OPTS);
-    const switchYs = ["spine1", "leaf1", "leaf2"].map((n) => pos.get(n).cy);
-    const hostYs = ["host1", "host2"].map((n) => pos.get(n).cy);
-    const lowestSwitch = Math.max(...switchYs);
-    for (const hy of hostYs) {
-      assert.ok(hy > lowestSwitch, `host y ${hy.toFixed(0)} should be below lowest switch ${lowestSwitch.toFixed(0)}`);
-    }
+    const p = computeTopologyLayout(nodes, edges, OPTS);
+    const cy = (n) => p.get(n).cy;
+    // larger cy = lower on screen. hosts lowest, spines highest.
+    assert.ok(cy("host1") > cy("leaf1"), "host below leaf");
+    assert.ok(cy("leaf1") > cy("spine1"), "leaf below spine");
+    // hosts share one bottom line
+    assert.equal(cy("host1"), cy("host2"), "hosts colinear");
+    // spines share the top line
+    assert.equal(cy("spine1"), cy("spine2"), "spines colinear");
+    assertNoOverlap(p);
   });
 
-  test("no two node boxes overlap", () => {
-    const nodes = Array.from({ length: 8 }, (_, i) => ({ name: `n${i}`, isHost: i >= 6 }));
-    const edges = [
-      { a: "n0", z: "n1" }, { a: "n0", z: "n2" }, { a: "n1", z: "n3" },
-      { a: "n2", z: "n4" }, { a: "n3", z: "n5" }, { a: "n4", z: "n6" }, { a: "n5", z: "n7" },
-    ];
-    const pos = computeTopologyLayout(nodes, edges, OPTS);
-    const names = nodes.map((n) => n.name);
-    for (let i = 0; i < names.length; i++) {
-      for (let j = i + 1; j < names.length; j++) {
-        assert.ok(!overlap(pos.get(names[i]), pos.get(names[j])), `${names[i]} and ${names[j]} overlap`);
-      }
-    }
-  });
-
-  test("pinned nodes stay exactly at their pinned position", () => {
+  test("pods stay contiguous — pod A's nodes don't interleave with pod B's", () => {
+    // 3-tier, 2 pods under a shared super-spine pair.
     const nodes = [
-      { name: "a", isHost: false },
-      { name: "b", isHost: false },
-      { name: "c", isHost: false },
+      { name: "ss1", isHost: false }, { name: "ss2", isHost: false },
+      { name: "sa1", isHost: false }, { name: "la1", isHost: false }, { name: "la2", isHost: false },
+      { name: "ha1", isHost: true }, { name: "ha2", isHost: true },
+      { name: "sb1", isHost: false }, { name: "lb1", isHost: false }, { name: "lb2", isHost: false },
+      { name: "hb1", isHost: true }, { name: "hb2", isHost: true },
     ];
-    const pinned = new Map([["a", { cx: 500, cy: 300 }]]);
-    const pos = computeTopologyLayout(nodes, [{ a: "a", z: "b" }], { ...OPTS, pinned });
-    assert.deepEqual(pos.get("a"), { cx: 500, cy: 300 });
+    const edges = [
+      { a: "ss1", z: "sa1" }, { a: "ss2", z: "sa1" }, { a: "ss1", z: "sb1" }, { a: "ss2", z: "sb1" },
+      { a: "sa1", z: "la1" }, { a: "sa1", z: "la2" }, { a: "sb1", z: "lb1" }, { a: "sb1", z: "lb2" },
+      { a: "la1", z: "ha1" }, { a: "la2", z: "ha2" }, { a: "lb1", z: "hb1" }, { a: "lb2", z: "hb2" },
+    ];
+    const p = computeTopologyLayout(nodes, edges, OPTS);
+    // leaves tier: pod A = {la1,la2}, pod B = {lb1,lb2}. Sorted by x, one pod's
+    // leaves must all precede the other's (no interleaving).
+    const leaves = ["la1", "la2", "lb1", "lb2"].sort((a, b) => p.get(a).cx - p.get(b).cx);
+    const podOf = (n) => (n.startsWith("la") ? "A" : "B");
+    const seq = leaves.map(podOf).join("");
+    assert.ok(seq === "AABB" || seq === "BBAA", `leaves interleave across pods: ${seq}`);
+    // hosts on one bottom line, super-spines on one top line
+    assert.equal(p.get("ha1").cy, p.get("hb2").cy, "all hosts colinear");
+    assert.ok(p.get("ha1").cy > p.get("ss1").cy, "hosts below super-spines");
+    assertNoOverlap(p);
+  });
+
+  test("host-less mesh still lays out with no overlaps", () => {
+    const nodes = [
+      { name: "a", isHost: false }, { name: "b", isHost: false }, { name: "c", isHost: false },
+    ];
+    const p = computeTopologyLayout(nodes, [{ a: "a", z: "b" }, { a: "b", z: "c" }, { a: "a", z: "c" }], OPTS);
+    assert.equal(p.size, 3);
+    assertNoOverlap(p);
   });
 
   test("is deterministic — same graph yields identical positions", () => {
     const nodes = [
-      { name: "a", isHost: false },
-      { name: "b", isHost: false },
-      { name: "c", isHost: true },
+      { name: "s1", isHost: false }, { name: "l1", isHost: false },
+      { name: "l2", isHost: false }, { name: "h1", isHost: true },
     ];
-    const edges = [{ a: "a", z: "b" }, { a: "b", z: "c" }];
+    const edges = [{ a: "l1", z: "s1" }, { a: "l2", z: "s1" }, { a: "h1", z: "l1" }];
     const p1 = computeTopologyLayout(nodes, edges, OPTS);
     const p2 = computeTopologyLayout(nodes, edges, OPTS);
-    for (const name of ["a", "b", "c"]) {
-      assert.deepEqual(p1.get(name), p2.get(name));
-    }
+    for (const nm of ["s1", "l1", "l2", "h1"]) assert.deepEqual(p1.get(nm), p2.get(nm));
   });
 });
