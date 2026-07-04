@@ -73,7 +73,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
-import { deriveNodeLinks } from "./node-references.js";
+import { deriveNodeLinks, availableInterfacesByDevice } from "./node-references.js";
 import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
@@ -5217,22 +5217,31 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
     }
     group.appendChild(devSelect);
 
-    const ifaceInput = el("input", {
-      className: "form-control",
-      id: idPrefix + "-iface",
-      type: "text",
-      placeholder: "interface name, e.g. Ethernet0",
-    }) as HTMLInputElement;
-
-    // Populate with known interfaces when device is selected.
-    devSelect.addEventListener("change", () => {
-      const ifaces = interfacesByDevice.get(devSelect.value) ?? [];
-      if (ifaces.length > 0 && ifaceInput.value === "") {
-        ifaceInput.placeholder = ifaces.join(", ");
+    // Interface picker: a dropdown of the selected device's FREE (declared,
+    // unwired) interfaces, repopulated whenever the device changes. Offering only
+    // free declared ports means the operator can't pick an undeclared interface
+    // (newtron 500 — see newtron#401) or an already-wired one (409).
+    const ifaceSelect = el("select", { className: "form-control", id: idPrefix + "-iface" }) as HTMLSelectElement;
+    const fillIfaces = (): void => {
+      ifaceSelect.textContent = "";
+      const dev = devSelect.value;
+      const ifaces = interfacesByDevice.get(dev) ?? [];
+      if (!dev) {
+        ifaceSelect.appendChild(el("option", { value: "" }, "— select a device first —") as HTMLOptionElement);
+        ifaceSelect.disabled = true;
+      } else if (ifaces.length === 0) {
+        ifaceSelect.appendChild(el("option", { value: "" }, "no free interfaces — declare a port first") as HTMLOptionElement);
+        ifaceSelect.disabled = true;
+      } else {
+        ifaceSelect.appendChild(el("option", { value: "" }, "— select interface —") as HTMLOptionElement);
+        for (const i of ifaces) ifaceSelect.appendChild(el("option", { value: i }, i) as HTMLOptionElement);
+        ifaceSelect.disabled = false;
       }
-    });
+    };
+    devSelect.addEventListener("change", fillIfaces);
+    fillIfaces();
 
-    group.appendChild(ifaceInput);
+    group.appendChild(ifaceSelect);
     return group;
   };
 
@@ -5250,9 +5259,9 @@ function openAddLinkDrawer(deviceNames: string[], interfacesByDevice: Map<string
   submitBtn.addEventListener("click", async () => {
     errorOut.textContent = "";
     const aDevice = (content.querySelector("#link-a-device") as HTMLSelectElement)?.value ?? "";
-    const aIface = (content.querySelector("#link-a-iface") as HTMLInputElement)?.value.trim() ?? "";
+    const aIface = (content.querySelector("#link-a-iface") as HTMLSelectElement)?.value ?? "";
     const zDevice = (content.querySelector("#link-z-device") as HTMLSelectElement)?.value ?? "";
-    const zIface = (content.querySelector("#link-z-iface") as HTMLInputElement)?.value.trim() ?? "";
+    const zIface = (content.querySelector("#link-z-iface") as HTMLSelectElement)?.value ?? "";
 
     if (!aDevice || !aIface || !zDevice || !zIface) {
       errorOut.appendChild(el("p", { className: "panel-error" }, "Both endpoints (device and interface) are required."));
@@ -5678,7 +5687,11 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
         // Lab + physical lifecycle live in their respective views.
         const addLinkBtn = el("button", { type: "button", className: "topology-toolbar-btn" }, "+ Add link");
         addLinkBtn.addEventListener("click", () => {
-          openAddLinkDrawer(deviceNames, new Map(), () => mountTopologyTab(root));
+          // Free (declared, unwired) interfaces per device — also excluding ports
+          // already staged in a pending link — so the picker offers real choices.
+          const pendingWired = pendingTopologyLinkAdds().flatMap((l) => [l.a, l.z]);
+          const avail = availableInterfacesByDevice(data, pendingWired);
+          openAddLinkDrawer(deviceNames, avail, () => mountTopologyTab(root));
         });
         toolbar.appendChild(addLinkBtn);
       } else if (viewMode === "spec-lab") {

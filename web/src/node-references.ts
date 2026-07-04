@@ -1,10 +1,13 @@
-// node-references.ts — pure detection of what still references a node, so the
-// delete flow can warn + force-cascade (parallel to service-bindings.ts).
+// node-references.ts — pure topology-reference helpers for the delete + add-link
+// flows: what still references a node (delete force-cascade), and which interfaces
+// are free to wire (add-link pickers).
 //
 // newtron's delete-node refuses (409) when a link still wires to the device — a
 // bare, unreferenced node deletes cleanly; ?force=true cascades the links. The UI
 // detects the links client-side for instant feedback and, on confirm, stages a
 // force delete so newtron removes the node + its links together.
+
+import { comparePorts } from "./port-config.js";
 
 export interface NodeLink {
   a: string;   // "device:iface"
@@ -36,6 +39,47 @@ export function deriveNodeLinks(topology: unknown, nodeName: string): NodeLink[]
     const dz = deviceOf(z);
     if (da !== nodeName && dz !== nodeName) continue;
     out.push({ a: String(a ?? ""), z: String(z ?? ""), peer: da === nodeName ? dz : da });
+  }
+  return out;
+}
+
+// availableInterfacesByDevice returns, per device, the DECLARED ports that aren't
+// already wired to a link — the interfaces you can pick when adding a link.
+// newtron's add-link requires both endpoints to be declared ports and refuses an
+// already-wired one, so offering only free declared ports keeps the picker honest
+// (no undeclared-interface 500s, no already-wired 409s). `extraWired` carries
+// pending (not-yet-applied) link endpoints ("device:iface") so they're excluded too.
+export function availableInterfacesByDevice(
+  topology: unknown,
+  extraWired: string[] = [],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const t = (topology && typeof topology === "object")
+    ? (topology as { nodes?: unknown; links?: unknown })
+    : {};
+  const nodes = t.nodes;
+  if (!nodes || typeof nodes !== "object") return out;
+
+  const wired = new Set<string>(extraWired);
+  if (Array.isArray(t.links)) {
+    for (const l of t.links) {
+      if (!l || typeof l !== "object") continue;
+      const a = (l as { a?: unknown }).a;
+      const z = (l as { z?: unknown }).z;
+      if (typeof a === "string") wired.add(a);
+      if (typeof z === "string") wired.add(z);
+    }
+  }
+
+  for (const [dev, def] of Object.entries(nodes as Record<string, unknown>)) {
+    const ports = (def && typeof def === "object")
+      ? (def as { ports?: unknown }).ports
+      : undefined;
+    if (!ports || typeof ports !== "object") { out.set(dev, []); continue; }
+    const free = Object.keys(ports as Record<string, unknown>)
+      .filter((p) => !wired.has(`${dev}:${p}`))
+      .sort(comparePorts);
+    out.set(dev, free);
   }
   return out;
 }
