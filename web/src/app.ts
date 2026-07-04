@@ -73,6 +73,7 @@ import { apiPath } from "./api-path.js";
 import { activeNetwork } from "./network-switcher.js";
 import { buildSpecDetailShape, type SpecField } from "./spec-detail-shape.js";
 import { deriveServiceBindings } from "./service-bindings.js";
+import { deriveNodeLinks } from "./node-references.js";
 import { deriveServiceReferences, type RefFieldDescriptor } from "./service-references.js";
 import { computePrefillForKind, strategiesFor } from "./smart-defaults.js";
 import {
@@ -1376,6 +1377,26 @@ function buildPanel(panel: Panel, result: PromiseSettledResult<SpecRowData[]>): 
                     const ok = await confirmInline({
                       title: `Force-delete service "${r.name}"?`,
                       body: `It's applied on ${n} interface${s} (${where}${more}). newtron won't delete an applied service; "Force delete" also removes those ${n} binding${s} from the topology. (On a deployed device, un-apply there first to avoid CONFIG_DB drift.)`,
+                      danger: true,
+                      confirmLabel: "Force delete",
+                    });
+                    if (!ok) return;
+                    force = true;
+                  }
+                } else if (panel.kind === "nodes") {
+                  // newtron won't delete a node a link still wires to (409); detect
+                  // the links client-side and, on confirm, force-cascade them so the
+                  // node + its links are removed together.
+                  const topo = await fetchTopology().catch(() => null);
+                  const links = deriveNodeLinks(topo, r.name);
+                  if (links.length > 0) {
+                    const peers = [...new Set(links.map((l) => l.peer).filter(Boolean))];
+                    const shown = peers.slice(0, 6).join(", ");
+                    const more = peers.length > 6 ? `, +${peers.length - 6} more` : "";
+                    const n = links.length, s = n === 1 ? "" : "s";
+                    const ok = await confirmInline({
+                      title: `Force-delete node "${r.name}"?`,
+                      body: `${n} link${s} still wire to it (${shown}${more}). newtron won't delete a linked node; "Force delete" removes the node and cascades those ${n} link${s} from the topology.`,
                       danger: true,
                       confirmLabel: "Force delete",
                     });
