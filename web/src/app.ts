@@ -5372,8 +5372,12 @@ function openLabOpModal(
     run: (ctx: { append: (line: string) => void; finish: () => void }) => Promise<void>;
   },
 ): void {
-  const overlay = el("div", { className: "network-modal-overlay" });
-  const modal = el("div", { className: "network-modal deploy-modal" });
+  // Non-blocking floating panel — NOT a full-screen modal backdrop. Deploy/provision
+  // are long ops the operator is told to "close once complete" (they continue in the
+  // background via SSE + the status poll), so the operator must be able to watch the
+  // topology fill in and pan/zoom while progress streams. A backdrop would freeze the
+  // canvas for the whole op. Blocking modals (network create/remove) keep their overlay.
+  const modal = el("div", { className: "network-modal deploy-modal lab-op-panel" });
   const title = el("h2", { className: "network-modal-title" }, opts.title);
   const hint = el("p", { className: "network-modal-hint" }, opts.hint);
   const logLines = el("pre", { className: "deploy-modal-log" });
@@ -5386,8 +5390,7 @@ function openLabOpModal(
   modal.appendChild(hint);
   modal.appendChild(logLines);
   modal.appendChild(actions);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  document.body.appendChild(modal);
 
   const append = (line: string): void => {
     logLines.textContent += (logLines.textContent ? "\n" : "") + line;
@@ -5395,7 +5398,7 @@ function openLabOpModal(
   };
   let src: EventSource | null = null;
   const finish = (): void => { src?.close(); src = null; };
-  const close = (): void => { finish(); overlay.remove(); };
+  const close = (): void => { finish(); modal.remove(); };
   closeBtn.addEventListener("click", close);
 
   // Stream the per-lab SSE events. Deploy emits phase/complete/error; Provision

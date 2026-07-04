@@ -1196,6 +1196,20 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .deploy-modal {
   width: min(720px, 90vw);
 }
+/* Lab deploy/provision progress floats — a non-blocking corner panel, not a
+ * full-screen modal backdrop. The op runs in the background (SSE + status poll),
+ * so the operator watches the topology fill in + pans/zooms while it streams; only
+ * this panel's own footprint is over the canvas, the rest stays interactive. */
+.lab-op-panel {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  z-index: 30;
+  width: min(440px, 92vw);
+  margin: 0;
+  box-shadow: var(--shadow-overlay);
+}
+.lab-op-panel .deploy-modal-log { max-height: 32vh; }
 .deploy-modal-log {
   margin: var(--space-md) 0;
   padding: var(--space-sm);
