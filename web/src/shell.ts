@@ -106,7 +106,6 @@ function setupBreadcrumb(): void {
   const labelByTab: Record<string, string> = {
     "tab-specs": "Specs",
     "tab-topology": "Topology",
-    "tab-permissions": "Permissions",
     "tab-history": "Changes",
     "tab-audit": "Audit",
   };
@@ -126,7 +125,7 @@ function setupBreadcrumb(): void {
 // ---- Sidebar nav active-state ---------------------------------------------
 
 function setupSidebarActiveStates(): void {
-  const ids = ["tab-specs", "tab-topology", "tab-permissions", "tab-history", "tab-audit"];
+  const ids = ["tab-specs", "tab-topology", "tab-history", "tab-audit"];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
     btn?.addEventListener(
@@ -227,7 +226,7 @@ function setupPalette(): void {
     // Tabs — always available, every view (was only Specs + Topology).
     for (const [id, label] of [
       ["tab-specs", "Specs"], ["tab-topology", "Topology"],
-      ["tab-permissions", "Permissions"], ["tab-history", "Changes"], ["tab-audit", "Audit"],
+      ["tab-history", "Changes"], ["tab-audit", "Audit"],
     ] as Array<[string, string]>) {
       paletteItems.push({ label: `Go to ${label}`, kind: "View", action: () => document.getElementById(id)?.click() });
     }

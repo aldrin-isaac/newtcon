@@ -5929,9 +5929,15 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // "no actuation signal" condition is communicated by the view
     // itself (blue spec-only coloring on every element) rather than
     // by a redundant disabled-chip state.
+    //
+    // Header bar (toolbar convention): view controls left, mutation/action
+    // buttons (Add link / Deploy / Provision / Destroy) pushed right, so the
+    // operator reads "what am I looking at" on the left and "what can I do"
+    // on the right instead of everything stacked into the left gutter.
+    const headerBar = el("div", { className: "topology-header-bar" });
     const viewRow = el("div", { className: "topology-view-row" });
-    root.appendChild(viewRow);
-    root.appendChild(toolbar);
+    headerBar.append(viewRow, toolbar);
+    root.appendChild(headerBar);
     const renderViewRow = (): void => {
       viewRow.textContent = "";
       const label = el("span", { className: "topology-view-label" }, "View:");
@@ -6271,21 +6277,21 @@ async function mountTopologyTab(root: HTMLElement): Promise<void> {
 function setupTabs(): void {
   const tabSpecs = document.getElementById("tab-specs");
   const tabTopology = document.getElementById("tab-topology");
-  const tabPermissions = document.getElementById("tab-permissions");
   const tabHistory = document.getElementById("tab-history");
   const tabAudit = document.getElementById("tab-audit");
   const panelSpecs = document.getElementById("panel-specs");
   const panelTopology = document.getElementById("panel-topology");
-  const panelPermissions = document.getElementById("panel-permissions");
   const panelHistory = document.getElementById("panel-history");
   const panelAudit = document.getElementById("panel-audit");
 
-  if (!tabSpecs || !tabTopology || !tabPermissions || !tabHistory || !tabAudit ||
-      !panelSpecs || !panelTopology || !panelPermissions || !panelHistory || !panelAudit) return;
+  if (!tabSpecs || !tabTopology || !tabHistory || !tabAudit ||
+      !panelSpecs || !panelTopology || !panelHistory || !panelAudit) return;
 
   let topologyMounted = false;
 
-  type TabName = "specs" | "topology" | "permissions" | "history" | "audit";
+  // Permissions moved into Specs → General → Permissions (it's current-state
+  // network config, a sibling of the spec facets, not a top-level surface).
+  type TabName = "specs" | "topology" | "history" | "audit";
 
   const activateTab = (name: TabName): void => {
     // Drawers (spec detail, node inspector, sub-rule add forms) live in
@@ -6298,7 +6304,6 @@ function setupTabs(): void {
 
     const isSpecs = name === "specs";
     const isTopology = name === "topology";
-    const isPermissions = name === "permissions";
     const isHistory = name === "history";
     const isAudit = name === "audit";
 
@@ -6306,8 +6311,6 @@ function setupTabs(): void {
     tabSpecs.setAttribute("aria-selected", isSpecs ? "true" : "false");
     tabTopology.classList.toggle("workspace-tab--active", isTopology);
     tabTopology.setAttribute("aria-selected", isTopology ? "true" : "false");
-    tabPermissions.classList.toggle("workspace-tab--active", isPermissions);
-    tabPermissions.setAttribute("aria-selected", isPermissions ? "true" : "false");
     tabHistory.classList.toggle("workspace-tab--active", isHistory);
     tabHistory.setAttribute("aria-selected", isHistory ? "true" : "false");
     tabAudit.classList.toggle("workspace-tab--active", isAudit);
@@ -6315,7 +6318,6 @@ function setupTabs(): void {
 
     (panelSpecs as HTMLElement).hidden = !isSpecs;
     (panelTopology as HTMLElement).hidden = !isTopology;
-    (panelPermissions as HTMLElement).hidden = !isPermissions;
     (panelHistory as HTMLElement).hidden = !isHistory;
     (panelAudit as HTMLElement).hidden = !isAudit;
 
@@ -6326,12 +6328,6 @@ function setupTabs(): void {
     if (!isTopology) {
       // Stop polling newtlab status when leaving the Topology tab.
       stopTopologyPoll();
-    }
-    if (isPermissions) {
-      // Always re-mount so the operator sees the live authorization table —
-      // a change upstream (network.json edit + reload) shouldn't surface
-      // stale here.
-      void mountAuthorizationTab(panelPermissions as HTMLElement);
     }
     if (isHistory) {
       // Re-mount so newly-applied entries surface immediately when the
@@ -6347,7 +6343,6 @@ function setupTabs(): void {
 
   tabSpecs.addEventListener("click", () => activateTab("specs"));
   tabTopology.addEventListener("click", () => activateTab("topology"));
-  tabPermissions.addEventListener("click", () => activateTab("permissions"));
   tabHistory.addEventListener("click", () => activateTab("history"));
   tabAudit.addEventListener("click", () => activateTab("audit"));
 }
@@ -6382,10 +6377,12 @@ function resolveGroupings(): { id: string; label: string; kinds: SpecKind[] }[] 
 }
 
 let activeFacet: SpecKind = "services";
-// The "General" group holds network-wide scoped-singleton settings (the SSH login)
-// that aren't named-instance spec facets, so they sit outside the SpecKind/PANELS
-// list machinery. When true, the panel renders that control instead of a facet list.
-let sshLoginActive = false;
+// The "General" group holds network-wide surfaces that aren't named-instance spec
+// facets, so they sit outside the SpecKind/PANELS list machinery: the SSH login
+// (a scoped-singleton setting) and Permissions (a read-only view of newtron's
+// grant table). When non-null, the panel renders that surface instead of a facet
+// list; the facet subnav items go inactive.
+let activeGeneral: null | "ssh" | "permissions" = null;
 
 async function mountSpecsView(root: HTMLElement): Promise<void> {
   root.textContent = "";
@@ -6445,7 +6442,7 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
           // IP-VPN create form) left open over the MAC-VPN facet is
           // stale. Mirrors the close-on-tab-switch behaviour.
           closeDetail();
-          sshLoginActive = false;
+          activeGeneral = null;
           activeFacet = kind;
           renderSubnav();
           renderActiveFacet();
@@ -6456,33 +6453,45 @@ async function mountSpecsView(root: HTMLElement): Promise<void> {
       subnav.appendChild(section);
     }
 
-    // General — network-wide settings that aren't a named-instance spec facet
-    // (scoped singletons like the SSH login). Rendered inline, not via the list
-    // machinery, so it lives outside SPEC_GROUPS/PANELS.
+    // General — network-wide surfaces that aren't a named-instance spec facet:
+    // the SSH login (a scoped-singleton setting) and Permissions (a read-only view
+    // of newtron's grant table). Rendered inline, not via the list machinery, so
+    // they live outside SPEC_GROUPS/PANELS.
     const genSection = el("div", { className: "specs-subnav-section" });
     genSection.appendChild(el("h3", { className: "specs-subnav-heading" }, "General"));
     const genList = el("div", { className: "specs-subnav-list" });
-    const sshBtn = el("button", {
-      type: "button",
-      className: "specs-subnav-item" + (sshLoginActive ? " specs-subnav-item--active" : ""),
-      ariaSelected: sshLoginActive ? "true" : "false",
-    }, "SSH Login");
-    sshBtn.addEventListener("click", () => {
-      closeDetail();
-      sshLoginActive = true;
-      renderSubnav();
-      void renderActiveFacet();
-    });
-    genList.appendChild(sshBtn);
+    const genItem = (label: string, key: "ssh" | "permissions"): HTMLElement => {
+      const active = activeGeneral === key;
+      const btn = el("button", {
+        type: "button",
+        className: "specs-subnav-item" + (active ? " specs-subnav-item--active" : ""),
+        ariaSelected: active ? "true" : "false",
+      }, label);
+      btn.addEventListener("click", () => {
+        closeDetail();
+        activeGeneral = key;
+        renderSubnav();
+        void renderActiveFacet();
+      });
+      return btn;
+    };
+    genList.append(genItem("SSH Login", "ssh"), genItem("Permissions", "permissions"));
     genSection.appendChild(genList);
     subnav.appendChild(genSection);
   }
 
   async function renderActiveFacet(): Promise<void> {
-    if (sshLoginActive) {
+    if (activeGeneral === "ssh") {
       // renderSSHLoginInto swaps content atomically at the end — no pre-clear, so
       // a re-render (on pending-queue change) doesn't flicker or stack forms.
       await renderSSHLoginInto(main);
+      return;
+    }
+    if (activeGeneral === "permissions") {
+      // Read-only view of newtron's grant table (super-users + user-groups +
+      // permissions). Always re-mounts against the live authorization table so an
+      // upstream network.json edit + reload doesn't surface stale here.
+      await mountAuthorizationTab(main);
       return;
     }
     const panel = PANELS.find((p) => p.kind === activeFacet);
