@@ -37,3 +37,6 @@ Thumbs.db
 # Local dev
 /tmp/
 /scratch/
+
+# Local TLS material (self-signed dev certs) — never commit private keys
+certs/

@@ -284,6 +284,13 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 /* View-mode chip row (slice #210.B) — sits above the zone-filter row.
  * Always mounted so operators see what views exist; unavailable modes
  * render disabled to signal what signal would be needed. */
+/* Header bar: view controls (left) vs mutation/action buttons (right).
+ * space-between splits the two clusters; on a narrow viewport they wrap
+ * and stack. The children own their vertical rhythm, so zero out the
+ * inner margins/padding the bar itself now supplies. */
+.topology-header-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; margin-bottom: var(--space-md); }
+.topology-header-bar .topology-view-row { padding-bottom: 0; }
+.topology-header-bar .topology-toolbar { margin-bottom: 0; }
 .topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-md); flex-wrap: wrap; }
 .topology-view-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); margin-right: var(--space-xs); }
 .topology-view-chip { font-size: var(--text-xs); padding: 2px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border-default); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); transition: all var(--duration-fast) var(--ease-standard); }
@@ -367,9 +374,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .form-button-row { display: flex; gap: var(--space-sm); margin-top: var(--space-sm); }
 .form-cancel-btn { padding: var(--space-2xs) var(--space-md); background: transparent; border: 1px solid var(--color-border-default); border-radius: 4px; color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); font-size: var(--text-sm); }
 .form-cancel-btn:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
-
-/* Permissions tab — read-only authorization-table inspector. */
-.view-permissions { padding: var(--space-md) var(--space-lg); overflow-y: auto; }
 
 /* Audit tab (slice #175.B) */
 .view-audit { padding: var(--space-md) var(--space-lg); overflow-y: auto; }
