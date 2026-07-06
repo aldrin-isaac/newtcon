@@ -287,8 +287,15 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 /* Header bar: view controls (left) vs mutation/action buttons (right).
  * space-between splits the two clusters; on a narrow viewport they wrap
  * and stack. The children own their vertical rhythm, so zero out the
- * inner margins/padding the bar itself now supplies. */
-.topology-header-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; margin-bottom: var(--space-md); }
+ * inner margins/padding the bar itself now supplies.
+ *
+ * The bar spans the canvas width, so a --space-sm horizontal inset (matching
+ * the floating zoom cluster's top-right offset) sits the right action buttons
+ * over the canvas with a right margin that mirrors the left view chips' inset
+ * — symmetric margins, and the actions line up with the in-canvas zoom
+ * controls instead of hugging the canvas border. box-sizing keeps the inset
+ * inside the canvas width rather than widening the bar past it. */
+.topology-header-bar { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; margin-bottom: var(--space-md); padding-inline: var(--space-sm); }
 .topology-header-bar .topology-view-row { padding-bottom: 0; }
 .topology-header-bar .topology-toolbar { margin-bottom: 0; }
 .topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-md); flex-wrap: wrap; }
@@ -298,8 +305,9 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .topology-view-chip--active { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); font-weight: var(--weight-medium); }
 
 /* Filter chip row — sits between toolbar and SVG split. Only mounted
- * when there's more than one distinct zone to pick from. */
-.topology-filter-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-sm); flex-wrap: wrap; }
+ * when there's more than one distinct zone to pick from. Horizontal inset
+ * matches the header bar so the zone chips left-align with the view chips. */
+.topology-filter-row { box-sizing: border-box; display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) var(--space-sm) var(--space-sm); flex-wrap: wrap; }
 .topology-filter-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); margin-right: var(--space-xs); }
 .topology-filter-chip { font-size: var(--text-xs); padding: 2px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; font-family: var(--font-system); transition: all var(--duration-fast) var(--ease-standard); }
 .topology-filter-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
