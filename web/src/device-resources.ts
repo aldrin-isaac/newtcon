@@ -130,9 +130,10 @@ export const HEALTH_COLUMNS: ResourceColumn[] = [
   { key: "check", label: "Check" },
   { key: "message", label: "Message" },
 ];
-// BGP /status neighbors sub-table; address key varies (address | neighbor_ip).
+// BGP /status neighbors sub-table. Peer identity is `neighbor_ip` (newtron #426
+// converged the peer-IP key; `address` now only names a route next-hop, not a peer).
 export const BGP_NEIGHBOR_COLUMNS: ResourceColumn[] = [
-  { key: "address", label: "Neighbor", derive: (r) => String(r.address ?? r.neighbor_ip ?? "") },
+  { key: "neighbor_ip", label: "Neighbor", derive: (r) => String(r.neighbor_ip ?? "") },
   { key: "vrf", label: "VRF" },
   { key: "type", label: "Type" },
   { key: "remote_as", label: "Remote AS" },

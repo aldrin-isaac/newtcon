@@ -253,12 +253,20 @@ func TestClient_CreateTopologyLink_Success(t *testing.T) {
 	}
 }
 
-// TestClient_DeleteTopologyLink_Success verifies that DeleteTopologyLink sends
-// DELETE to the link/{device}/{interface} path.
+// TestClient_DeleteTopologyLink_Success verifies that DeleteTopologyLink POSTs
+// to /topology/delete-link with the colon-joined endpoint in the body
+// (newtron #426 replaced the REST DELETE path with this RPC verb).
 func TestClient_DeleteTopologyLink_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/networks/default/topology/links/spine1/Ethernet0" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/topology/delete-link" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decoding body: %v", err)
+		}
+		if body["endpoint"] != "spine1:Ethernet0" {
+			t.Errorf("expected endpoint spine1:Ethernet0, got %q", body["endpoint"])
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"data":{"deleted":"spine1:Ethernet0"},"error":""}`)
