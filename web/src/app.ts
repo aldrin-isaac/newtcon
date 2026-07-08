@@ -58,7 +58,7 @@ import {
   fetchNodeVRFs,
   fetchNodeACLs,
   fetchNodeLAGs,
-  fetchNodeNeighbors,
+  fetchNodeBGPCheck,
   fetchNodeBGPStatus,
   fetchNodeEVPNStatus,
   fetchNodeConfigDB,
@@ -3084,7 +3084,7 @@ const STATE_SUBSECTIONS = [
   { id: "bgp",       label: "BGP" },
   { id: "evpn",      label: "EVPN" },
   { id: "lags",      label: "LAGs" },
-  { id: "neighbors", label: "Neighbors" },
+  { id: "bgp-check", label: "BGP Health" },
 ] as const;
 
 // Raw / debug-only data — Config DB / Intent Tree / Projection. These
@@ -4841,7 +4841,7 @@ function fetchStateSubsection(id: typeof STATE_SUBSECTIONS[number]["id"], device
     case "bgp":       return fetchNodeBGPStatus(device);
     case "evpn":      return fetchNodeEVPNStatus(device);
     case "lags":      return fetchNodeLAGs(device);
-    case "neighbors": return fetchNodeNeighbors(device);
+    case "bgp-check": return fetchNodeBGPCheck(device);
   }
 }
 
@@ -4870,10 +4870,10 @@ function renderStateSubsection(
     case "vlans":     renderResourceTable(body, data, VLAN_COLUMNS); break;
     case "acls":      renderResourceTable(body, data, ACL_COLUMNS); break;
     case "lags":      renderResourceTable(body, data, LAG_COLUMNS); break;
-    // /neighbors returns device health-checks (check/status/message); render
+    // /bgp/check returns device health-checks (check/status/message); render
     // those as a status table, falling back to the auto-table for any other
-    // shape (e.g. real LLDP neighbor records).
-    case "neighbors":
+    // shape.
+    case "bgp-check":
       if (isHealthCheckList(data)) renderResourceTable(body, data, HEALTH_COLUMNS);
       else renderAutoTable(body, data);
       break;
@@ -4917,7 +4917,7 @@ function statusTone(value: string): "ok" | "warn" | "down" {
 }
 
 // renderBGPStatus — BGP /status returns
-//   { local_as, router_id, loopback_ip, neighbors: [{address, vrf, type, remote_as, admin_status}], evpn_peers: [string] }
+//   { local_as, router_id, loopback_ip, neighbors: [{neighbor_ip, vrf, type, remote_as, admin_status}], evpn_peers: [string] }
 // Rendered as: top-level facts as labeled rows + neighbors table +
 // EVPN peer chips. Falls back to generic tree for unfamiliar shapes.
 function renderBGPStatus(body: HTMLElement, data: unknown): void {

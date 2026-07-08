@@ -1,6 +1,6 @@
 // Browser smoke: the State tab renders LAGs (curated table + status pills) and
-// Neighbors (device health-checks → status table). Self-contained for LAGs
-// (creates a port-channel, verifies, deletes); Neighbors is read live.
+// BGP Health (device health-checks → status table). Self-contained for LAGs
+// (creates a port-channel, verifies, deletes); BGP Health is read live.
 
 import puppeteer from "puppeteer-core";
 import { authenticatePage, skipIfNotDeployed, loginCookie } from "./_auth.mjs";
@@ -58,9 +58,9 @@ try {
   expect(/PortChannel99/.test(lags.text), `LAGs: shows the created port-channel`);
   expect(lags.pill, `LAGs: admin/oper rendered as status pills`);
 
-  const nbr = await sectionText(page, "Neighbors");
-  expect(nbr.table && /Status/.test(nbr.text) && /Check/.test(nbr.text), `Neighbors: health-check status table (Status/Check columns)`);
-  expect(nbr.pill, `Neighbors: status rendered as a pill`);
+  const nbr = await sectionText(page, "BGP Health");
+  expect(nbr.table && /Status/.test(nbr.text) && /Check/.test(nbr.text), `BGP Health: health-check status table (Status/Check columns)`);
+  expect(nbr.pill, `BGP Health: status rendered as a pill`);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;

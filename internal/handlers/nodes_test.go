@@ -343,10 +343,11 @@ func TestCreateTopologyLink_Success(t *testing.T) {
 }
 
 // TestDeleteTopologyLink_Success verifies that DELETE /api/topology/links/{device}/{interface}
-// forwards to newtron's DELETE topology/link/{device}/{interface}.
+// (newtcon's own REST surface) forwards to newtron's POST topology/delete-link
+// with the colon-joined endpoint in the body (newtron #426).
 func TestDeleteTopologyLink_Success(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/newtron/v1/networks/default/topology/links/spine1/Ethernet0" {
+		if r.Method != http.MethodPost || r.URL.Path != "/newtron/v1/networks/default/topology/delete-link" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")

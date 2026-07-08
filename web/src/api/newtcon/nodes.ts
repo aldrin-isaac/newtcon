@@ -73,9 +73,11 @@ export async function fetchNodeLAGs(device: string, network?: string): Promise<u
   return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/lags`, network));
 }
 
-// fetchNodeNeighbors returns neighbors.
-export async function fetchNodeNeighbors(device: string, network?: string): Promise<unknown> {
-  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/neighbors`, network));
+// fetchNodeBGPCheck returns the device BGP health-check summary
+// (check/status/message rows). Was fetchNodeNeighbors → /neighbors, an alias
+// newtron #426 deleted; /bgp/check is the honest, sole path.
+export async function fetchNodeBGPCheck(device: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/bgp/check`, network));
 }
 
 // fetchNodeBGPStatus returns BGP status.

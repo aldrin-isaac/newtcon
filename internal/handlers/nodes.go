@@ -46,7 +46,7 @@ type NodesDeps struct {
 //	GET  /api/networks/{netID}/nodes/{device}/vrfs                     — VRFs
 //	GET  /api/networks/{netID}/nodes/{device}/acls                     — ACLs
 //	GET  /api/networks/{netID}/nodes/{device}/lags                     — LAGs
-//	GET  /api/networks/{netID}/nodes/{device}/neighbors                — neighbors
+//	GET  /api/networks/{netID}/nodes/{device}/bgp/check                — BGP health check
 //	GET  /api/networks/{netID}/nodes/{device}/bgp/status               — BGP status
 //	GET  /api/networks/{netID}/nodes/{device}/evpn/status              — EVPN status
 //	GET  /api/networks/{netID}/nodes/{device}/configdb                 — full CONFIG_DB snapshot
@@ -185,13 +185,14 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		}, "/api/networks/"+netID+"/nodes/"+device+"/lags")
 	}))
 
-	// Neighbors.
-	mux.Handle("GET /api/networks/{netID}/nodes/{device}/neighbors", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// BGP health check (was /neighbors — an alias newtron #426 deleted; the
+	// payload is device health-checks, not adjacency, hence the honest name).
+	mux.Handle("GET /api/networks/{netID}/nodes/{device}/bgp/check", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		netID := r.PathValue("netID")
 		device := r.PathValue("device")
 		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
-			return c.NodeNeighbors(ctx, netID, device)
-		}, "/api/networks/"+netID+"/nodes/"+device+"/neighbors")
+			return c.NodeBGPCheck(ctx, netID, device)
+		}, "/api/networks/"+netID+"/nodes/"+device+"/bgp/check")
 	}))
 
 	// BGP status.

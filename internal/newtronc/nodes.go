@@ -134,11 +134,12 @@ func (c *Client) NodeLAGs(ctx context.Context, network, device string) (json.Raw
 	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/lags", network, device))
 }
 
-// NodeNeighbors calls GET /networks/{netID}/nodes/{device}/neighbor.
-//
-// Substrate: pkg/newtron/api/handler.go line 116.
-func (c *Client) NodeNeighbors(ctx context.Context, network, device string) (json.RawMessage, error) {
-	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/neighbors", network, device))
+// NodeBGPCheck calls GET /networks/{netID}/nodes/{device}/bgp/check — the
+// device BGP health-check summary (check/status/message rows). newtron #426
+// deleted the /neighbors alias that returned this same payload under an
+// adjacency name; /bgp/check is the sole path now.
+func (c *Client) NodeBGPCheck(ctx context.Context, network, device string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/bgp/check", network, device))
 }
 
 // NodeBGPStatus calls GET /networks/{netID}/nodes/{device}/bgp/status.
@@ -392,12 +393,16 @@ func (c *Client) CreateTopologyLink(ctx context.Context, network string, body an
 	return c.nodePostBody(ctx, fmt.Sprintf("/networks/%s/topology/create-link", network), body)
 }
 
-// DeleteTopologyLink removes the link containing the given endpoint.
-// Endpoint is "device:interface" — one endpoint uniquely identifies the link
-// (handler_network.go). URL path: /topology/links/{device}/{interface}.
+// DeleteTopologyLink removes the link containing the given endpoint. newtron
+// #426 replaced the REST DELETE /topology/links/{device}/{interface} with an
+// RPC verb paired with create-link:
+//
+//	POST /topology/delete-link   { "endpoint": "device:interface" }
+//
+// One endpoint uniquely identifies the link. Response: { "deleted": "device:interface" }.
 func (c *Client) DeleteTopologyLink(ctx context.Context, network, device, iface string) (json.RawMessage, error) {
-	path := fmt.Sprintf("/networks/%s/topology/links/%s/%s", network, device, iface)
-	return c.nodeDelete(ctx, path)
+	body := map[string]string{"endpoint": device + ":" + iface}
+	return c.nodePostBody(ctx, fmt.Sprintf("/networks/%s/topology/delete-link", network), body)
 }
 
 // ============================================================================
