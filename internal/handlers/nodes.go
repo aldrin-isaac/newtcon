@@ -49,6 +49,7 @@ type NodesDeps struct {
 //	GET  /api/networks/{netID}/nodes/{device}/bgp/check                — BGP health check
 //	GET  /api/networks/{netID}/nodes/{device}/bgp/status               — BGP status
 //	GET  /api/networks/{netID}/nodes/{device}/evpn/status              — EVPN status
+//	GET  /api/networks/{netID}/nodes/{device}/interfaces/{iface}/status — per-interface diagnostics
 //	GET  /api/networks/{netID}/nodes/{device}/configdb                 — full CONFIG_DB snapshot
 //	GET  /api/networks/{netID}/nodes/{device}/configdb/{table}         — table keys
 //	GET  /api/networks/{netID}/nodes/{device}/configdb/{table}/{key}   — entry value
@@ -211,6 +212,17 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
 			return c.NodeEVPNStatus(ctx, netID, device)
 		}, "/api/networks/"+netID+"/nodes/"+device+"/evpn/status")
+	}))
+
+	// Per-interface operational status (counters, rates, ARP, LLDP, optics) — the
+	// console diagnostics one-call read (newtron #431).
+	mux.Handle("GET /api/networks/{netID}/nodes/{device}/interfaces/{iface}/status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		netID := r.PathValue("netID")
+		device := r.PathValue("device")
+		iface := r.PathValue("iface")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeInterfaceStatus(ctx, netID, device, iface)
+		}, "/api/networks/"+netID+"/nodes/"+device+"/interfaces/"+iface+"/status")
 	}))
 
 	// CONFIG_DB snapshot.
