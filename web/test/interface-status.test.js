@@ -5,8 +5,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  formatBps, formatPps, formatCount, lldpFarEnd, counterPairs,
-  hasCounterAlerts, neighborLines,
+  formatBps, formatPps, formatCount, formatSpeed, lldpFarEnd, counterPairs,
+  hasCounterAlerts, neighborLines, memberSummaries,
 } from "../dist/interface-status.js";
 
 describe("formatBps", () => {
@@ -85,6 +85,45 @@ describe("hasCounterAlerts", () => {
     assert.equal(hasCounterAlerts({ rx_errors: 0, tx_errors: 0, rx_discards: 0, tx_discards: 0 }), false);
     assert.equal(hasCounterAlerts({ tx_discards: 2 }), true);
     assert.equal(hasCounterAlerts(null), false);
+  });
+});
+
+describe("formatSpeed", () => {
+  test("renders SONiC Mbps strings as G/M", () => {
+    assert.equal(formatSpeed("40000"), "40G");
+    assert.equal(formatSpeed("100000"), "100G");
+    assert.equal(formatSpeed("2500"), "2.5G");
+    assert.equal(formatSpeed("100"), "100M");
+  });
+  test("guards the -vs STATE_DB sentinel and garbage (newtron #441)", () => {
+    assert.equal(formatSpeed("4294967295"), "—", "uint32 sentinel is not a speed");
+    assert.equal(formatSpeed(4294967295), "—");
+    assert.equal(formatSpeed(undefined), "—");
+    assert.equal(formatSpeed("0"), "—");
+    assert.equal(formatSpeed("nope"), "—");
+  });
+});
+
+describe("memberSummaries", () => {
+  test("shapes LAG/SVI members: name, up flag, sentinel-guarded speed", () => {
+    assert.deepEqual(
+      memberSummaries([
+        { name: "Ethernet8", admin_status: "up", oper_status: "up", speed: "40000" },
+        { name: "Ethernet12", admin_status: "up", oper_status: "down", speed: "4294967295" },
+      ]),
+      [
+        { name: "Ethernet8", up: true, speed: "40G" },
+        { name: "Ethernet12", up: false, speed: "—" },
+      ],
+    );
+  });
+  test("falls back to admin_status when oper is absent", () => {
+    assert.deepEqual(memberSummaries([{ name: "Ethernet0", admin_status: "up" }]),
+      [{ name: "Ethernet0", up: true, speed: "—" }]);
+  });
+  test("drops nameless entries; tolerates non-arrays (physical ports omit members)", () => {
+    assert.deepEqual(memberSummaries([{ admin_status: "up" }]), []);
+    assert.deepEqual(memberSummaries(undefined), []);
   });
 });
 

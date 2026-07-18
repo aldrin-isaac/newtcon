@@ -139,6 +139,7 @@ import {
 } from "./device-interfaces.js";
 import {
   formatBps, formatPps, lldpFarEnd, counterPairs, hasCounterAlerts, neighborLines,
+  memberSummaries,
   type InterfaceStatus,
 } from "./interface-status.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
@@ -3645,12 +3646,35 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       }
       section.appendChild(header);
 
-      // LLDP far-end — the headline. What the cable actually reaches.
+      // LLDP far-end — the headline. What the cable actually reaches. A LAG/SVI
+      // has no LLDP by design (kind-aware /status omits it and carries members
+      // instead), so the "none heard" fallback only applies to physical ports.
       const far = lldpFarEnd(s.lldp_peer);
-      const lldpRow = el("div", { className: "iface-live-lldp" + (far ? "" : " iface-live-lldp--none") });
-      lldpRow.appendChild(el("span", { className: "iface-live-lldp-label" }, "Cabled to"));
-      lldpRow.appendChild(el("span", { className: "iface-live-lldp-peer" }, far ?? "no LLDP neighbor heard"));
-      section.appendChild(lldpRow);
+      const isAggregate = Array.isArray(s.members) && s.members.length > 0;
+      if (far || !isAggregate) {
+        const lldpRow = el("div", { className: "iface-live-lldp" + (far ? "" : " iface-live-lldp--none") });
+        lldpRow.appendChild(el("span", { className: "iface-live-lldp-label" }, "Cabled to"));
+        lldpRow.appendChild(el("span", { className: "iface-live-lldp-peer" }, far ?? "no LLDP neighbor heard"));
+        section.appendChild(lldpRow);
+      }
+
+      // LAG / SVI members (kind-aware /status, newtron #441) — present only on
+      // PortChannelN / VlanN; physical ports omit the field entirely.
+      const members = memberSummaries(s.members);
+      if (members.length) {
+        const mem = el("div", { className: "iface-live-members" });
+        mem.appendChild(el("span", { className: "iface-live-members-label" }, "Members"));
+        const list = el("span", { className: "iface-live-members-list" });
+        for (const m of members) {
+          const chip = el("span", { className: "iface-live-member" + (m.up ? "" : " iface-live-member--down") });
+          chip.appendChild(el("span", { className: `iface-dot iface-dot--${m.up ? "up" : "down"}` }));
+          chip.appendChild(el("span", { className: "iface-live-member-name" }, m.name));
+          if (m.speed !== "—") chip.appendChild(el("span", { className: "iface-live-member-speed" }, m.speed));
+          list.appendChild(chip);
+        }
+        mem.appendChild(list);
+        section.appendChild(mem);
+      }
 
       // Resolved ARP neighbors (presence = resolved; absence = never resolved).
       const nbrs = neighborLines(s.neighbors);

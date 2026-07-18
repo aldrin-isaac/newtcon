@@ -24,6 +24,16 @@ export interface IfaceRates {
 
 export interface IfaceNeighbor { address?: string; mac?: string; family?: string }
 
+// IfaceMember — one member of a LAG (PortChannelN) or SVI (VlanN) bridge
+// domain, from the kind-aware /status read (newtron #441). Omitted for
+// physical ports.
+export interface IfaceMember {
+  name?: string;
+  admin_status?: string;
+  oper_status?: string;
+  speed?: string;
+}
+
 export interface IfaceLldp {
   chassis_id?: string; port_id?: string; port_description?: string;
   system_name?: string; system_description?: string;
@@ -42,6 +52,7 @@ export interface InterfaceStatus {
   neighbors?: IfaceNeighbor[];
   lldp_peer?: IfaceLldp;
   optics?: Record<string, unknown>;
+  members?: IfaceMember[];
 }
 
 // num coerces a wire value (number or numeric string) to a finite number, or
@@ -114,6 +125,40 @@ export function hasCounterAlerts(c: IfaceCounters | undefined | null): boolean {
   if (!c) return false;
   return (num(c.rx_errors) ?? 0) > 0 || (num(c.tx_errors) ?? 0) > 0
     || (num(c.rx_discards) ?? 0) > 0 || (num(c.tx_discards) ?? 0) > 0;
+}
+
+// STATE_DB's uint32 "no data" sentinel: -vs platforms report this for port
+// speed because the virtual SAI never populates a real value (newtron #441
+// wire note). Render as unknown, never as a literal.
+const SPEED_SENTINEL = 4294967295;
+
+// formatSpeed renders a SONiC port speed (Mbps as a string, e.g. "40000") as
+// an operator-friendly "40G". Guards the -vs sentinel and garbage with "—".
+export function formatSpeed(speed: unknown): string {
+  const n = num(speed);
+  if (n === undefined || n <= 0 || n >= SPEED_SENTINEL) return "—";
+  if (n >= 1000) {
+    const g = n / 1000;
+    return `${Number.isInteger(g) ? g : g.toFixed(1)}G`;
+  }
+  return `${n}M`;
+}
+
+export interface MemberSummary { name: string; up: boolean; speed: string }
+
+// memberSummaries shapes the kind-aware /status `members` array (LAG or SVI
+// bridge-domain members) for display: name, an up/down flag (oper first,
+// admin as fallback), and a sentinel-guarded speed. Entries without a name
+// are dropped; wire order (sorted by name server-side) is preserved.
+export function memberSummaries(members: IfaceMember[] | undefined | null): MemberSummary[] {
+  if (!Array.isArray(members)) return [];
+  return members
+    .filter((m) => m && typeof m === "object" && typeof m.name === "string" && m.name !== "")
+    .map((m) => ({
+      name: m.name as string,
+      up: (m.oper_status ?? m.admin_status) === "up",
+      speed: formatSpeed(m.speed),
+    }));
 }
 
 // neighborLines renders resolved ARP neighbors as "address → mac" strings.
