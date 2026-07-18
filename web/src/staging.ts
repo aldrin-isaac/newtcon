@@ -411,7 +411,10 @@ export async function applyDevice(device: string): Promise<ApplyResult> {
 const onlineCache: Map<string, { at: number; online: boolean }> = new Map();
 const ONLINE_CACHE_MS = 5_000;
 
-async function probeOnline(device: string): Promise<boolean | undefined> {
+// Exported for the apply-preview modal's Delivery section, which shows the
+// operator which mode each device's changes will apply in (see
+// deliveryLabel in apply-preview.ts) using the same probe applyDevice uses.
+export async function probeOnline(device: string): Promise<boolean | undefined> {
   const cached = onlineCache.get(device);
   if (cached && Date.now() - cached.at < ONLINE_CACHE_MS) return cached.online;
   try {

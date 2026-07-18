@@ -176,3 +176,55 @@ describe("shouldDriftCheck() — which ops are existence-probeable", () => {
     assert.equal(shouldDriftCheck({ group: "topology" }), false);
   });
 });
+
+// ---- Delivery-mode indicator helpers ----------------------------------------
+
+import { deliveryDevices, deliveryLabel } from "../dist/apply-preview.js";
+
+describe("deliveryDevices", () => {
+  const devAction = (id, device) =>
+    ({ id, group: "device", op: "action", device, actionId: "save-config", label: "Save config", body: {} });
+  const ifaceAction = (id, device, iface) =>
+    ({ id, group: "interface", op: "action", device, iface, actionId: "apply-service", label: "Bind service", body: { service: "S" } });
+
+  test("unique devices from device+interface actions, first-seen order", () => {
+    const q = [
+      ifaceAction("1", "switch2", "Ethernet0"),
+      devAction("2", "switch1"),
+      ifaceAction("3", "switch2", "Ethernet4"),
+      devAction("4", "switch3"),
+    ];
+    assert.deepEqual(deliveryDevices(q), ["switch2", "switch1", "switch3"]);
+  });
+
+  test("spec/topology/ssh items are mode-independent — excluded", () => {
+    const q = [
+      { id: "1", group: "mutation", method: "POST", path: "services", effect: "create", kind: "services", name: "S", title: "S" },
+      { id: "2", group: "topology", op: "add-link", a: "a:1", z: "b:1" },
+      { id: "3", group: "ssh-login", op: "set", scope: "network", scopeInstance: "", title: "ssh" },
+    ];
+    assert.deepEqual(deliveryDevices(q), []);
+  });
+
+  test("empty queue → empty", () => {
+    assert.deepEqual(deliveryDevices([]), []);
+  });
+});
+
+describe("deliveryLabel", () => {
+  test("offline (false) → authors intent (topology mode)", () => {
+    const d = deliveryLabel(false);
+    assert.equal(d.mode, "intent");
+    assert.match(d.label, /authors intent/);
+    assert.match(d.hint, /provision/);
+  });
+  test("online (true) → delivers to device (actuated)", () => {
+    assert.equal(deliveryLabel(true).mode, "live");
+    assert.match(deliveryLabel(true).label, /delivers to device/);
+  });
+  test("indeterminate probe mirrors applyDevice: attempts actuated delivery", () => {
+    // applyDevice only picks topology mode on a definitive false — the
+    // preview must not claim intent-authoring when the apply will try live.
+    assert.equal(deliveryLabel(undefined).mode, "live");
+  });
+});
