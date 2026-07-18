@@ -142,6 +142,7 @@ import {
   memberSummaries,
   type InterfaceStatus,
 } from "./interface-status.js";
+import { deriveIrbRows, pendingCreateVlanIds, macvpnVlanHints, type IrbRow } from "./irb-interfaces.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
 import {
   deviceServiceUsage, countServiceInstances, shapeResourceRows, isHealthCheckList,
@@ -166,6 +167,7 @@ import {
   removeFromQueue,
   pendingTopologyLinkAdds,
   enqueueInterfaceAction,
+  enqueueDeviceAction,
   enqueuePortConfig,
   enqueueTopologyRemoveLink,
   deviceQueue,
@@ -3376,10 +3378,12 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
   // un-deployed/unreachable node) must NOT hide the ports or block staging
   // services. So the live read can fail and we still render every platform port.
   let liveUnavailable = false;
-  const [profile, topo, liveRaw] = await Promise.all([
+  const [profile, topo, liveRaw, liveVlans] = await Promise.all([
     fetchSpecDetail("nodes", device).catch(() => null),
     fetchTopology().catch(() => null),
     fetchNodeInterfaces(device).catch(() => { liveUnavailable = true; return null; }),
+    // Live VLAN read for the IRB section — best-effort like the interface read.
+    fetchNodeVLANs(device).catch(() => null),
   ]);
   const platform = (profile as { platform?: string } | null)?.platform ?? "";
   const devEntry = ((topo as { nodes?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.nodes ?? {})[device] ?? {};
@@ -3396,13 +3400,19 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
     : liveRaw && typeof liveRaw === "object" ? [liveRaw as LiveIface] : [];
 
   const rows = buildDeviceInterfaceView({ inventory, topoPorts, live, bindings, links });
+  const reload = (): void => { void buildAndRenderIfaceView(host, device); };
   if (rows.length === 0) {
     host.textContent = "";
     host.appendChild(el("p", { className: "topology-empty" },
       "No interfaces — this node has no platform (no port inventory) and no configured ports."));
+    renderIrbSection(host, device, devEntry.steps, liveVlans, reload);
     return;
   }
-  renderIfaceTable(host, device, rows, liveUnavailable, () => { void buildAndRenderIfaceView(host, device); });
+  renderIfaceTable(host, device, rows, liveUnavailable, reload);
+  // IRB interfaces (SVIs) — a VlanN section below the physical ports. An
+  // irb-type service binds ON the SVI (newtron #434+), so the SVI needs a row
+  // to be discoverable and actionable from the console.
+  renderIrbSection(host, device, devEntry.steps, liveVlans, reload);
 }
 
 const IFACE_FILTERS: { id: import("./device-interfaces.js").ViewFilter; label: string }[] = [
@@ -3721,6 +3731,151 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       section.appendChild(el("p", { className: "iface-live-unavail" },
         "Live status unavailable — device not reachable (deploy + provision to read runtime state)."));
     });
+}
+
+// renderIrbSection — the "IRB interfaces (VLAN)" section under the physical
+// port table. An irb-type service binds ON the SVI (Vlan{N}); this section
+// makes SVIs discoverable and actionable: existing ones (live read + topology
+// intent + staged create-vlan, joined by deriveIrbRows) render as expandable
+// rows with the same LIVE STATUS panel and Apply-service action physical
+// ports get, and "+ Add VLAN interface" stages a create-vlan through the
+// normal queue (so the Apply-All modal's Delivery chip applies to it too).
+// The right VLAN id is usually pinned by a macvpn — the add form surfaces
+// those as hints.
+function renderIrbSection(
+  host: HTMLElement,
+  device: string,
+  steps: unknown,
+  liveVlans: unknown,
+  reload: () => void,
+): void {
+  const rows = deriveIrbRows({
+    steps,
+    liveVlans,
+    pendingVlanIds: pendingCreateVlanIds(deviceQueue(device)),
+  });
+
+  const section = el("div", { className: "irb-section" });
+  const head = el("div", { className: "irb-section-head" });
+  head.appendChild(el("h4", { className: "irb-section-title" }, "IRB interfaces (VLAN)"));
+  const addBtn = el("button", { type: "button", className: "iface-action-btn" }, "+ Add VLAN interface");
+  head.appendChild(addBtn);
+  section.appendChild(head);
+
+  const formHost = el("div", { className: "irb-add-form-host" });
+  section.appendChild(formHost);
+  addBtn.addEventListener("click", () => { void openAddVlanForm(formHost, device, reload); });
+
+  if (rows.length === 0) {
+    section.appendChild(el("p", { className: "irb-section-empty" },
+      "No VLAN interfaces. An IRB-type service (irb / evpn-irb) is applied on a VLAN interface — add one to create the SVI, then bind the service on it."));
+  } else {
+    const table = el("div", { className: "irb-rows" });
+    for (const row of rows) table.appendChild(renderIrbRow(device, row, reload));
+    section.appendChild(table);
+  }
+  host.appendChild(section);
+}
+
+function renderIrbRow(device: string, row: IrbRow, reload: () => void): HTMLElement {
+  const wrap = el("div", { className: "irb-row-wrap" });
+  const line = el("div", { className: "irb-row", tabIndex: 0 });
+
+  // Status dot: live svi state when known; otherwise the source badge tells it.
+  const dotState = row.svi === "up" ? "up" : row.svi === "down" ? "down" : "unknown";
+  line.appendChild(el("span", { className: `iface-dot iface-dot--${dotState}` }));
+  line.appendChild(el("span", { className: "iface-name" }, row.name));
+  if (row.source !== "live") {
+    line.appendChild(el("span", {
+      className: "irb-source-chip",
+      title: row.source === "intent"
+        ? "Authored in the topology — not observed live (device unreachable or not yet provisioned)."
+        : "Staged in the pending queue — Save to apply.",
+    }, row.source === "intent" ? "intent" : "pending"));
+  }
+  const meta: string[] = [];
+  if (row.l2Vni !== undefined) meta.push(`L2VNI ${row.l2Vni}`);
+  if (row.macvpn) meta.push(row.macvpn);
+  if (row.memberCount !== undefined) meta.push(`${row.memberCount} member${row.memberCount === 1 ? "" : "s"}`);
+  line.appendChild(el("span", { className: "irb-row-meta" }, meta.join(" · ") || "—"));
+  if (row.service) line.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+  wrap.appendChild(line);
+
+  // Expand-in-place: LIVE STATUS (kind-aware — members) + actions.
+  const detail = el("div", { className: "irb-row-detail" });
+  detail.hidden = true;
+  wrap.appendChild(detail);
+  let built = false;
+  const toggle = (): void => {
+    detail.hidden = !detail.hidden;
+    line.classList.toggle("irb-row--expanded", !detail.hidden);
+    if (!detail.hidden && !built) {
+      built = true;
+      renderIfaceLiveStatus(detail, device, row.name);
+      const actions = el("div", { className: "iface-actions" });
+      const formHost = el("div", { className: "iface-action-form-host" });
+      const apply = el("button", { type: "button", className: "iface-action-btn" }, row.service ? "Re-apply service" : "Apply service");
+      apply.addEventListener("click", () => openIfaceForm(formHost, device, row.name, findIfaceAction("Service", "apply-service"), reload));
+      actions.appendChild(apply);
+      const del = el("button", { type: "button", className: "iface-action-btn iface-action-btn--danger" }, "Delete VLAN");
+      del.addEventListener("click", () => {
+        enqueueDeviceAction(device, "delete-vlan", `Delete VLAN ${row.vlanId} (SVI ${row.name})`, { id: row.vlanId }, true);
+        showToast({ kind: "success", title: "Queued", body: `Delete VLAN ${row.vlanId} — Save to apply.` });
+        reload();
+      });
+      actions.appendChild(del);
+      detail.appendChild(actions);
+      detail.appendChild(formHost);
+    }
+  };
+  line.addEventListener("click", toggle);
+  line.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+  return wrap;
+}
+
+// openAddVlanForm — inline create-vlan form for the IRB section. The macvpn
+// pins the VLAN id for an irb service, so authored macvpns surface as hints.
+async function openAddVlanForm(formHost: HTMLElement, device: string, reload: () => void): Promise<void> {
+  formHost.textContent = "";
+  const form = el("form", { className: "iface-action-form" });
+  form.appendChild(el("p", { className: "iface-action-form-title" }, "Add VLAN interface (SVI)"));
+  const row = el("div", { className: "iface-field" });
+  row.appendChild(el("label", { className: "iface-field-label" }, "VLAN ID *"));
+  const input = el("input", { type: "number", className: "form-control", placeholder: "1–4094" }) as HTMLInputElement;
+  row.appendChild(input);
+  form.appendChild(row);
+  const hintEl = el("p", { className: "form-help-text" }, "Creates VLAN N; SONiC materializes the VlanN interface. Then apply the IRB service on it.");
+  form.appendChild(hintEl);
+  const errOut = el("div", { className: "form-error-out" });
+  form.appendChild(errOut);
+  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
+  cancel.addEventListener("click", () => { formHost.textContent = ""; });
+  const queueBtn = el("button", { type: "submit", className: "btn btn-primary btn-sm" }, "Queue");
+  btnRow.append(cancel, queueBtn);
+  form.appendChild(btnRow);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const id = Number(input.value);
+    if (!Number.isInteger(id) || id < 1 || id > 4094) {
+      errOut.textContent = "VLAN ID must be an integer between 1 and 4094.";
+      return;
+    }
+    enqueueDeviceAction(device, "create-vlan", `Create VLAN ${id} (SVI Vlan${id})`, { id });
+    showToast({ kind: "success", title: "Queued", body: `Create VLAN ${id} — Save to apply, then bind the IRB service on Vlan${id}.` });
+    formHost.textContent = "";
+    reload();
+  });
+  formHost.appendChild(form);
+  input.focus();
+
+  // macvpn pins, best-effort: "MACVPN pins VLAN 100" appended to the hint.
+  try {
+    const names = await fetchSpecList("macvpns");
+    const details = await Promise.all(names.map((n) => fetchSpecDetail("macvpns", n).catch(() => null)));
+    const hints = macvpnVlanHints(details.filter((d): d is Record<string, unknown> => !!d));
+    if (hints.length) hintEl.textContent += ` (${hints.join("; ")}.)`;
+  } catch { /* hints are optional */ }
 }
 
 // openPortPropsForm renders the schema-driven PortConfig form (admin_status /
