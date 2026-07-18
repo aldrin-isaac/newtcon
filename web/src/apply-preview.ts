@@ -226,3 +226,61 @@ function previewBase(p: Pending): Omit<PendingPreview, "method" | "path"> {
 function kindLabel(k: string): string {
   return k.replace(/-/g, " ");
 }
+
+// ---- Delivery-mode indicator (per-device apply semantics) -------------------
+//
+// Device-targeted actions (group "device" / "interface") apply in one of two
+// modes, decided per device by applyDevice() in staging.ts at apply time:
+//
+//   device online  → actuated apply — the change is DELIVERED to the running
+//                    switch (and recorded as intent);
+//   device offline → topology mode — the change AUTHORS INTENT only, and
+//                    actuates at the next provision.
+//
+// A topology-mode apply still reports success, so without an affordance the
+// distinction is silent — an operator can believe a policy is enforcing when
+// it is only authored (this bit us live; see the RCA-051 verification
+// exchange). These helpers back the confirm-modal's "Delivery" section: the
+// pure parts are here (testable), the async probe + DOM live in shell.ts.
+//
+// deliveryLabel mirrors applyDevice's decision EXACTLY: topology mode is
+// chosen only when the probe says definitively false; anything else
+// (true / undefined probe) attempts actuated delivery.
+
+/** deliveryDevices — unique devices in the queue whose apply is
+ *  mode-dependent (device/interface action items), in first-seen order.
+ *  Spec + topology + ssh-login items are network-level and mode-independent. */
+export function deliveryDevices(queue: readonly Pending[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of queue) {
+    if ((p.group === "device" || p.group === "interface") && p.op === "action") {
+      if (!seen.has(p.device)) { seen.add(p.device); out.push(p.device); }
+    }
+  }
+  return out;
+}
+
+export interface DeliveryLabel {
+  mode: "live" | "intent";
+  label: string;
+  hint: string;
+}
+
+/** deliveryLabel maps a probeOnline() result to the operator-facing chip.
+ *  Mirrors applyDevice(): only a definitive offline (false) selects
+ *  topology/authoring mode. */
+export function deliveryLabel(online: boolean | undefined): DeliveryLabel {
+  if (online === false) {
+    return {
+      mode: "intent",
+      label: "authors intent",
+      hint: "Device is offline — the change is recorded as intent and actuates at the next provision.",
+    };
+  }
+  return {
+    mode: "live",
+    label: "delivers to device",
+    hint: "Device is online — the change is applied to the running switch now.",
+  };
+}

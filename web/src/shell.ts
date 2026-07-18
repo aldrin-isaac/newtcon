@@ -11,8 +11,9 @@ import {
   removeFromQueue,
   discardAll,
   applyAll,
+  probeOnline,
 } from "./staging.js";
-import { previewQueue, driftVerdict, shouldDriftCheck, type ApplyPreview, type PendingPreview, type DriftVerdict } from "./apply-preview.js";
+import { previewQueue, driftVerdict, shouldDriftCheck, deliveryDevices, deliveryLabel, type ApplyPreview, type PendingPreview, type DriftVerdict } from "./apply-preview.js";
 import { apiPath } from "./api-path.js";
 import { appendEntry, buildEntry } from "./action-history.js";
 import { activeNetwork } from "./network-switcher.js";
@@ -534,6 +535,17 @@ function mountApplyPreviewModal(
   }
   card.appendChild(list);
 
+  // Delivery mode (per device). Device-targeted actions apply actuated
+  // (delivered to the running switch) when the device is online, or as
+  // authored intent (actuates at next provision) when it's offline — and a
+  // topology-mode apply still reports success, so the difference must not be
+  // silent. One chip per affected device, probed async with the same probe
+  // applyDevice uses.
+  const delivery = deliveryDevices(getQueue());
+  if (delivery.length > 0) {
+    card.appendChild(renderDeliverySection(delivery));
+  }
+
   // Device-level projection (slice #171.B). For every affected device,
   // newtron computes the projected per-device diff via in-memory replay
   // + restore. Rendered as a per-device row that starts in "fetching…"
@@ -791,6 +803,53 @@ function renderDriftSection(queue: readonly Pending[], network: string): HTMLEle
 // Fanout-and-aggregate per the newtron#193 analysis: ~50 LoC, no batch
 // endpoint required. Latency is N parallel calls; the operator can
 // click Apply before all projections resolve if they want.
+// renderDeliverySection — the per-device delivery-mode chips in the confirm
+// modal. One row per device with staged device/interface actions; each row
+// probes the device (same probe applyDevice uses) and resolves to either
+// "delivers to device" (online → actuated apply) or "authors intent" (offline
+// → topology mode, actuates at next provision). The distinction must be
+// visible because both paths report success.
+function renderDeliverySection(devices: string[]): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "apply-preview-delivery";
+  const heading = document.createElement("h3");
+  heading.className = "apply-preview-delivery-heading";
+  heading.textContent = "Delivery";
+  section.appendChild(heading);
+
+  const list = document.createElement("ul");
+  list.className = "apply-preview-delivery-list";
+  section.appendChild(list);
+
+  for (const device of devices) {
+    const row = document.createElement("li");
+    row.className = "apply-preview-delivery-row";
+    const name = document.createElement("span");
+    name.className = "apply-preview-delivery-device";
+    name.textContent = device;
+    row.appendChild(name);
+    const chip = document.createElement("span");
+    chip.className = "apply-delivery-chip apply-delivery-chip--probing";
+    chip.textContent = "checking device…";
+    row.appendChild(chip);
+    list.appendChild(row);
+
+    void probeOnline(device).then((online) => {
+      const d = deliveryLabel(online);
+      chip.className = `apply-delivery-chip apply-delivery-chip--${d.mode}`;
+      chip.textContent = d.label;
+      chip.title = d.hint;
+      if (d.mode === "intent") {
+        const note = document.createElement("span");
+        note.className = "apply-preview-delivery-note";
+        note.textContent = "offline — actuates at next provision";
+        row.appendChild(note);
+      }
+    });
+  }
+  return section;
+}
+
 function renderProjectionSection(batches: DeviceBatch[], network: string): HTMLElement {
   const section = document.createElement("section");
   section.className = "apply-preview-projection";

@@ -661,6 +661,19 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .apply-preview-drift-item--info { color: var(--color-text-secondary); }
 
 /* Per-device projection block in the apply-preview modal (slice #171.B) */
+/* Delivery-mode section — one chip per device: actuated ("delivers to
+ * device") vs authored-only ("authors intent", actuates at provision). */
+.apply-preview-delivery { padding: var(--space-sm) var(--space-lg); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface); }
+.apply-preview-delivery-heading { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin: 0 0 var(--space-2xs); color: var(--color-text-primary); }
+.apply-preview-delivery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2xs); }
+.apply-preview-delivery-row { display: flex; align-items: center; gap: var(--space-sm); font-size: var(--text-sm); }
+.apply-preview-delivery-device { font-family: var(--font-mono); color: var(--color-text-primary); }
+.apply-delivery-chip { font-size: var(--text-2xs); padding: 1px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border-default); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-medium); }
+.apply-delivery-chip--probing { color: var(--color-text-muted); font-style: italic; text-transform: none; letter-spacing: normal; }
+.apply-delivery-chip--live { color: var(--color-success, #1a7f37); border-color: var(--color-success, #1a7f37); background: var(--color-success-bg, rgba(26,127,55,0.08)); }
+.apply-delivery-chip--intent { color: var(--color-warning); border-color: var(--color-warning); background: var(--color-warning-bg, rgba(154,103,0,0.08)); }
+.apply-preview-delivery-note { font-size: var(--text-2xs); color: var(--color-text-muted); }
+
 .apply-preview-projection { padding: var(--space-sm) var(--space-lg); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface); }
 .apply-preview-projection-heading { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin: 0 0 var(--space-2xs); color: var(--color-text-primary); }
 .apply-preview-projection-blurb { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 var(--space-sm); }
