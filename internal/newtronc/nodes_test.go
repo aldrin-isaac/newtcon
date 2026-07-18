@@ -117,6 +117,28 @@ func TestClient_NodeConfigDBEntry_Success(t *testing.T) {
 	}
 }
 
+// TestClient_NodeInterfaceStatus_Success verifies the per-interface diagnostics
+// read hits the .../interfaces/{iface}/status path (newtron #431).
+func TestClient_NodeInterfaceStatus_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/status" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"name":"Ethernet0","oper_status":"up"},"error":""}`)
+	}))
+	defer srv.Close()
+
+	c := newtronc.New(srv.URL)
+	raw, err := c.NodeInterfaceStatus(context.Background(), "default", "switch1", "Ethernet0")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if raw == nil {
+		t.Fatal("expected non-nil RawMessage")
+	}
+}
+
 // ============================================================================
 // Topology write operations
 // ============================================================================

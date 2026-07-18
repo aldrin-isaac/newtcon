@@ -156,6 +156,15 @@ func (c *Client) NodeEVPNStatus(ctx context.Context, network, device string) (js
 	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/evpn/status", network, device))
 }
 
+// NodeInterfaceStatus calls GET /networks/{netID}/nodes/{device}/interfaces/{iface}/status
+// — newtron #431's one-call operational diagnostic for a port: admin/oper state,
+// cumulative counters, SONiC-computed rates (bps/pps + FEC BER), resolved ARP
+// neighbors, LLDP far-end, and (on physical platforms) transceiver optics. This is
+// the read that lets the console localize a link failure without SSH.
+func (c *Client) NodeInterfaceStatus(ctx context.Context, network, device, iface string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/status", network, device, iface))
+}
+
 // NodeConfigDB calls GET /networks/{netID}/nodes/{device}/configdb.
 //
 // Substrate: pkg/newtron/api/handler.go line 150.

@@ -61,6 +61,7 @@ import {
   fetchNodeBGPCheck,
   fetchNodeBGPStatus,
   fetchNodeEVPNStatus,
+  fetchInterfaceStatus,
   fetchNodeConfigDB,
   fetchNodeConfigDBTable,
   fetchNodeConfigDBEntry,
@@ -136,6 +137,11 @@ import {
   type LiveIface,
   type PlatformPort,
 } from "./device-interfaces.js";
+import {
+  formatBps, formatPps, lldpFarEnd, counterPairs, hasCounterAlerts, neighborLines,
+  memberSummaries,
+  type InterfaceStatus,
+} from "./interface-status.js";
 import { INTERFACE_ACTIONS, type ActionDef, type ActionField } from "./topology-actions.js";
 import {
   deviceServiceUsage, countServiceInstances, shapeResourceRows, isHealthCheckList,
@@ -3548,6 +3554,10 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
   for (const [k, v] of props) { dl.appendChild(el("dt", {}, k)); dl.appendChild(el("dd", {}, v)); }
   host.appendChild(dl);
 
+  // Live operational diagnostics (counters/rates/ARP/LLDP) — fetched lazily on
+  // expand. Best-effort: an un-deployed / unreachable device just shows a note.
+  renderIfaceLiveStatus(host, device, row.name);
+
   // Service binding.
   if (row.service) {
     const svc = el("div", { className: "iface-detail-svc" });
@@ -3609,6 +3619,108 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
     raw.appendChild(renderValue(row.live));
     host.appendChild(raw);
   }
+}
+
+// renderIfaceLiveStatus fetches the per-interface operational diagnostic
+// (newtron #431) and renders it into the expanded row: the LLDP far-end (the
+// wiring truth — what the port is actually cabled to), resolved ARP neighbors,
+// SONiC-computed rates, and cumulative counters (errors/discards flagged). This
+// is what turns "the link is down" into a localizable picture without SSH.
+// Best-effort: an un-deployed / unreachable device renders a single note. On a
+// platform without COUNTERS_DB (or with no LLDP heard), those blocks are simply
+// absent — newtron omits them and we render only what's present.
+function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string): void {
+  const section = el("div", { className: "iface-live" });
+  section.appendChild(el("p", { className: "iface-live-loading" }, "Loading live status…"));
+  host.appendChild(section);
+
+  void fetchInterfaceStatus(device, iface)
+    .then((raw) => {
+      const s = (raw && typeof raw === "object" ? raw : {}) as InterfaceStatus;
+      section.textContent = "";
+
+      const header = el("div", { className: "iface-live-header" });
+      header.appendChild(el("span", { className: "iface-live-title" }, "Live status"));
+      if (hasCounterAlerts(s.counters)) {
+        header.appendChild(el("span", { className: "iface-live-alert", title: "Non-zero errors or discards on this port" }, "⚠ errors/discards"));
+      }
+      section.appendChild(header);
+
+      // LLDP far-end — the headline. What the cable actually reaches. A LAG/SVI
+      // has no LLDP by design (kind-aware /status omits it and carries members
+      // instead), so the "none heard" fallback only applies to physical ports.
+      const far = lldpFarEnd(s.lldp_peer);
+      const isAggregate = Array.isArray(s.members) && s.members.length > 0;
+      if (far || !isAggregate) {
+        const lldpRow = el("div", { className: "iface-live-lldp" + (far ? "" : " iface-live-lldp--none") });
+        lldpRow.appendChild(el("span", { className: "iface-live-lldp-label" }, "Cabled to"));
+        lldpRow.appendChild(el("span", { className: "iface-live-lldp-peer" }, far ?? "no LLDP neighbor heard"));
+        section.appendChild(lldpRow);
+      }
+
+      // LAG / SVI members (kind-aware /status, newtron #441) — present only on
+      // PortChannelN / VlanN; physical ports omit the field entirely.
+      const members = memberSummaries(s.members);
+      if (members.length) {
+        const mem = el("div", { className: "iface-live-members" });
+        mem.appendChild(el("span", { className: "iface-live-members-label" }, "Members"));
+        const list = el("span", { className: "iface-live-members-list" });
+        for (const m of members) {
+          const chip = el("span", { className: "iface-live-member" + (m.up ? "" : " iface-live-member--down") });
+          chip.appendChild(el("span", { className: `iface-dot iface-dot--${m.up ? "up" : "down"}` }));
+          chip.appendChild(el("span", { className: "iface-live-member-name" }, m.name));
+          if (m.speed !== "—") chip.appendChild(el("span", { className: "iface-live-member-speed" }, m.speed));
+          list.appendChild(chip);
+        }
+        mem.appendChild(list);
+        section.appendChild(mem);
+      }
+
+      // Resolved ARP neighbors (presence = resolved; absence = never resolved).
+      const nbrs = neighborLines(s.neighbors);
+      const arp = el("div", { className: "iface-live-arp" });
+      arp.appendChild(el("span", { className: "iface-live-arp-label" }, "ARP"));
+      if (nbrs.length) {
+        const list = el("span", { className: "iface-live-arp-list" });
+        for (const n of nbrs) list.appendChild(el("code", { className: "iface-live-arp-item" }, n));
+        arp.appendChild(list);
+      } else {
+        arp.appendChild(el("span", { className: "iface-live-arp-none" }, "none resolved"));
+      }
+      section.appendChild(arp);
+
+      // Rates (SONiC-computed — no client-side delta math).
+      if (s.rates) {
+        const rates = el("div", { className: "iface-live-rates" });
+        rates.appendChild(el("span", { className: "iface-live-rate" }, `Rx ${formatBps(s.rates.rx_bps)} · ${formatPps(s.rates.rx_pps)}`));
+        rates.appendChild(el("span", { className: "iface-live-rate" }, `Tx ${formatBps(s.rates.tx_bps)} · ${formatPps(s.rates.tx_pps)}`));
+        section.appendChild(rates);
+      }
+
+      // Counters — Rx/Tx table, error/discard rows flagged.
+      const pairs = counterPairs(s.counters);
+      if (pairs.length) {
+        const table = el("table", { className: "iface-live-counters" });
+        const thead = el("tr", {});
+        thead.append(el("th", {}, ""), el("th", { className: "iface-live-num" }, "Rx"), el("th", { className: "iface-live-num" }, "Tx"));
+        table.appendChild(thead);
+        for (const p of pairs) {
+          const tr = el("tr", { className: p.alert ? "iface-live-counter--alert" : "" });
+          tr.append(
+            el("td", {}, p.label),
+            el("td", { className: "iface-live-num" }, p.rx),
+            el("td", { className: "iface-live-num" }, p.tx),
+          );
+          table.appendChild(tr);
+        }
+        section.appendChild(table);
+      }
+    })
+    .catch(() => {
+      section.textContent = "";
+      section.appendChild(el("p", { className: "iface-live-unavail" },
+        "Live status unavailable — device not reachable (deploy + provision to read runtime state)."));
+    });
 }
 
 // openPortPropsForm renders the schema-driven PortConfig form (admin_status /

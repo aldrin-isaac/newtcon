@@ -1319,6 +1319,34 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
 .iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
 
+/* Per-interface live diagnostics (newtron #431): LLDP far-end, ARP, rates,
+ * counters. Rendered lazily in the expanded interface row. */
+.iface-live { margin: var(--space-sm) 0; padding: var(--space-sm); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-surface-sunken, var(--color-surface)); font-size: var(--text-2xs); display: flex; flex-direction: column; gap: var(--space-xs); }
+.iface-live-loading, .iface-live-unavail { color: var(--color-text-muted); margin: 0; }
+.iface-live-header { display: flex; align-items: center; gap: var(--space-sm); }
+.iface-live-title { text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-medium); color: var(--color-text-secondary); }
+.iface-live-alert { color: var(--color-danger); font-weight: var(--weight-medium); }
+.iface-live-lldp { display: flex; gap: var(--space-sm); align-items: baseline; }
+.iface-live-lldp-label, .iface-live-arp-label { color: var(--color-text-secondary); min-width: 4.5em; }
+.iface-live-lldp-peer { font-family: var(--font-mono); color: var(--color-text-primary); font-weight: var(--weight-medium); }
+.iface-live-lldp--none .iface-live-lldp-peer { color: var(--color-text-muted); font-weight: var(--weight-regular); font-style: italic; }
+.iface-live-members { display: flex; gap: var(--space-sm); align-items: baseline; }
+.iface-live-members-label { color: var(--color-text-secondary); min-width: 4.5em; }
+.iface-live-members-list { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.iface-live-member { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); }
+.iface-live-member--down { color: var(--color-text-muted); }
+.iface-live-member-speed { color: var(--color-text-secondary); font-size: 0.9em; }
+.iface-live-arp { display: flex; gap: var(--space-sm); align-items: baseline; }
+.iface-live-arp-list { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.iface-live-arp-item { font-family: var(--font-mono); }
+.iface-live-arp-none { color: var(--color-text-muted); font-style: italic; }
+.iface-live-rates { display: flex; gap: var(--space-md); font-family: var(--font-mono); color: var(--color-text-secondary); }
+.iface-live-counters { border-collapse: collapse; font-family: var(--font-mono); }
+.iface-live-counters th { text-align: left; color: var(--color-text-muted); font-weight: var(--weight-regular); padding: 0 var(--space-sm) 2px 0; }
+.iface-live-counters td { padding: 1px var(--space-sm) 1px 0; }
+.iface-live-num { text-align: right; font-variant-numeric: tabular-nums; }
+.iface-live-counter--alert td { color: var(--color-danger); }
+
 /* Tailored State resource tables (VRFs / VLANs / ACLs). */
 .resource-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
 .resource-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }

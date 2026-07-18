@@ -90,6 +90,13 @@ export async function fetchNodeEVPNStatus(device: string, network?: string): Pro
   return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/evpn/status`, network));
 }
 
+// fetchInterfaceStatus returns the per-interface operational diagnostic
+// (counters, rates, ARP, LLDP far-end, optics) for one port — newtron #431.
+// Typed as InterfaceStatus by the caller; raw here.
+export async function fetchInterfaceStatus(device: string, iface: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/interfaces/${encodeURIComponent(iface)}/status`, network));
+}
+
 // fetchNodeConfigDB returns the full CONFIG_DB snapshot.
 export async function fetchNodeConfigDB(device: string, network?: string): Promise<unknown> {
   return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/configdb`, network));
