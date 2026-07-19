@@ -41,6 +41,15 @@
 .nav-icon { display: inline-flex; align-items: center; color: var(--color-text-muted); }
 .nav-item--active .nav-icon { color: var(--color-accent); }
 .sidebar-footer { padding-top: var(--space-sm); border-top: 1px solid var(--color-border-subtle); }
+.theme-toggle {
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm); width: 100%;
+  margin-bottom: var(--space-2xs);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer;
+}
+.theme-toggle:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+
 .palette-trigger {
   display: flex; align-items: center; gap: var(--space-sm);
   padding: var(--space-xs) var(--space-sm); width: 100%;

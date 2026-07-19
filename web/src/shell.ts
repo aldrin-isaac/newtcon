@@ -33,6 +33,28 @@ import { setupNetworkSwitcher } from "./network-switcher.js";
 import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
+import { initTheme, toggleTheme, currentTheme } from "./theme.js";
+
+// ---- Theme toggle ---------------------------------------------------------
+// The button lives in the sidebar footer (index.html); theme.ts owns the
+// data-theme stamp + persistence. The icon/label always advertise the theme
+// you would SWITCH TO (moon = "go dark", sun = "go light").
+
+function syncThemeToggle(): void {
+  const icon = document.getElementById("theme-toggle-icon");
+  const label = document.getElementById("theme-toggle-label");
+  const dark = currentTheme() === "dark";
+  if (icon) icon.innerHTML = iconSVG(dark ? "sun" : "moon");
+  if (label) label.textContent = dark ? "Light theme" : "Dark theme";
+}
+
+function setupThemeToggle(): void {
+  document.getElementById("theme-toggle")?.addEventListener("click", () => {
+    toggleTheme();
+    syncThemeToggle();
+  });
+  syncThemeToggle();
+}
 
 // ---- Icon hydration -------------------------------------------------------
 
@@ -960,6 +982,8 @@ function renderProjectionRow(initial: DeviceProjection): {
 
 async function boot(): Promise<void> {
   hydrateIcons();
+  initTheme();
+  setupThemeToggle();
   watchForNewIcons();
   // Auth gate runs first: the workspace only renders once whoami succeeds or
   // the operator signs in. The overlay markup lives in index.html; auth-gate.ts

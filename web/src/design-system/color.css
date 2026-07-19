@@ -1,6 +1,10 @@
 /* Color tokens for newtcon — semantic, restrained, operator-readable. */
 
 :root {
+  /* Native controls (select, date inputs, scrollbars) follow color-scheme,
+   * not our tokens — declare it per theme so they match. */
+  color-scheme: light;
+
   --color-bg:                  #f5f5f0;
   --color-surface:             #ffffff;
   --color-surface-raised:      #ffffff;
@@ -75,4 +79,75 @@
   --shadow-lg:    0 10px 15px -3px rgb(28 25 23 / 0.08), 0 4px 6px -2px rgb(28 25 23 / 0.04);
   --shadow-overlay: 0 20px 25px -5px rgb(28 25 23 / 0.10), 0 10px 10px -5px rgb(28 25 23 / 0.04);
   --shadow-drag:  0 4px 8px rgb(28 25 23 / 0.18);
+}
+/* Dark theme token set (uplift 3.2 draft) — warm-stone darks mirroring the
+ * light theme's warm neutrals; hues keep their semantic identity but are
+ * re-tuned for dark surfaces (lighter fills, deeper bgs).
+ *
+ * Mechanism: JS always stamps data-theme on <html> at boot
+ * (stored preference ?? prefers-color-scheme), so CSS needs exactly ONE
+ * dark block — no @media duplication. */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg:                  #171512;
+  --color-surface:             #1f1d19;
+  --color-surface-raised:      #262420;
+  --color-surface-sunken:      #121110;
+  --color-surface-hover:       #2a2723;
+  --color-surface-pressed:     #33302a;
+
+  --color-text-primary:        #e8e5e0;
+  --color-text-secondary:      #a8a29a;
+  --color-text-muted:          #7d7871;
+  --color-text-disabled:       #55524c;
+  --color-text-on-accent:      #ffffff;
+
+  --color-border-subtle:       #2e2b26;
+  --color-border-default:      #3a362f;
+  --color-border-strong:       #55524c;
+
+  --color-accent:              #6d9dc4;
+  --color-accent-hover:        #82aed2;
+  --color-accent-pressed:      #5b8cb4;
+  --color-accent-bg:           #1d2b38;
+  --color-accent-bg-hover:     #24384a;
+  --color-accent-border:       #35516b;
+
+  --color-success:             #58a878;
+  --color-success-bg:          #16281d;
+  --color-success-border:      #2a4a36;
+
+  --color-warning:             #cf9448;
+  --color-warning-bg:          #2c2214;
+  --color-warning-border:      #55401f;
+
+  --color-danger:              #d66a5e;
+  --color-danger-bg:           #301a17;
+  --color-danger-border:       #58291f;
+
+  --color-info:                #8ba2b5;
+  --color-info-bg:             #1d242b;
+  --color-info-border:         #37434f;
+
+  --color-drift:               #a37fe8;
+  --color-drift-bg:            #251b38;
+  --color-drift-border:        #453268;
+
+  --color-warning-strong:      #e0a55c;
+  --color-danger-strong:       #e07f72;
+
+  /* Terminal raw viewers are dark by design in BOTH themes — unchanged. */
+
+  --color-surface-recessed:    #24211d;
+
+  --color-scrim:               rgb(0 0 0 / 0.6);
+
+  --shadow-xs:    0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm:    0 1px 2px 0 rgb(0 0 0 / 0.35), 0 1px 3px 0 rgb(0 0 0 / 0.3);
+  --shadow-md:    0 2px 4px -1px rgb(0 0 0 / 0.4), 0 4px 6px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg:    0 10px 15px -3px rgb(0 0 0 / 0.45), 0 4px 6px -2px rgb(0 0 0 / 0.3);
+  --shadow-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 10px 10px -5px rgb(0 0 0 / 0.3);
+  --shadow-drag:  0 4px 8px rgb(0 0 0 / 0.5);
 }
