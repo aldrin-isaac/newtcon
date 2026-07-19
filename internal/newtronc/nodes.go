@@ -134,6 +134,15 @@ func (c *Client) NodeLAGs(ctx context.Context, network, device string) (json.Raw
 	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/lags", network, device))
 }
 
+// NodeDBTable calls GET /networks/{netID}/nodes/{device}/db/{db}/{table} —
+// newtron's kind-aware operational-DB read (one bulk table per call). The
+// console uses it for per-device bulk reads the per-interface status
+// endpoint would need N calls for (e.g. APPL_DB/LLDP_ENTRY_TABLE backing
+// link-truth classification, slice 4.2).
+func (c *Client) NodeDBTable(ctx context.Context, network, device, db, table string) (json.RawMessage, error) {
+	return c.nodeGet(ctx, fmt.Sprintf("/networks/%s/nodes/%s/db/%s/%s", network, device, db, table))
+}
+
 // NodeBGPCheck calls GET /networks/{netID}/nodes/{device}/bgp/check — the
 // device BGP health-check summary (check/status/message rows). newtron #426
 // deleted the /neighbors alias that returned this same payload under an

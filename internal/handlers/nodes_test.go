@@ -606,3 +606,34 @@ func TestConflictClassification_Precondition(t *testing.T) {
 		t.Errorf("kind: want precondition_failure, got %q", body.Error.Kind)
 	}
 }
+
+// TestNodeDBTableForwards verifies GET /api/.../db/{db}/{table} forwards to
+// newtron's kind-aware operational-DB read with both segments intact.
+func TestNodeDBTableForwards(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"data":{"LLDP_ENTRY_TABLE:Ethernet0":{"lldp_rem_sys_name":"switch2"}},"error":""}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{
+		Client: newtronc.New(upstream.URL),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/networks/default/nodes/switch1/db/APPL_DB/LLDP_ENTRY_TABLE", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	want := "/newtron/v1/networks/default/nodes/switch1/db/APPL_DB/LLDP_ENTRY_TABLE"
+	if gotPath != want {
+		t.Fatalf("upstream path = %q, want %q", gotPath, want)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("lldp_rem_sys_name")) {
+		t.Fatalf("body not forwarded verbatim: %s", rec.Body.String())
+	}
+}
