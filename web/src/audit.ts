@@ -120,7 +120,7 @@ function renderIntegrity(r: AuditIntegrityResult): HTMLElement {
     className: "audit-integrity audit-integrity--" + (clean ? "clean" : "broken"),
   });
   const head = el("div", { className: "audit-integrity-head" });
-  const dot = el("span", { className: "audit-integrity-dot" });
+  const dot = el("span", { className: "status-dot status-dot--lg status-dot--" + (clean ? "ok" : "error") });
   head.appendChild(dot);
   head.appendChild(el("strong", { className: "audit-integrity-title" },
     clean ? "Hash chain intact" : "Hash chain TAMPERED"));
@@ -148,7 +148,7 @@ function renderIntegrity(r: AuditIntegrityResult): HTMLElement {
 function renderIntegrityError(err: unknown): HTMLElement {
   const box = el("div", { className: "audit-integrity audit-integrity--unknown" });
   const head = el("div", { className: "audit-integrity-head" });
-  head.appendChild(el("span", { className: "audit-integrity-dot" }));
+  head.appendChild(el("span", { className: "status-dot status-dot--lg" }));
   head.appendChild(el("strong", { className: "audit-integrity-title" },
     integrityErrorTitle(err)));
   box.appendChild(head);

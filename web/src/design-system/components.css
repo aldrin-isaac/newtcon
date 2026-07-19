@@ -296,3 +296,17 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 .chip--clickable:hover { border-color: var(--color-accent); color: var(--color-text-primary); background: var(--color-surface-hover); }
 .chip--clickable:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
 .chip--ref::after { content: "→"; margin-left: 6px; opacity: 0.5; font-family: var(--font-system); }
+
+
+/* ---- Status dot — the one indicator-dot primitive (uplift 2.1) ----------
+ * States: --ok --warning --error (semantic) | --muted --faint (inert/gray)
+ * Size: base 8px | --lg 10px. SVG canvas dots (.topo-status-dot) are a
+ * fill/stroke concern and stay with the topology renderer. */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
+.status-dot--lg { width: 10px; height: 10px; }
+.status-dot--ok { background: var(--color-success); }
+.status-dot--warning { background: var(--color-warning); }
+.status-dot--error { background: var(--color-danger); }
+.status-dot--unknown { background: var(--color-text-muted); }
+.status-dot--muted { background: var(--color-text-muted); }
+.status-dot--faint { background: var(--color-border-default); }
