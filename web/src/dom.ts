@@ -19,6 +19,22 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 
 // ---- Shared recursive value renderer ----------------------------------------
 
+// copyable — leaf values in the raw tree copy themselves on click, with a
+// brief "copied" flash. Redacted values never come through here (the
+// ssh_pass path renders its own span), so nothing sensitive is copyable.
+function copyable(span: HTMLElement): HTMLElement {
+  span.classList.add("detail-copyable");
+  span.title = "Click to copy";
+  span.addEventListener("click", () => {
+    const text = span.textContent ?? "";
+    void navigator.clipboard?.writeText(text).then(() => {
+      span.classList.add("detail-copied");
+      window.setTimeout(() => span.classList.remove("detail-copied"), 900);
+    }).catch(() => { /* clipboard unavailable — the click is a no-op */ });
+  });
+  return span;
+}
+
 export function renderValue(value: unknown): HTMLElement | Text {
   if (value === null || value === undefined) {
     return el("span", { className: "detail-null" }, "—");
@@ -74,10 +90,10 @@ export function renderValue(value: unknown): HTMLElement | Text {
     return dl;
   }
   if (typeof value === "boolean") {
-    return el("span", { className: "detail-bool" }, value ? "true" : "false");
+    return copyable(el("span", { className: "detail-bool" }, value ? "true" : "false"));
   }
   if (typeof value === "number") {
-    return el("span", { className: "detail-num" }, String(value));
+    return copyable(el("span", { className: "detail-num" }, String(value)));
   }
-  return el("span", { className: "detail-str" }, String(value));
+  return copyable(el("span", { className: "detail-str" }, String(value)));
 }

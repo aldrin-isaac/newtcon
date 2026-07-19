@@ -414,6 +414,11 @@
 }
 .detail-num { color: var(--color-success); }
 .detail-str { color: var(--color-text-primary); }
+/* Leaf values copy on click; the flash confirms without a toast. */
+.detail-copyable { cursor: copy; border-radius: var(--radius-xs); }
+.detail-copyable:hover { background: var(--color-accent-bg); }
+.detail-copied { background: var(--color-success-bg); transition: background var(--duration-fast) var(--ease-standard); }
+.detail-copied::after { content: " copied"; color: var(--color-success); font-size: var(--text-2xs); }
 /* Collapsible branches: nested objects/arrays fold behind their key.
    The wrap spans both kv-grid columns; the summary mirrors the dt voice
    with a rotating caret; the body carries the same indent guide. */
@@ -1491,7 +1496,35 @@
 .iface-action-btn--danger:hover { background: var(--color-danger-bg); }
 
 /* CONFIG_DB navigator */
-.configdb-tables { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin-bottom: var(--space-sm); }
+/* Config-DB navigation restyled to the raw-tree branch idiom (operator
+   feedback: browser-default lists were unreadable). Tables and keys are
+   caret rows matching .detail-branch-summary; entries open into the same
+   typed tree with indent guides. */
+.configdb-tables, .configdb-keys { list-style: none; margin: 0; padding: 0; }
+.configdb-tables { font-family: var(--font-mono); font-size: var(--text-xs); }
+.configdb-table-item, .configdb-key-item {
+  cursor: pointer; padding: 2px 0; color: var(--color-accent); font-weight: var(--weight-medium);
+}
+.configdb-table-item::before, .configdb-key-item::before {
+  content: "▸"; display: inline-block; margin-right: var(--space-2xs);
+  color: var(--color-text-muted); font-size: 0.8em;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.configdb-table-item.configdb-open::before, .configdb-key-item.configdb-open::before { transform: rotate(90deg); }
+.configdb-table-item:hover, .configdb-key-item:hover { color: var(--color-accent-hover); }
+.configdb-table-item:focus-visible, .configdb-key-item:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+.configdb-keys {
+  margin: var(--space-2xs) 0 var(--space-2xs) var(--space-2xs);
+  padding-left: var(--space-sm); border-left: 2px solid var(--color-accent-border);
+}
+.configdb-key-item { font-weight: var(--weight-regular); }
+.configdb-entry {
+  margin: var(--space-2xs) 0 var(--space-xs) var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface-recessed);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
 .configdb-table-btn {
   padding: 2px var(--space-xs);
   font-family: var(--font-mono);
@@ -2119,18 +2152,6 @@
 }
 
 /* Raw (debugging) disclosure at the drawer bottom */
-.node-raw-wrap {
-  margin-top: var(--space-md);
-  border-top: 1px dashed var(--color-border-subtle);
-  padding-top: var(--space-sm);
-}
-.node-raw-summary {
-  cursor: pointer;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-}
 .node-raw-body { margin-top: var(--space-xs); }
 .node-raw-section {
   border: 1px solid var(--color-border-subtle);

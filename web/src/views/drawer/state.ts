@@ -393,15 +393,16 @@ function humanizeKey(key: string): string {
   return titled.join(" ");
 }
 
-// renderRawSection — collapsed disclosure rendering the three
-// power-user / debugging surfaces (Config DB · Projection · Intent
-// Tree). Hidden by default below the primary tab panels.
-export function renderRawSection(host: HTMLElement, device: string): void {
-  const wrap = el("details", { className: "disclosure node-raw-wrap" }) as HTMLDetailsElement;
-  const sum = el("summary", { className: "node-raw-summary" }, "Raw (debugging)");
-  wrap.appendChild(sum);
+// renderDebugTab — the Debug tab: the three power-user surfaces
+// (Config DB · Projection · Intent Tree) as lazy per-section
+// disclosures. Promoted from a "Raw (debugging)" disclosure buried
+// below the tab panels to a first-class tab (operator request).
+export function renderDebugTab(host: HTMLElement, device: string): void {
+  host.textContent = "";
+  host.appendChild(el("p", { className: "node-spec-intro" },
+    "Raw device state for debugging — fetched on expand. Values copy on click."));
   const inner = el("div", { className: "node-raw-body" });
-  wrap.appendChild(inner);
+  host.appendChild(inner);
 
   for (const sec of RAW_SECTIONS) {
     const d = el("details", { className: "disclosure node-raw-section" }) as HTMLDetailsElement;
@@ -434,6 +435,5 @@ export function renderRawSection(host: HTMLElement, device: string): void {
     inner.appendChild(d);
   }
 
-  host.appendChild(wrap);
 }
 

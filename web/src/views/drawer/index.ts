@@ -10,7 +10,7 @@
 // ONE remaining temp import (dissolves in uplift 1.4): isProvisioning lives
 // with the topology poll in app.ts until the Topology view extracts.
 
-// NODE_TABS — the 6 primary tabs the device drawer surfaces. Down from
+// NODE_TABS — the primary tabs the device drawer surfaces. Down from
 // 14 (collapsed VLANs / VRFs / ACLs / BGP / EVPN / LAGs / Neighbors
 // under "State"; tucked Config DB / Intent Tree / Projection under a
 // "Raw" disclosure rendered below the panels). Ordered by operator
@@ -38,13 +38,14 @@ import { showToast } from "../../toast.js";
 import { type TopologyViewMode } from "../../topology-view-mode.js";
 import { displaySchemaFor, kindTitleFor, openDetail } from "../specs/index.js";
 import { renderInterfaceTab } from "./interfaces.js";
-import { renderRawSection, renderStateTab } from "./state.js";
+import { renderDebugTab, renderStateTab } from "./state.js";
 const NODE_TABS = [
   { id: "interfaces", label: "Interfaces" },
   { id: "state",      label: "State" },
   { id: "spec",       label: "Spec" },
   { id: "drift",      label: "Drift" },
   { id: "history",    label: "History" },
+  { id: "debug",      label: "Debug" },
 ] as const;
 
 type NodeTabId = typeof NODE_TABS[number]["id"];
@@ -458,6 +459,7 @@ export function renderConfigDBTab(container: HTMLElement, device: string, tableM
     let keysLoaded = false;
 
     const toggleTable = (): void => {
+      tableItem.classList.toggle("configdb-open", keysContainer.hidden);
       if (keysContainer.hidden) {
         keysContainer.hidden = false;
         if (!keysLoaded) {
@@ -487,6 +489,7 @@ export function renderConfigDBTab(container: HTMLElement, device: string, tableM
                 let entryLoaded = false;
 
                 const toggleKey = (): void => {
+                  keyItem.classList.toggle("configdb-open", entryContent.hidden);
                   if (entryContent.hidden) {
                     entryContent.hidden = false;
                     if (!entryLoaded) {
@@ -965,7 +968,6 @@ export function openNodeDrawer(device: string, viewMode?: TopologyViewMode): voi
   // Raw (debugging) disclosure — Config DB / Projection / Intent
   // Tree tucked away below the primary panels. Most operators never
   // open it; the ones who need it know where to look.
-  renderRawSection(content, device);
 
   // Pick the default tab based on the view-mode the drawer was
   // opened from: Spec view → Spec; Lab/Physical → Summary (the
@@ -1085,6 +1087,10 @@ function loadNodeTab(id: NodeTabId, container: HTMLElement, device: string): voi
 
     case "state":
       void renderStateTab(container, device);
+      break;
+
+    case "debug":
+      renderDebugTab(container, device);
       break;
 
     case "spec": {
