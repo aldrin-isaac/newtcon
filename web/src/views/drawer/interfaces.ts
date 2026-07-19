@@ -13,11 +13,12 @@
 // list already fetched by the tab loader; the rest is fetched here and joined
 // via buildDeviceInterfaceView (pure).
 import { apiPath } from "../../api-path.js";
+import { loadDeviceModel } from "../../device-model.js";
 import { fetchPlatformPorts, fetchSpecDetail, fetchSpecList } from "../../api/newtcon/network.js";
-import { fetchInterfaceStatus, fetchNodeInterfaces, fetchNodeVLANs, fetchTopology } from "../../api/newtcon/nodes.js";
+import { fetchInterfaceStatus, fetchTopology } from "../../api/newtcon/nodes.js";
 import { fetchSchema } from "../../api/newtcon/schema.js";
 import { confirmInline } from "../../confirm-inline.js";
-import { type InterfaceRow, type LiveIface, type PlatformPort, applyFilter as applyIfaceFilter, buildDeviceInterfaceView, countView, deriveDeviceBindings, linksForDevice } from "../../device-interfaces.js";
+import { type InterfaceRow, applyFilter as applyIfaceFilter, buildDeviceInterfaceView, countView, deriveDeviceBindings, linksForDevice } from "../../device-interfaces.js";
 import { el, renderValue } from "../../dom.js";
 import { type InterfaceStatus, counterPairs, formatBps, formatPps, hasCounterAlerts, lldpFarEnd, memberSummaries, neighborLines } from "../../interface-status.js";
 import { type IrbRow, deriveIrbRows, macvpnVlanHints, pendingCreateVlanIds } from "../../irb-interfaces.js";
@@ -43,27 +44,13 @@ async function buildAndRenderIfaceView(host: HTMLElement, device: string): Promi
   // live interface read is a best-effort oper-status overlay; its absence (an
   // un-deployed/unreachable node) must NOT hide the ports or block staging
   // services. So the live read can fail and we still render every platform port.
-  let liveUnavailable = false;
-  const [profile, topo, liveRaw, liveVlans] = await Promise.all([
-    fetchSpecDetail("nodes", device).catch(() => null),
-    fetchTopology().catch(() => null),
-    fetchNodeInterfaces(device).catch(() => { liveUnavailable = true; return null; }),
-    // Live VLAN read for the IRB section — best-effort like the interface read.
-    fetchNodeVLANs(device).catch(() => null),
-  ]);
-  const platform = (profile as { platform?: string } | null)?.platform ?? "";
-  const devEntry = ((topo as { nodes?: Record<string, { ports?: Record<string, Record<string, unknown>>; steps?: unknown[] }> } | null)?.nodes ?? {})[device] ?? {};
+  // One fetch bundle (device-model.ts) — spec + topology + live overlays.
+  const model = await loadDeviceModel(device);
+  const { liveUnavailable, inventory, live, liveVlans } = model;
+  const devEntry = model.entry;
   const topoPorts = devEntry.ports ?? {};
   const bindings = deriveDeviceBindings(devEntry);
-  const links = linksForDevice((topo as { links?: unknown } | null)?.links, device);
-  let inventory: PlatformPort[] = [];
-  if (platform) {
-    const plat = await fetchSpecDetail("platforms", platform).catch(() => null);
-    const ports = (plat as { ports?: PlatformPort[] } | null)?.ports;
-    if (Array.isArray(ports)) inventory = ports;
-  }
-  const live = Array.isArray(liveRaw) ? liveRaw as LiveIface[]
-    : liveRaw && typeof liveRaw === "object" ? [liveRaw as LiveIface] : [];
+  const links = linksForDevice(model.links, device);
 
   const rows = buildDeviceInterfaceView({ inventory, topoPorts, live, bindings, links });
   const reload = (): void => { void buildAndRenderIfaceView(host, device); };

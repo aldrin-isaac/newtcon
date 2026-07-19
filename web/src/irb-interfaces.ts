@@ -16,6 +16,8 @@
 //
 // DOM rendering lives in app.ts (renderIrbSection); everything here is pure.
 
+import { parseDeviceSteps } from "./device-steps.js";
+
 export interface IrbRow {
   /** Interface name, e.g. "Vlan100". */
   name: string;
@@ -33,17 +35,9 @@ export interface IrbRow {
   source: "live" | "intent" | "pending";
 }
 
-interface StepLike { url?: unknown; params?: unknown }
-
 function num(v: unknown): number | undefined {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? n : undefined;
-}
-
-function param(step: StepLike, key: string): unknown {
-  const p = step.params;
-  if (!p || typeof p !== "object") return undefined;
-  return (p as Record<string, unknown>)[key];
 }
 
 /**
@@ -69,20 +63,16 @@ export function deriveIrbRows(input: {
     if (n !== undefined && n >= 1 && n <= 4094) upsert(n);
   }
 
-  // Topology intent.
-  const steps: StepLike[] = Array.isArray(input.steps)
-    ? (input.steps.filter((s) => s && typeof s === "object") as StepLike[])
-    : [];
-  for (const s of steps) {
-    const url = typeof s.url === "string" ? s.url : "";
-    if (url === "/create-vlan") {
-      const id = num(param(s, "vlan_id") ?? param(s, "id"));
+  // Topology intent — walked over the shared parser (device-steps.ts).
+  for (const step of parseDeviceSteps(input.steps)) {
+    if (step.verb === "create-vlan" && !step.iface) {
+      const id = num(step.params.vlan_id ?? step.params.id);
       if (id !== undefined) { const r = upsert(id); if (r.source !== "live") r.source = "intent"; }
     }
-    if (url === "/bind-macvpn") {
-      const id = num(param(s, "vlan_id"));
-      const mac = param(s, "macvpn");
-      const vni = num(param(s, "vni"));
+    if (step.verb === "bind-macvpn" && !step.iface) {
+      const id = num(step.params.vlan_id);
+      const mac = step.params.macvpn;
+      const vni = num(step.params.vni);
       if (id !== undefined) {
         const r = upsert(id);
         if (r.source !== "live") r.source = "intent";
@@ -90,14 +80,16 @@ export function deriveIrbRows(input: {
         if (vni !== undefined && r.l2Vni === undefined) r.l2Vni = vni;
       }
     }
-    const m = /^\/interfaces\/Vlan(\d+)\/apply-service$/.exec(url);
-    if (m) {
-      const id = num(m[1]);
-      const svc = param(s, "service");
-      if (id !== undefined) {
-        const r = upsert(id);
-        if (r.source !== "live") r.source = "intent";
-        if (typeof svc === "string" && svc !== "") r.service = svc;
+    if (step.verb === "apply-service" && step.iface) {
+      const m = /^Vlan(\d+)$/.exec(step.iface);
+      if (m) {
+        const id = num(m[1]);
+        const svc = step.params.service;
+        if (id !== undefined) {
+          const r = upsert(id);
+          if (r.source !== "live") r.source = "intent";
+          if (typeof svc === "string" && svc !== "") r.service = svc;
+        }
       }
     }
   }
