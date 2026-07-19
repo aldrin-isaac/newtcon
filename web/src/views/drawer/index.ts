@@ -278,7 +278,7 @@ function renderSpecValue(row: import("../../spec-detail-shape.js").SpecRow): Nod
 function renderRefChip(refKind: string, name: string): HTMLElement {
   const chip = el("button", {
     type: "button",
-    className: "spec-ref-chip",
+    className: "chip chip--mono chip--clickable chip--ref",
     title: `Open ${name}`,
   }, name) as HTMLButtonElement;
   chip.addEventListener("click", () => {

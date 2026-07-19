@@ -1397,8 +1397,8 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       viewRow.appendChild(label);
       for (const mode of ALL_VIEW_MODES) {
         const isActive = mode === viewMode;
-        const cls = ["topology-view-chip"];
-        if (isActive) cls.push("topology-view-chip--active");
+        const cls = ["chip", "chip--md", "chip--clickable"];
+        if (isActive) cls.push("chip--accent");
         const chip = el("button", {
           type: "button",
           className: cls.join(" "),
@@ -1440,7 +1440,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         const active = filterState.zones.has(z);
         const chip = el("button", {
           type: "button",
-          className: "topology-filter-chip" + (active ? " topology-filter-chip--active" : ""),
+          className: "chip chip--md chip--clickable" + (active ? " chip--accent" : ""),
         }, z) as HTMLButtonElement;
         chip.addEventListener("click", () => {
           const next = new Set(filterState.zones);

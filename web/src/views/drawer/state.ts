@@ -122,7 +122,7 @@ function renderServiceLensInto(body: HTMLElement, usage: ServiceUsage[]): void {
   for (const u of usage) {
     const card = el("div", { className: "svc-lens-card" });
     const head = el("div", { className: "svc-lens-head" });
-    head.appendChild(el("span", { className: "iface-svc-chip" }, u.service));
+    head.appendChild(el("span", { className: "chip chip--link" }, u.service));
     head.appendChild(el("span", { className: "svc-lens-count" },
       `${u.instances.length} interface${u.instances.length === 1 ? "" : "s"}`));
     card.appendChild(head);
@@ -259,7 +259,7 @@ function renderBGPStatus(body: HTMLElement, data: unknown): void {
     body.appendChild(el("p", { className: "node-subsection-label" }, "EVPN peers"));
     const chips = el("p", { className: "node-chip-row" });
     for (const p of evpnPeers) {
-      chips.appendChild(el("span", { className: "node-chip" }, String(p)));
+      chips.appendChild(el("span", { className: "chip chip--md chip--mono chip--sunken" }, String(p)));
     }
     body.appendChild(chips);
   }

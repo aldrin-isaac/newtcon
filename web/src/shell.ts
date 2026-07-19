@@ -829,14 +829,14 @@ function renderDeliverySection(devices: string[]): HTMLElement {
     name.textContent = device;
     row.appendChild(name);
     const chip = document.createElement("span");
-    chip.className = "apply-delivery-chip apply-delivery-chip--probing";
+    chip.className = "chip chip--caps chip--muted";
     chip.textContent = "checking device…";
     row.appendChild(chip);
     list.appendChild(row);
 
     void probeOnline(device).then((online) => {
       const d = deliveryLabel(online);
-      chip.className = `apply-delivery-chip apply-delivery-chip--${d.mode}`;
+      chip.className = "chip chip--caps " + (d.mode === "intent" ? "chip--warning" : "chip--success");
       chip.textContent = d.label;
       chip.title = d.hint;
       if (d.mode === "intent") {

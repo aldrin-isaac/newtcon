@@ -154,7 +154,7 @@ function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, r
   const portCell = el("td", { className: "iface-cell-port" });
   portCell.appendChild(el("span", { className: `iface-dot iface-dot--${row.status}`, title: statusTitle(row) }));
   portCell.appendChild(el("span", { className: "iface-name" }, row.name));
-  if (isPending) portCell.appendChild(el("span", { className: "iface-pending-chip", title: "Queued changes — Save to apply" }, "pending"));
+  if (isPending) portCell.appendChild(el("span", { className: "chip chip--warning", title: "Queued changes — Save to apply" }, "pending"));
   tr.appendChild(portCell);
 
   tr.appendChild(el("td", {}, el("span", { className: `iface-role iface-role--${row.role}` }, roleLabel(row.role))));
@@ -164,7 +164,7 @@ function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, r
   // Service cell: chip if bound, else an inline "+ Apply" CTA on serviceless ports.
   const svcCell = el("td", { className: "iface-cell-svc" });
   if (row.service) {
-    svcCell.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+    svcCell.appendChild(el("span", { className: "chip chip--link" }, row.service));
   } else {
     const apply = el("button", { type: "button", className: "iface-apply-cta" }, "+ Apply");
     apply.addEventListener("click", (e) => { e.stopPropagation(); expand(true); });
@@ -224,7 +224,7 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
   // Service binding.
   if (row.service) {
     const svc = el("div", { className: "iface-detail-svc" });
-    svc.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+    svc.appendChild(el("span", { className: "chip chip--link" }, row.service));
     if (row.l2l3) svc.appendChild(el("span", { className: "iface-detail-svc-meta" }, row.l2l3));
     host.appendChild(svc);
   }
@@ -233,7 +233,7 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
   const queued = deviceQueue(device).filter((p) => p.group === "interface" && (p as { iface?: string }).iface === row.name);
   if (queued.length > 0) {
     const q = el("div", { className: "iface-detail-queued" });
-    q.appendChild(el("span", { className: "iface-pending-chip" }, "pending"));
+    q.appendChild(el("span", { className: "chip chip--warning" }, "pending"));
     q.appendChild(el("span", { className: "iface-detail-queued-list" }, queued.map((p) => (p as { label: string }).label).join(" · ")));
     host.appendChild(q);
   }
@@ -440,7 +440,7 @@ function renderIrbRow(device: string, row: IrbRow, reload: () => void): HTMLElem
   line.appendChild(el("span", { className: "iface-name" }, row.name));
   if (row.source !== "live") {
     line.appendChild(el("span", {
-      className: "irb-source-chip",
+      className: "chip chip--sm chip--dashed chip--muted",
       title: row.source === "intent"
         ? "Authored in the topology — not observed live (device unreachable or not yet provisioned)."
         : "Staged in the pending queue — Save to apply.",
@@ -451,7 +451,7 @@ function renderIrbRow(device: string, row: IrbRow, reload: () => void): HTMLElem
   if (row.macvpn) meta.push(row.macvpn);
   if (row.memberCount !== undefined) meta.push(`${row.memberCount} member${row.memberCount === 1 ? "" : "s"}`);
   line.appendChild(el("span", { className: "irb-row-meta" }, meta.join(" · ") || "—"));
-  if (row.service) line.appendChild(el("span", { className: "iface-svc-chip" }, row.service));
+  if (row.service) line.appendChild(el("span", { className: "chip chip--link" }, row.service));
   wrap.appendChild(line);
 
   // Expand-in-place: LIVE STATUS (kind-aware — members) + actions.

@@ -45,7 +45,7 @@ try {
   await new Promise((r) => setTimeout(r, 1500));
   // View-mode gating (post-#210): lab lifecycle lives in the Lab view.
   await page.evaluate(() => {
-    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+    const chip = Array.from(document.querySelectorAll(".topology-view-row .chip"))
       .find((el) => el.textContent.trim() === "Lab");
     if (chip instanceof HTMLElement) chip.click();
   });
