@@ -126,6 +126,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-live.ts          → pure live-layer derivations (uplift 4.4): COUNTERS_DB parsing (port-name-map, RATES), portUtilization, heat tiers, shouldPollLive gate
     topology-focus.ts         → pure focus-mode derivations (uplift 4.5): neighborsOf/focusDim + nearestInDirection arrow-nav
     fabric-health.ts          → pure header-strip aggregation (uplift 4.5): aggregateFabricHealth folds underlay/drift/lab maps into three toned cells
+    drawer-resize.ts          → user-resizable drawer width: left-edge grab handle (drag; double-click resets), clampDrawerWidth bounds, per-browser persistence via --drawer-user-width (both docked + overlay modes; contents reflow — tables are width:100%)
     fabric-health-strip.ts    → the header fabric-health strip: 60s visible-only sweep (bgp/check + drift per device + lab status), mounts #fabric-strip, click → Topology
     topology-palette.ts       → resolvePalette + resolveDevicePalette — pure resolver from per-element actuation observation to the unified five-state palette (spec-only / actuated-ok / actuated-down / drift / unknown); foundation for the layered Topology views (slice #210.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
