@@ -34,6 +34,10 @@ const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
 const DEVICE = process.env.DEVICE || "switch1";
+// THEME=light|dark|both (default both since Phase 3.2: the console has two
+// first-class themes; dark captures get a "--dark" id suffix).
+const THEME = process.env.THEME || "both";
+const THEMES = THEME === "both" ? ["light", "dark"] : [THEME];
 
 const outRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../test/visual-baseline");
 const compareMode = process.argv.includes("--compare");
@@ -129,8 +133,9 @@ const CAPTURES = [
   } },
 ];
 
-const targets = CAPTURES.filter((c) => !filter || c.id.includes(filter));
-console.log(`${compareMode ? "compare" : "baseline"} capture: ${targets.length} view${targets.length === 1 ? "" : "s"} → ${outDir}\n`);
+const targets = CAPTURES.filter((c) => !filter || c.id.includes(filter))
+  .flatMap((c) => THEMES.map((theme) => ({ ...c, theme, id: theme === "dark" ? `${c.id}--dark` : c.id })));
+console.log(`${compareMode ? "compare" : "baseline"} capture: ${targets.length} view${targets.length === 1 ? "" : "s"} (themes: ${THEMES.join("+")}) → ${outDir}\n`);
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
@@ -143,7 +148,7 @@ try {
     const page = await browser.newPage();
     try {
       await authenticatePage(page, BASE);
-      await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
+      await page.evaluateOnNewDocument((n, t) => { try { localStorage.setItem("newtcon.activeNetwork", n); localStorage.setItem("newtcon.theme", t); } catch { /* */ } }, NET, cap.theme);
       await gotoApp(page, BASE);
       await cap.run(page);
       const file = path.join(outDir, `${cap.id}.png`);
