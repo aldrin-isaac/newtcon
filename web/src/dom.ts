@@ -34,13 +34,39 @@ export function renderValue(value: unknown): HTMLElement | Text {
     return list;
   }
   if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return el("span", { className: "detail-null" }, "(empty)");
     const dl = el("dl", { className: "kv detail-object" });
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      dl.appendChild(el("dt", {}, k));
-      const dd = el("dd");
+    for (const [k, v] of entries) {
       // Never render a device password verbatim — some reads (GET /nodes/{name})
       // return ssh_pass in the clear. Redact at any nesting depth.
-      dd.appendChild(k === "ssh_pass"
+      const redacted = k === "ssh_pass";
+      const nested = !redacted && v !== null && typeof v === "object"
+        && (Array.isArray(v) ? v.length > 0 : Object.keys(v as object).length > 0);
+      if (nested) {
+        // Non-empty object/array values collapse behind their key: a
+        // <details> branch (open by default — collapsing is the operator's
+        // move, hiding data is not ours). The wrap spans the kv grid.
+        const det = el("details", { className: "detail-branch" }) as HTMLDetailsElement;
+        det.open = true;
+        const count = Array.isArray(v) ? v.length : Object.keys(v as object).length;
+        const summary = el("summary", { className: "detail-branch-summary" });
+        summary.append(
+          el("span", { className: "detail-branch-key" }, k),
+          el("span", { className: "detail-branch-count" }, ` (${count})`),
+        );
+        det.appendChild(summary);
+        const body = el("div", { className: "detail-branch-body" });
+        body.appendChild(renderValue(v));
+        det.appendChild(body);
+        const wrap = el("div", { className: "detail-branch-wrap" });
+        wrap.appendChild(det);
+        dl.appendChild(wrap);
+        continue;
+      }
+      dl.appendChild(el("dt", {}, k));
+      const dd = el("dd");
+      dd.appendChild(redacted
         ? el("span", { className: "spec-detail-redacted" }, "••••••")
         : renderValue(v));
       dl.appendChild(dd);
