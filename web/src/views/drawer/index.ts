@@ -168,7 +168,7 @@ export function renderSpecDetailInto(container: HTMLElement, fields: SpecField[]
     const det = el("details", { className: "spec-detail-extras" });
     det.appendChild(el("summary", { className: "spec-detail-extras-summary" },
       `All fields (${shape.extras.length} additional)`));
-    const dlx = el("dl", { className: "spec-detail" });
+    const dlx = el("dl", { className: "kv spec-detail" });
     for (const row of shape.extras) {
       dlx.appendChild(el("dt", { className: "spec-detail-label spec-detail-label--extra" }, row.label));
       const dd = el("dd", { className: "spec-detail-value" });
