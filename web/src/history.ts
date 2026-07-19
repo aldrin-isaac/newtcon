@@ -15,6 +15,7 @@ import {
   clearHistory,
   loadHistory,
 } from "./action-history.js";
+import { el } from "./dom.js";
 import { activeNetwork } from "./network-switcher.js";
 import { confirmInline } from "./confirm-inline.js";
 import { planUndo, type UndoPlan } from "./undo-plan.js";
@@ -263,15 +264,3 @@ function formatTime(iso: string): string {
   }
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  Object.assign(node, attrs);
-  for (const c of children) {
-    node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-  }
-  return node;
-}

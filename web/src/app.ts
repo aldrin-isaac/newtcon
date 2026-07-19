@@ -13,8 +13,8 @@ import {
 import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief, extractUnderlyingMessage } from "./render-error.js";
 import { mountAuthorizationTab } from "./authorization.js";
-import { mountHistoryTab } from "./history.js";
-import { mountAuditTab, renderEventsTable, renderEventsError } from "./audit.js";
+import { renderEventsTable, renderEventsError } from "./audit.js";
+import { viewFor } from "./views/index.js";
 import { fetchAuditEvents, type AuditEvent } from "./api/newtcon/audit.js";
 import { emptyStateFor, TOPOLOGY_EMPTY } from "./empty-states.js";
 import {
@@ -174,21 +174,8 @@ import {
   subscribe as subscribePending,
   type SpecKind as StagingSpecKind,
 } from "./staging.js";
+import { el, renderValue } from "./dom.js";
 
-// ---- DOM helper -------------------------------------------------------------
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  Object.assign(node, attrs);
-  for (const child of children) {
-    node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
-  }
-  return node;
-}
 
 // ---- Specs tab -------------------------------------------------------------
 
@@ -1681,41 +1668,6 @@ function renderTopologyEmptyState(): HTMLElement {
   return block;
 }
 
-// ---- Shared recursive value renderer ----------------------------------------
-
-export function renderValue(value: unknown): HTMLElement | Text {
-  if (value === null || value === undefined) {
-    return el("span", { className: "detail-null" }, "—");
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) return el("span", { className: "detail-null" }, "(empty)");
-    const list = el("ol", { className: "detail-array" });
-    for (const item of value) {
-      const li = el("li");
-      li.appendChild(renderValue(item));
-      list.appendChild(li);
-    }
-    return list;
-  }
-  if (typeof value === "object") {
-    const dl = el("dl", { className: "detail-object" });
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      dl.appendChild(el("dt", {}, k));
-      const dd = el("dd");
-      // Never render a device password verbatim — some reads (GET /nodes/{name})
-      // return ssh_pass in the clear. Redact at any nesting depth.
-      dd.appendChild(k === "ssh_pass"
-        ? el("span", { className: "spec-detail-redacted" }, "••••••")
-        : renderValue(v));
-      dl.appendChild(dd);
-    }
-    return dl;
-  }
-  if (typeof value === "boolean") {
-    return el("span", { className: "detail-bool" }, value ? "true" : "false");
-  }
-  return document.createTextNode(String(value));
-}
 
 // ---- Detail drawer (spec) ---------------------------------------------------
 
@@ -6596,15 +6548,13 @@ function setupTabs(): void {
       // Stop polling newtlab status when leaving the Topology tab.
       stopTopologyPoll();
     }
-    if (isHistory) {
-      // Re-mount so newly-applied entries surface immediately when the
-      // operator opens the tab after an Apply.
-      mountHistoryTab(panelHistory as HTMLElement);
-    }
-    if (isAudit) {
-      // Re-mount so the operator gets fresh events + integrity status
-      // every time they open the tab (no auto-poll for now).
-      void mountAuditTab(panelAudit as HTMLElement);
+    // Registry-driven re-mounts (views/index.ts): fresh-data views re-mount
+    // on every activation — History so newly-applied entries surface
+    // immediately, Audit for fresh events + integrity status (no auto-poll).
+    const view = viewFor(name);
+    if (view?.remountOnActivate) {
+      const panel = document.getElementById(view.panelId);
+      if (panel) void view.mount(panel);
     }
   };
 

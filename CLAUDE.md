@@ -81,6 +81,8 @@ internal/types/               → DTOs (request/response shapes) + error envelop
 web/                          → frontend (vanilla HTML + TypeScript-as-tsc per ADR-0002)
   src/                        → source
     index.html                → root workspace HTML
+    dom.ts                    → el() + renderValue — the shared DOM helpers (consolidated from four per-module copies; uplift 1.1). renderValue redacts ssh_pass at any depth
+    views/                    → workspace view registry (registry.ts + index.ts): top-level views register {panelId, mount, remountOnActivate}; the tab dispatcher consults viewFor(). History + Audit are residents; Specs/drawer/Topology migrate here in uplift 1.2–1.4
     app.ts                    → workspace entry + tab dispatch + topology view + drawers
     workspace.css             → workspace layout (consumes design-system tokens)
     shell.ts                  → app shell (sidebar, tabs, status pill, palette)

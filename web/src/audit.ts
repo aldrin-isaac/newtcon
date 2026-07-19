@@ -17,6 +17,7 @@ import {
   type AuditIntegrityResult,
   type EventFilters,
 } from "./api/newtcon/audit.js";
+import { el } from "./dom.js";
 import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import {
@@ -414,15 +415,3 @@ function formatDetailValue(v: unknown): string {
   return String(v);
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  Object.assign(node, attrs);
-  for (const c of children) {
-    node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-  }
-  return node;
-}

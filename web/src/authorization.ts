@@ -16,6 +16,7 @@
 // this view becomes the inspector half of the editor.
 
 import { fetchAuthorization, type AuthorizationDetail } from "./api/newtcon/authorization.js";
+import { el } from "./dom.js";
 import { ApiError } from "./api/newtcon/services.js";
 import { formatErrorBrief } from "./render-error.js";
 import {
@@ -592,17 +593,3 @@ function renderWhereScope(where: Record<string, unknown>): HTMLElement {
   return list;
 }
 
-// ---- Local DOM helper (mirrors app.ts's `el` so this module stays
-// self-contained — no cross-module HTMLElement-builder dependency).
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  Object.assign(node, attrs);
-  for (const c of children) {
-    node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-  }
-  return node;
-}
