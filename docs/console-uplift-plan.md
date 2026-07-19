@@ -171,9 +171,9 @@ later re-earns scope at its phase boundary.
 | Metric | Baseline (2026-07-18) | Target |
 |---|---|---|
 | `app.ts` lines | 6,829 (of 18,427 frontend) | ≤ 800 |
-| Chip class families | 6 | 1 |
+| Chip class families | 9 (measured by 0.3 — the critique's grep undercounted) | 1 |
 | Independent topology-step parsers | 3 | 1 |
-| Raw colors in `workspace.css` | (recorded by 0.3) | 0 |
+| Raw colors in `workspace.css` | 53 (recorded by 0.3) | 0 |
 | Themes | 1 (light) | 2, both first-class |
 | Deep-linkable views | 0 | all primary views |
 | Unit tests / smokes | 695 / 30 | only up |
