@@ -864,6 +864,10 @@ export function openNodeDrawer(device: string, viewMode?: TopologyViewMode): voi
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
 
+  // Tell the router (uplift 2.4) so #/{net}/topology/device/{device} tracks
+  // the open inspector. Inert when nothing listens (unit tests).
+  document.dispatchEvent(new CustomEvent("newtcon:route-state", { detail: { device, detail: null } }));
+
   drawer.setAttribute("aria-hidden", "false");
   drawer.classList.add("open");
   content.textContent = "";

@@ -2018,6 +2018,8 @@ export async function openDetail(kind: SpecKind, kindTitle: string, name: string
   const content = document.getElementById("drawer-content");
   if (!drawer || !content) return;
 
+  announceRoute({ facet: kind, detail: name, device: null });
+
   drawer.setAttribute("aria-hidden", "false");
   drawer.classList.add("open");
   content.textContent = "";
@@ -2258,8 +2260,13 @@ function renderServiceUsage(container: HTMLElement, slug: SpecKind, name: string
 export function closeDetail(): void {
   const drawer = document.getElementById("detail-drawer");
   if (!drawer) return;
+  const wasOpen = drawer.classList.contains("open");
   drawer.setAttribute("aria-hidden", "true");
   drawer.classList.remove("open");
+  // The one drawer hosts both the spec detail and the node inspector —
+  // closing clears both params (only if it was actually open, so idempotent
+  // close calls on tab switches don't spam the router).
+  if (wasOpen) announceRoute({ detail: null, device: null });
 }
 
 
@@ -2299,6 +2306,13 @@ let activeFacet: SpecKind = "services";
 // list; the facet subnav items go inactive.
 let activeGeneral: null | "ssh" | "permissions" = null;
 
+// announceRoute — tell the router (uplift 2.4) about a params change so the
+// URL hash tracks workspace state. Fire-and-forget: with no router listening
+// (unit tests) the event is inert.
+function announceRoute(detail: Record<string, string | null>): void {
+  document.dispatchEvent(new CustomEvent("newtcon:route-state", { detail }));
+}
+
 /** specsViewDegraded — true when the schema never loaded (empty PANELS): the
  *  view mounted dead (#390). The tab dispatcher re-mounts on activation while
  *  this holds, and the error state below offers an explicit Retry. */
@@ -2306,7 +2320,35 @@ export function specsViewDegraded(): boolean {
   return PANELS.length === 0;
 }
 
+// Root of the last mount — applySpecsRoute re-mounts against it when a
+// deep link / back-forward changes the facet (uplift 2.4).
+let lastRoot: HTMLElement | null = null;
+
+/** applySpecsRoute — drive the Specs view to a hash route's facet/detail
+ *  (router-only entry point; user clicks go through the subnav handlers). */
+export async function applySpecsRoute(facet?: string, detail?: string): Promise<void> {
+  if (!lastRoot) return;
+  if (facet === "general") {
+    const key: "ssh" | "permissions" = detail === "permissions" ? "permissions" : "ssh";
+    if (activeGeneral !== key) {
+      activeGeneral = key;
+      await mountSpecsView(lastRoot);
+    }
+    return;
+  }
+  const target: SpecKind = facet && PANELS.some((p) => p.kind === facet) ? (facet as SpecKind) : "services";
+  const changed = activeGeneral !== null || activeFacet !== target;
+  activeGeneral = null;
+  activeFacet = target;
+  if (changed || specsViewDegraded()) await mountSpecsView(lastRoot);
+  if (detail) {
+    const panel = PANELS.find((p) => p.kind === target);
+    if (panel) void openDetail(target, panel.title, detail);
+  }
+}
+
 export async function mountSpecsView(root: HTMLElement): Promise<void> {
+  lastRoot = root;
   root.textContent = "";
   // Schema-driven panel discovery — fetch the kind list before
   // building the subnav. Cached for the session after the first call.
@@ -2381,6 +2423,7 @@ export async function mountSpecsView(root: HTMLElement): Promise<void> {
           closeDetail();
           activeGeneral = null;
           activeFacet = kind;
+          announceRoute({ facet: kind, detail: null });
           renderSubnav();
           renderActiveFacet();
         });
@@ -2407,6 +2450,7 @@ export async function mountSpecsView(root: HTMLElement): Promise<void> {
       btn.addEventListener("click", () => {
         closeDetail();
         activeGeneral = key;
+        announceRoute({ facet: "general", detail: key });
         renderSubnav();
         void renderActiveFacet();
       });

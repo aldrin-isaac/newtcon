@@ -9,6 +9,7 @@
 // Backend: GET /api/networks (list) + POST /api/networks (register).
 
 import { iconSVG } from "./icons.js";
+import { retargetHashToNetwork } from "./route.js";
 import { confirmInline } from "./confirm-inline.js";
 
 const STORAGE_KEY = "newtcon.activeNetwork";
@@ -30,6 +31,12 @@ export function activeNetwork(): string {
   } catch {
     return DEFAULT_NET;
   }
+}
+
+/** adoptNetwork — silently adopt a network as active (no reload). Used by the
+ *  router when the URL hash names a different network (deep-link authority). */
+export function adoptNetwork(id: string): void {
+  setActiveNetwork(id);
 }
 
 function setActiveNetwork(id: string): void {
@@ -99,6 +106,7 @@ function renderDropdown(host: HTMLElement, infos: NetworkInfo[]): void {
       });
       if (!ok) return;
       setActiveNetwork(info.id);
+      location.hash = retargetHashToNetwork(location.hash, info.id);
       window.location.reload();
     });
     host.appendChild(item);
@@ -231,6 +239,7 @@ function openRegisterModal(): void {
       }
       // 201 Created — switch to the new network and reload.
       setActiveNetwork(id);
+      location.hash = retargetHashToNetwork(location.hash, id);
       window.location.reload();
     } catch (err) {
       errorOut.textContent = String(err);
