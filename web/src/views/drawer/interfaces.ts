@@ -152,7 +152,7 @@ function renderIfaceRow(tbody: HTMLElement, device: string, row: InterfaceRow, r
 
   // Port cell: status dot + name (+ pending marker when a queued action targets it).
   const portCell = el("td", { className: "iface-cell-port" });
-  portCell.appendChild(el("span", { className: `iface-dot iface-dot--${row.status}`, title: statusTitle(row) }));
+  portCell.appendChild(el("span", { className: `status-dot status-dot--${row.status === "up" ? "ok" : row.status === "down" ? "muted" : "faint"}`, title: statusTitle(row) }));
   portCell.appendChild(el("span", { className: "iface-name" }, row.name));
   if (isPending) portCell.appendChild(el("span", { className: "chip chip--warning", title: "Queued changes — Save to apply" }, "pending"));
   tr.appendChild(portCell);
@@ -330,7 +330,7 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
         const list = el("span", { className: "iface-live-members-list" });
         for (const m of members) {
           const chip = el("span", { className: "iface-live-member" + (m.up ? "" : " iface-live-member--down") });
-          chip.appendChild(el("span", { className: `iface-dot iface-dot--${m.up ? "up" : "down"}` }));
+          chip.appendChild(el("span", { className: `status-dot status-dot--${m.up ? "ok" : "muted"}` }));
           chip.appendChild(el("span", { className: "iface-live-member-name" }, m.name));
           if (m.speed !== "—") chip.appendChild(el("span", { className: "iface-live-member-speed" }, m.speed));
           list.appendChild(chip);
@@ -436,7 +436,7 @@ function renderIrbRow(device: string, row: IrbRow, reload: () => void): HTMLElem
 
   // Status dot: live svi state when known; otherwise the source badge tells it.
   const dotState = row.svi === "up" ? "up" : row.svi === "down" ? "down" : "unknown";
-  line.appendChild(el("span", { className: `iface-dot iface-dot--${dotState}` }));
+  line.appendChild(el("span", { className: `status-dot status-dot--${dotState === "up" ? "ok" : dotState === "down" ? "muted" : "faint"}` }));
   line.appendChild(el("span", { className: "iface-name" }, row.name));
   if (row.source !== "live") {
     line.appendChild(el("span", {
