@@ -168,12 +168,23 @@ later re-earns scope at its phase boundary.
 
 ## Metrics the program is accountable to
 
-| Metric | Baseline (2026-07-18) | Target |
-|---|---|---|
-| `app.ts` lines | 6,829 (of 18,427 frontend) | ≤ 800 |
-| Chip class families | 9 (measured by 0.3 — the critique's grep undercounted) | 1 |
-| Independent topology-step parsers | 3 | 1 |
-| Raw colors in `workspace.css` | 53 (recorded by 0.3) | 0 |
-| Themes | 1 (light) | 2, both first-class |
-| Deep-linkable views | 0 | all primary views |
-| Unit tests / smokes | 695 / 30 | only up |
+| Metric | Baseline (2026-07-18) | Target | Final (2026-07-19, program complete) |
+|---|---|---|---|
+| `app.ts` lines | 6,829 (of 18,427 frontend) | ≤ 800 | **49** (ratchet ceiling) |
+| Chip class families | 9 (measured by 0.3 — the critique's grep undercounted) | 1 | **1** (ceiling 0 extra) |
+| Independent topology-step parsers | 3 | 1 | **1** (device-steps.ts) |
+| Raw colors in `workspace.css` | 53 (recorded by 0.3) | 0 | **0** (comment-aware counter, ceiling 0) |
+| Themes | 1 (light) | 2, both first-class | **2** (data-theme; system-follow default; per-browser pin) |
+| Deep-linkable views | 0 | all primary views | **all** (#/{net}/{view} + facet/detail/device params) |
+| Unit tests / smokes | 695 / 30 | only up | **770 / 40** |
+
+## Program status — COMPLETE (2026-07-19)
+
+All five phases landed: 0.1–0.3 (instruments), 1.1–1.5 (extractions),
+2.1–2.5 (primitives, error taxonomy, toasts, hash router, docked
+inspector), 3.1–3.4 (color audit, dark theme, JetBrains Mono +
+numerals, status presence), 4.1–4.5 (node cards, link truth, lenses,
+live layer, focus + fabric-health strip), 5.1–5.2 (Cmd-K verbs, history
+honesty). PRs #381–#435. Two operator decisions remain from phase
+exits: the default theme (currently system-follow) and the Phase-4
+canvas review (compare.html in web/test/visual-baseline/).
