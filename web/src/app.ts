@@ -18,79 +18,8 @@
 // ---- Tab switching ----------------------------------------------------------
 
 import { signedInOnce } from "./auth-gate.js";
-import { viewFor } from "./views/index.js";
+import { bootNetSync, startRouter } from "./router.js";
 import { closeDetail, mountSpecsView } from "./views/specs/index.js";
-import { mountTopologyTab, stopTopologyPoll } from "./views/topology/index.js";
-function setupTabs(): void {
-  const tabSpecs = document.getElementById("tab-specs");
-  const tabTopology = document.getElementById("tab-topology");
-  const tabHistory = document.getElementById("tab-history");
-  const tabAudit = document.getElementById("tab-audit");
-  const panelSpecs = document.getElementById("panel-specs");
-  const panelTopology = document.getElementById("panel-topology");
-  const panelHistory = document.getElementById("panel-history");
-  const panelAudit = document.getElementById("panel-audit");
-
-  if (!tabSpecs || !tabTopology || !tabHistory || !tabAudit ||
-      !panelSpecs || !panelTopology || !panelHistory || !panelAudit) return;
-
-  let topologyMounted = false;
-
-  // Permissions moved into Specs → General → Permissions (it's current-state
-  // network config, a sibling of the spec facets, not a top-level surface).
-  type TabName = "specs" | "topology" | "history" | "audit";
-
-  const activateTab = (name: TabName): void => {
-    // Drawers (spec detail, node inspector, sub-rule add forms) live in
-    // #detail-drawer overlaid on top of the workspace. Switching tabs
-    // changes the panel behind the drawer; leaving it open would
-    // display stale content (e.g. a Service detail floating over the
-    // Topology view). Close on every tab switch — Escape closes
-    // similarly; tab clicks should too.
-    closeDetail();
-
-    const isSpecs = name === "specs";
-    const isTopology = name === "topology";
-    const isHistory = name === "history";
-    const isAudit = name === "audit";
-
-    tabSpecs.classList.toggle("workspace-tab--active", isSpecs);
-    tabSpecs.setAttribute("aria-selected", isSpecs ? "true" : "false");
-    tabTopology.classList.toggle("workspace-tab--active", isTopology);
-    tabTopology.setAttribute("aria-selected", isTopology ? "true" : "false");
-    tabHistory.classList.toggle("workspace-tab--active", isHistory);
-    tabHistory.setAttribute("aria-selected", isHistory ? "true" : "false");
-    tabAudit.classList.toggle("workspace-tab--active", isAudit);
-    tabAudit.setAttribute("aria-selected", isAudit ? "true" : "false");
-
-    (panelSpecs as HTMLElement).hidden = !isSpecs;
-    (panelTopology as HTMLElement).hidden = !isTopology;
-    (panelHistory as HTMLElement).hidden = !isHistory;
-    (panelAudit as HTMLElement).hidden = !isAudit;
-
-    if (isTopology && !topologyMounted) {
-      topologyMounted = true;
-      mountTopologyTab(panelTopology as HTMLElement);
-    }
-    if (!isTopology) {
-      // Stop polling newtlab status when leaving the Topology tab.
-      stopTopologyPoll();
-    }
-    // Registry-driven re-mounts (views/index.ts): fresh-data views re-mount
-    // on every activation — History so newly-applied entries surface
-    // immediately, Audit for fresh events + integrity status (no auto-poll).
-    const view = viewFor(name);
-    if (view && (view.remountOnActivate || view.shouldRemount?.())) {
-      const panel = document.getElementById(view.panelId);
-      if (panel) void view.mount(panel);
-    }
-  };
-
-  tabSpecs.addEventListener("click", () => activateTab("specs"));
-  tabTopology.addEventListener("click", () => activateTab("topology"));
-  tabHistory.addEventListener("click", () => activateTab("history"));
-  tabAudit.addEventListener("click", () => activateTab("audit"));
-}
 
 // ---- Entry ------------------------------------------------------------------
 
@@ -98,9 +27,12 @@ async function mount(): Promise<void> {
   const root = document.getElementById("panel-specs");
   if (!root) return;
 
+  // Net-from-hash must win BEFORE any view fetches (deep-link authority),
+  // then the first mount, then the router applies the rest of the route
+  // (tab, facet/detail, device drawer) and starts tracking history.
+  bootNetSync();
   await mountSpecsView(root);
-
-  setupTabs();
+  startRouter();
 
   document.getElementById("drawer-close")?.addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {
