@@ -18,7 +18,7 @@
 import { parseDeviceSteps } from "./device-steps.js";
 import type { UnderlayState } from "./topology-links.js";
 
-export type LensKind = "vni" | "underlay" | "drift";
+export type LensKind = "vni" | "underlay" | "drift" | "live";
 
 export interface LensState {
   kind: LensKind | null;
@@ -89,7 +89,8 @@ export interface LensInputs {
 /** lensEffect — resolve the active lens into halo/dim/badge sets.
  *  Null lens → empty effect (canvas untouched). */
 export function lensEffect(lens: LensState, inputs: LensInputs): LensEffect {
-  if (lens.kind === null) return { halo: new Set(), dim: new Set(), badge: new Map() };
+  // live: heat renders on links (topology-live.ts); nodes stay untouched.
+  if (lens.kind === null || lens.kind === "live") return { halo: new Set(), dim: new Set(), badge: new Map() };
 
   const halo = new Set<string>();
   const dim = new Set<string>();

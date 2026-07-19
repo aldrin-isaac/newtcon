@@ -35,6 +35,7 @@ import { showContextMenu } from "../../topology-actions-ui.js";
 import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
+import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
 import { type PaletteState, resolveLabDevicePalette, resolveLabStatusText, resolveLinkPalette, resolvePhysicalDevicePalette, resolvePhysicalStatusText } from "../../topology-palette.js";
 import { type PinnedPosition, clearPositions, loadPositions, savePosition } from "../../topology-positions.js";
@@ -348,6 +349,8 @@ function renderTopologySVG(
     });
     if (link.local_device) line.setAttribute("data-local-device", link.local_device);
     if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
+    if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
+    if (link.remote_interface) line.setAttribute("data-remote-iface", link.remote_interface);
     svg.appendChild(line);
   }
 
@@ -1025,11 +1028,18 @@ function openProvisionModal(network: string, opts: { physical?: boolean } = {}):
 // call) and only re-renders the per-device status badges in place — the full
 // topology + /info + drift fetch only runs on tab mount.
 let topologyPollTimer: number | null = null;
+// Live-layer heat poll timer (slice 4.4) — owned by mountTopologyTab, but
+// cleared alongside the status poll so LEAVING the tab stops both.
+let heatPollTimer: number | null = null;
 
 export function stopTopologyPoll(): void {
   if (topologyPollTimer !== null) {
     window.clearInterval(topologyPollTimer);
     topologyPollTimer = null;
+  }
+  if (heatPollTimer !== null) {
+    window.clearInterval(heatPollTimer);
+    heatPollTimer = null;
   }
 }
 
@@ -1543,7 +1553,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const renderLensRow = (): void => {
       lensRow.textContent = "";
       lensRow.appendChild(el("span", { className: "topology-filter-label" }, "Lens:"));
-      const lensChip = (label: string, kind: "vni" | "underlay" | "drift"): void => {
+      const lensChip = (label: string, kind: "vni" | "underlay" | "drift" | "live"): void => {
         const active = lensState.kind === kind;
         const chip = el("button", {
           type: "button",
@@ -1555,12 +1565,14 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
             : { kind };
           renderLensRow();
           renderGraph();
+          syncHeatPoll();
         });
         lensRow.appendChild(chip);
       };
       lensChip("VNI", "vni");
       lensChip("Underlay", "underlay");
       lensChip("Drift", "drift");
+      lensChip("Live", "live");
       if (lensState.kind === "vni") {
         for (const vlan of availableVlans(rawDevices)) {
           const active = lensState.vlanId === vlan;
@@ -1664,6 +1676,65 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     for (const [name, dev] of Object.entries(rawDevices)) {
       interfacesByDevice.set(name, Object.keys(dev?.ports ?? {}).sort(comparePorts));
     }
+
+    // Live-layer heat poll (slice 4.4). Bounded: ONE RATES call per online
+    // device per 5s tick, and only while shouldPollLive() (topology tab
+    // visible + Live lens on). The port→OID name-map is fetched once per
+    // device per mount (it's static). Ticks patch link classes in place —
+    // no re-render, no layout churn.
+    const nameMapByDevice = new Map<string, Map<string, string>>();
+    const applyHeat = (utilByDevice: Map<string, Map<string, number>>): void => {
+      const svg = graphSlot.querySelector("svg.topology-graph");
+      if (!svg) return;
+      for (const line of svg.querySelectorAll<SVGLineElement>(".topo-link:not(.topo-link-hit)")) {
+        const ends: { local_device?: string; local_interface?: string; remote_device?: string; remote_interface?: string } = {};
+        const ld = line.getAttribute("data-local-device"); if (ld !== null) ends.local_device = ld;
+        const li = line.getAttribute("data-local-iface"); if (li !== null) ends.local_interface = li;
+        const rd = line.getAttribute("data-remote-device"); if (rd !== null) ends.remote_device = rd;
+        const ri = line.getAttribute("data-remote-iface"); if (ri !== null) ends.remote_interface = ri;
+        line.classList.remove("topo-link--heat-low", "topo-link--heat-med", "topo-link--heat-high");
+        const tier = linkHeat(ends, utilByDevice);
+        if (tier !== undefined && tier !== "idle") line.classList.add(`topo-link--heat-${tier}`);
+      }
+    };
+    const heatTick = async (): Promise<void> => {
+      if (!shouldPollLive({ tabVisible: document.visibilityState === "visible", liveLensOn: lensState.kind === "live" })) return;
+      const online = deviceNames.filter((n) => onlineByDevice.get(n) === true);
+      const utilByDevice = new Map<string, Map<string, number>>();
+      await Promise.allSettled(online.map(async (name) => {
+        let nameMap = nameMapByDevice.get(name);
+        if (!nameMap) {
+          nameMap = parsePortNameMap(await fetchNodeDBTable(name, "COUNTERS_DB", "COUNTERS_PORT_NAME_MAP"));
+          nameMapByDevice.set(name, nameMap);
+        }
+        const rates = parseRates(await fetchNodeDBTable(name, "COUNTERS_DB", "RATES"));
+        const speeds = speedsByDevice.get(name);
+        const util = new Map<string, number>();
+        for (const port of nameMap.keys()) {
+          const u = portUtilization(port, nameMap, rates, speeds?.get(port));
+          if (u !== undefined) util.set(port, u);
+        }
+        utilByDevice.set(name, util);
+      }));
+      applyHeat(utilByDevice);
+    };
+    const startHeatPoll = (): void => {
+      if (heatPollTimer !== null) return;
+      void heatTick();
+      heatPollTimer = window.setInterval(() => { void heatTick(); }, 5000);
+    };
+    const stopHeatPoll = (): void => {
+      if (heatPollTimer !== null) { window.clearInterval(heatPollTimer); heatPollTimer = null; }
+      applyHeat(new Map()); // clear any lingering heat classes
+    };
+    const syncHeatPoll = (): void => {
+      if (lensState.kind === "live") startHeatPoll();
+      else stopHeatPoll();
+    };
+    document.addEventListener("visibilitychange", () => {
+      // shouldPollLive() gates each tick; nothing to do here beyond letting
+      // the next tick no-op when hidden. Kept explicit for readability.
+    });
 
     let renderGraph: () => void;
     renderGraph = (): void => {

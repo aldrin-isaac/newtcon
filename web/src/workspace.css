@@ -289,6 +289,22 @@
 .topo-link.topo-link--verified      { stroke-dasharray: none; }
 .topo-link.topo-link--mismatch      { stroke: var(--color-danger); stroke-dasharray: none; stroke-width: 3; }
 .topo-link.topo-link--underlay-down { stroke: var(--color-danger); }
+/* Live utilization heat (slice 4.4) — color always; shimmer (a slow dash
+   march that reads as flow) only for operators who allow motion. */
+.topo-link.topo-link--heat-low  { stroke: var(--color-accent); }
+.topo-link.topo-link--heat-med  { stroke: var(--color-warning); }
+.topo-link.topo-link--heat-high { stroke: var(--color-danger); }
+@media (prefers-reduced-motion: no-preference) {
+  .topo-link--heat-low, .topo-link--heat-med, .topo-link--heat-high {
+    stroke-dasharray: 6 4;
+    animation: topo-heat-flow 1.2s linear infinite;
+  }
+  .topo-link--heat-high { animation-duration: 0.6s; }
+}
+@keyframes topo-heat-flow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
 
 /* Layered filter dimming (slice #174.E) — non-matching nodes stay in
  * place so the operator keeps context, but fade out so the filtered
@@ -2148,6 +2164,11 @@
 /* Booting devices: pulse to signal "in motion" while we wait for newtlab. */
 .topo-status-dot--booting {
   animation: topo-booting-pulse 1.4s ease-in-out infinite;
+}
+/* Boot/provision pulse honors reduced-motion: the warning color still
+ * carries the state; only the pulse is motion. */
+@media (prefers-reduced-motion: reduce) {
+  .topo-status-dot--provisioning, .topo-status-dot--booting { animation: none; }
 }
 @keyframes topo-booting-pulse {
   0%, 100% { opacity: 1; }
