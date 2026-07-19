@@ -401,20 +401,51 @@
 .subtab-panel { padding-top: var(--space-xs); }
 
 /* Recursive value renderer */
-.detail-object dt { font-family: var(--font-mono); color: var(--color-text-secondary); font-weight: var(--weight-medium); }
-.detail-object dd { margin: 0; word-break: break-word; font-family: var(--font-mono); }
-.detail-object dd > .detail-object, .detail-object dd > .detail-array { margin-top: var(--space-xs); padding-left: var(--space-sm); border-left: 2px solid var(--color-border-subtle); }
+/* Raw/debug tree (renderValue): keys and values in distinct voices —
+ * keys accent-tinted, strings primary, numbers success-tinted, booleans
+ * accent, nulls muted — with indent guides per depth. (Feedback: the
+ * undifferentiated mono dump was "horrid".) */
+.detail-object dt { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-accent); font-weight: var(--weight-medium); }
+.detail-object dt::after { content: ":"; color: var(--color-text-muted); }
+.detail-object dd { margin: 0; word-break: break-word; font-family: var(--font-mono); font-size: var(--text-xs); }
+.detail-object dd > .detail-object, .detail-object dd > .detail-array {
+  margin-top: var(--space-2xs); padding-left: var(--space-sm);
+  border-left: 2px solid var(--color-accent-border);
+}
+.detail-num { color: var(--color-success); }
+.detail-str { color: var(--color-text-primary); }
 .detail-array { margin: 0; padding-left: var(--space-md); font-size: var(--text-sm); }
 .detail-array li { margin: var(--space-2xs) 0; }
 .detail-null { color: var(--color-text-muted); font-style: italic; font-family: var(--font-system); }
 .detail-bool { color: var(--color-accent); }
 
 /* Spec-detail tailored layout (renderSpecDetailInto — labeled rows from
- * the spec's FieldDef schema). Operator labels in the system font; raw
- * values keep the mono treatment so IDs / IPs are easy to read. */
-.spec-detail-label { font-family: var(--font-system); color: var(--color-text-secondary); font-weight: var(--weight-medium); }
-.spec-detail-label--extra { font-family: var(--font-mono); color: var(--color-text-muted); }
-.spec-detail-value { margin: 0; word-break: break-word; font-family: var(--font-mono); }
+ * the spec's FieldDef schema). Redesigned from the flat dl (feedback:
+ * "labels and values are hard to distinguish"): a two-column card with
+ * hairline row separators; labels are small-caps system type, values
+ * mono primary — two clearly different voices. */
+.spec-detail {
+  display: grid; grid-template-columns: minmax(150px, max-content) 1fr;
+  gap: 0 var(--space-md);
+  background: var(--color-surface-recessed);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-2xs) var(--space-md);
+}
+.spec-detail-label, .spec-detail-value {
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+/* last row: both cells lose the hairline */
+.spec-detail > dt:nth-last-of-type(1), .spec-detail > dd:nth-last-of-type(1) { border-bottom: none; }
+.spec-detail-label {
+  font-family: var(--font-system); font-size: var(--text-2xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted); font-weight: var(--weight-medium);
+  align-self: center;
+}
+.spec-detail-label--extra { text-transform: none; letter-spacing: normal; font-family: var(--font-mono); color: var(--color-text-muted); }
+.spec-detail-value { margin: 0; word-break: break-word; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-text-primary); }
 .spec-detail-empty { color: var(--color-text-muted); font-style: italic; font-family: var(--font-system); }
 .spec-detail-extras { margin-top: var(--space-md); }
 .spec-detail-extras-summary { cursor: pointer; font-size: var(--text-xs); color: var(--color-text-muted); padding: var(--space-2xs) 0; }

@@ -50,5 +50,8 @@ export function renderValue(value: unknown): HTMLElement | Text {
   if (typeof value === "boolean") {
     return el("span", { className: "detail-bool" }, value ? "true" : "false");
   }
-  return document.createTextNode(String(value));
+  if (typeof value === "number") {
+    return el("span", { className: "detail-num" }, String(value));
+  }
+  return el("span", { className: "detail-str" }, String(value));
 }
