@@ -37,10 +37,21 @@ export function mountHistoryTab(root: HTMLElement): void {
   const network = activeNetwork();
   const entries = loadHistory(network);
 
-  root.appendChild(el("h2", { className: "view-heading" }, "Changes"));
-  root.appendChild(el("p", { className: "view-intro" },
-    "Recent Apply All runs in this network, recorded by this browser. " +
-    "Up to 50 entries; older fall off. Not a substitute for newtron's audit log."));
+  const heading = el("h2", { className: "view-heading" }, "Changes");
+  // History honesty (uplift 5.2): this record lives in localStorage — one
+  // browser's memory, not shared truth. The badge says so at a glance and
+  // the intro links to the Audit tab, which reads newtron's authoritative
+  // server-side log.
+  heading.appendChild(el("span", { className: "chip chip--sm history-scope-badge" }, "this browser only"));
+  root.appendChild(heading);
+  const intro = el("p", { className: "view-intro" },
+    "Recent Apply All runs in this network, recorded by this browser — other operators cannot see them. " +
+    "Up to 50 entries; older fall off. The shared, tamper-evident record is ");
+  const auditLink = el("button", { type: "button", className: "history-audit-link" }, "newtron's audit log");
+  auditLink.addEventListener("click", () => document.getElementById("tab-audit")?.click());
+  intro.appendChild(auditLink);
+  intro.appendChild(document.createTextNode("."));
+  root.appendChild(intro);
 
   if (entries.length === 0) {
     root.appendChild(el("p", { className: "view-empty" },
