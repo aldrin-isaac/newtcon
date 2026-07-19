@@ -35,7 +35,7 @@ import { fetchAllSchemas, fetchSchema, resolveSlugToKind, resolveSubRuleKind } f
 import { setSecret } from "../../api/newtcon/secrets.js";
 import { ApiError } from "../../api/newtcon/services.js";
 import { showSSHCredentials } from "../../api/newtcon/ssh-credentials.js";
-import { openNodeDrawer, renderErrorInto, renderSpecDetailInto, toSpecField } from "../../app.js";
+import { openNodeDrawer, renderErrorInto, renderSpecDetailInto, toSpecField } from "../drawer/index.js";
 import { mountAuthorizationTab } from "../../authorization.js";
 import { confirmInline } from "../../confirm-inline.js";
 import { el, renderValue } from "../../dom.js";

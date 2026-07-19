@@ -12,7 +12,7 @@
 // disclosures. Each fetches lazily on first expansion; sections with
 // no data show "—" inline instead of empty disclosures.
 import { fetchNodeACLs, fetchNodeBGPCheck, fetchNodeBGPStatus, fetchNodeConfigDB, fetchNodeEVPNStatus, fetchNodeIntentTree, fetchNodeLAGs, fetchNodeProjection, fetchNodeVLANs, fetchNodeVRFs, fetchTopology } from "../../api/newtcon/nodes.js";
-import { renderConfigDBTab, renderErrorInto, renderValueInto } from "../../app.js";
+import { renderConfigDBTab, renderErrorInto, renderValueInto } from "./index.js";
 import { ACL_COLUMNS, BGP_NEIGHBOR_COLUMNS, HEALTH_COLUMNS, LAG_COLUMNS, type ResourceColumn, type ServiceUsage, VLAN_COLUMNS, VRF_COLUMNS, countServiceInstances, deviceServiceUsage, isHealthCheckList, shapeResourceRows } from "../../device-resources.js";
 import { el } from "../../dom.js";
 const STATE_SUBSECTIONS = [
