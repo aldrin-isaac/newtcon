@@ -36,6 +36,12 @@ function setupDOM() {
         return child;
       },
       insertBefore(child, ref) {
+        // Real-DOM semantics: inserting a node that already has a parent
+        // MOVES it (needed by the collapse-repeats resurface path).
+        if (child.parent) {
+          const old = child.parent.children.indexOf(child);
+          if (old >= 0) child.parent.children.splice(old, 1);
+        }
         const i = ref ? this.children.indexOf(ref) : -1;
         if (i >= 0) this.children.splice(i, 0, child);
         else this.children.unshift(child);
@@ -179,5 +185,80 @@ describe("showToast()", () => {
     assert.equal(region.children.length, 2);
     const firstTitle = findByClass(region.children[0], "toast-title");
     assert.equal(firstTitle.textContent, "new");
+  });
+
+  // ---- Uplift 2.3: visible-stack cap ---------------------------------------
+
+  test("visible stack is capped: a fifth toast drops the oldest", () => {
+    for (const t of ["a", "b", "c", "d", "e"]) showToast({ kind: "info", title: t });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 4);
+    const titles = region.children.map((t) => findByClass(t, "toast-title").textContent);
+    assert.deepEqual(titles, ["e", "d", "c", "b"], "oldest (a) dropped, newest on top");
+  });
+
+  test("cap drops the oldest auto-dismissing toast before any sticky error", () => {
+    showToast({ kind: "info", title: "info-oldest" });
+    for (const t of ["e1", "e2", "e3"]) showToast({ kind: "error", title: t });
+    showToast({ kind: "error", title: "e4" });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 4);
+    const titles = region.children.map((t) => findByClass(t, "toast-title").textContent);
+    assert.deepEqual(titles, ["e4", "e3", "e2", "e1"], "the info fell off; every sticky error survives");
+  });
+
+  test("cap drops the oldest error only when errors fill the whole stack", () => {
+    for (const t of ["e1", "e2", "e3", "e4", "e5"]) showToast({ kind: "error", title: t });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 4);
+    const titles = region.children.map((t) => findByClass(t, "toast-title").textContent);
+    assert.deepEqual(titles, ["e5", "e4", "e3", "e2"]);
+  });
+
+  // ---- Uplift 2.3: collapse repeats ----------------------------------------
+
+  test("an identical toast collapses into a \u00d7N counter instead of stacking", () => {
+    showToast({ kind: "error", title: "Apply failed", body: "same reason" });
+    showToast({ kind: "error", title: "Apply failed", body: "same reason" });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 1, "no duplicate stacked");
+    assert.equal(findByClass(body, "toast-count").textContent, "\u00d72");
+    showToast({ kind: "error", title: "Apply failed", body: "same reason" });
+    assert.equal(findByClass(body, "toast-count").textContent, "\u00d73");
+  });
+
+  test("same title but different body does NOT collapse", () => {
+    showToast({ kind: "error", title: "Apply failed", body: "reason one" });
+    showToast({ kind: "error", title: "Apply failed", body: "reason two" });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 2);
+  });
+
+  test("a repeat resurfaces its toast to the top of the stack", () => {
+    showToast({ kind: "info", title: "first" });
+    showToast({ kind: "info", title: "second" });
+    showToast({ kind: "info", title: "first" });
+    const region = findByClass(body, "toast-region");
+    assert.equal(region.children.length, 2);
+    const titles = region.children.map((t) => findByClass(t, "toast-title").textContent);
+    assert.deepEqual(titles, ["first", "second"]);
+  });
+
+  test("a repeat restarts the auto-dismiss window (stale timer no-ops)", () => {
+    showToast({ kind: "info", title: "I" });
+    const toast = findByClass(body, "toast--info");
+    showToast({ kind: "info", title: "I" });
+    assert.equal(timers.length, 2, "repeat scheduled a fresh timer");
+    // Fire only the ORIGINAL timer: the bumped generation must ignore it.
+    timers[0].fired = true; timers[0].fn();
+    assert.equal(toast.removed, false, "stale timer no-ops after a repeat");
+    timers[1].fired = true; timers[1].fn();
+    assert.equal(toast.removed, true, "fresh timer dismisses");
+  });
+
+  test("collapsed error repeats stay sticky (no timer scheduled)", () => {
+    showToast({ kind: "error", title: "E" });
+    showToast({ kind: "error", title: "E" });
+    assert.equal(timers.length, 0);
   });
 });
