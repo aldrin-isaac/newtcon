@@ -127,7 +127,9 @@
 .topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; pointer-events: none; }
 .topo-link-hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 .topo-link-hit:hover + .topo-link { stroke: var(--color-accent); stroke-width: 2; }
-.topo-node rect { fill: var(--color-surface); stroke: var(--color-border-strong); stroke-width: 1.5; transition: fill var(--duration-fast) var(--ease-standard), stroke var(--duration-fast) var(--ease-standard); }
+.topo-node rect { fill: var(--color-surface-raised); stroke: var(--color-border-strong); stroke-width: 1.5; filter: drop-shadow(var(--shadow-node)); transition: fill var(--duration-fast) var(--ease-standard), stroke var(--duration-fast) var(--ease-standard); }
+.topo-node-glyph { pointer-events: none; }
+.topo-node-glyph path { fill: none; stroke: var(--color-text-muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 /* Hover + selection share one calm treatment: a soft accent fill and border.
  * :focus (not just :focus-visible) so a clicked node stays highlighted like a
  * normal selected object until you click away. */
@@ -257,8 +259,14 @@
 .topo-node.topo-elem--spec-only > rect       { stroke: var(--color-info);       stroke-dasharray: 4 3; }
 .topo-node.topo-elem--actuated-ok > rect     { stroke: var(--color-success); }
 .topo-node.topo-elem--actuated-down > rect   { stroke: var(--color-danger);     stroke-width: 2.5; }
-.topo-node.topo-elem--drift > rect           { stroke: var(--color-drift);      stroke-dasharray: 1 3; stroke-width: 2.5; }
+/* Dashed outline is RESERVED for spec-only (aesthetic law, uplift 4.1):
+   drift is solid violet — its badge + color carry the signal. */
+.topo-node.topo-elem--drift > rect           { stroke: var(--color-drift);      stroke-width: 2.5; }
 .topo-node.topo-elem--unknown > rect         { stroke: var(--color-text-muted); }
+.topo-node.topo-elem--actuated-ok .topo-node-glyph path   { stroke: var(--color-success); }
+.topo-node.topo-elem--actuated-down .topo-node-glyph path { stroke: var(--color-danger); }
+.topo-node.topo-elem--drift .topo-node-glyph path         { stroke: var(--color-drift); }
+.topo-node.topo-elem--spec-only .topo-node-glyph path     { stroke: var(--color-info); }
 /* Drift badge corner-pill stays warning-colored to remain visible
  * against a violet outline. The badge encodes the count; the outline
  * encodes state. */
@@ -269,7 +277,7 @@
 .topo-link.topo-elem--spec-only     { stroke: var(--color-info);         stroke-dasharray: 4 3; }
 .topo-link.topo-elem--actuated-ok   { stroke: var(--color-success); }
 .topo-link.topo-elem--actuated-down { stroke: var(--color-danger);       stroke-width: 2.5; }
-.topo-link.topo-elem--drift         { stroke: var(--color-drift);        stroke-dasharray: 1 3; stroke-width: 2.5; }
+.topo-link.topo-elem--drift         { stroke: var(--color-drift);        stroke-width: 2.5; }
 .topo-link.topo-elem--unknown       { stroke: var(--color-border-strong); }
 
 /* Layered filter dimming (slice #174.E) — non-matching nodes stay in

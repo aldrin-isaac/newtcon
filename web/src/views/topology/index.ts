@@ -378,9 +378,22 @@ function renderTopologySVG(
       y: String(pos.cy - NODE_H / 2),
       width: String(NODE_W),
       height: String(NODE_H),
-      rx: "4",
+      rx: "6",
     });
     g.appendChild(rect);
+
+    // Role glyph (uplift 4.1): a small silhouette anchoring the card's
+    // top-left — switch = fabric glyph, host = server glyph. Outline paths
+    // (Lucide, MIT) scaled 24→11px; stroke inherits the palette accent via CSS.
+    const glyphPath = String(node.type) === "host"
+      ? "M2 2h20v8H2zM2 14h20v8H2zM6 6h.01M6 18h.01"
+      : "M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9zM6 9v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9";
+    const glyph = svgEl("g", {
+      "class": "topo-node-glyph",
+      transform: `translate(${pos.cx - NODE_W / 2 + 7}, ${pos.cy - NODE_H / 2 + 7}) scale(${11 / 24})`,
+    });
+    glyph.appendChild(svgEl("path", { d: glyphPath }));
+    g.appendChild(glyph);
 
     const label = svgEl("text", {
       x: String(pos.cx),

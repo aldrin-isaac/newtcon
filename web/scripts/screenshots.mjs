@@ -31,6 +31,13 @@ import puppeteer from "puppeteer-core";
 import { authenticatePage, gotoApp } from "../test/smoke/_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
+// Same convenience as run-smokes.mjs: an https target with no explicit TLS
+// stance means a self-signed dev cert — without this, Node-side login fetches
+// fail SILENTLY and every capture shoots an anonymous page (learned the hard
+// way: a full baseline run "succeeded" with unauthenticated shots).
+if (BASE.startsWith("https://") && process.env.NODE_TLS_REJECT_UNAUTHORIZED === undefined) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const NET = process.env.NET || "smoke-fixture";
 const DEVICE = process.env.DEVICE || "switch1";
@@ -159,6 +166,19 @@ try {
     } catch (e) {
       results.push({ id: cap.id, ok: false, err: e.message });
       console.log(`  ✗ ${cap.id} — ${e.message.split("\n")[0]}`);
+      // Failure diagnostics: dump what the page actually looked like so a
+      // timeout is debuggable from the log alone.
+      try {
+        const state = await page.evaluate(() => JSON.stringify({
+          hash: location.hash,
+          readyState: document.readyState,
+          dataKinds: document.querySelectorAll("[data-kind]").length,
+          subnav: document.querySelectorAll(".specs-subnav-item").length,
+          specsPanelHidden: document.getElementById("panel-specs")?.hidden,
+          bodyText: (document.body?.textContent || "").replace(/\s+/g, " ").slice(0, 150),
+        }));
+        console.log(`      page state: ${state}`);
+      } catch { /* page already gone */ }
     } finally {
       await page.close().catch(() => {});
     }

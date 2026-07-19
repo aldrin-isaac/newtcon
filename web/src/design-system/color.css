@@ -84,6 +84,7 @@
   --shadow-lg:    0 10px 15px -3px rgb(28 25 23 / 0.08), 0 4px 6px -2px rgb(28 25 23 / 0.04);
   --shadow-overlay: 0 20px 25px -5px rgb(28 25 23 / 0.10), 0 10px 10px -5px rgb(28 25 23 / 0.04);
   --shadow-drag:  0 4px 8px rgb(28 25 23 / 0.18);
+  --shadow-node:  0 1px 3px rgb(28 25 23 / 0.14);
 }
 /* Dark theme token set (uplift 3.2 draft) — warm-stone darks mirroring the
  * light theme's warm neutrals; hues keep their semantic identity but are
@@ -155,4 +156,5 @@
   --shadow-lg:    0 10px 15px -3px rgb(0 0 0 / 0.45), 0 4px 6px -2px rgb(0 0 0 / 0.3);
   --shadow-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 10px 10px -5px rgb(0 0 0 / 0.3);
   --shadow-drag:  0 4px 8px rgb(0 0 0 / 0.5);
+  --shadow-node:  0 1px 3px rgb(0 0 0 / 0.45);
 }
