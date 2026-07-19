@@ -136,3 +136,15 @@ export function extractUnderlyingMessage(details: Record<string, unknown>): stri
   } catch { /* not JSON — surface the raw string */ }
   return trimmed;
 }
+
+
+/**
+ * engineOpErrorBody — one-line operator-facing reason for a failed engine
+ * operation (deploy/provision/apply): the upstream's underlying message when
+ * the error is a typed ApiError, else the plain message. (Moved from app.ts
+ * in console-uplift 1.2 — it is error-shaping, so it lives here.)
+ */
+export function engineOpErrorBody(err: unknown): string {
+  const reason = err instanceof ApiError ? extractUnderlyingMessage(err.details) : null;
+  return reason ?? (err instanceof Error ? err.message : String(err));
+}

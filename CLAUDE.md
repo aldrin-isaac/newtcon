@@ -82,7 +82,8 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
   src/                        → source
     index.html                → root workspace HTML
     dom.ts                    → el() + renderValue — the shared DOM helpers (consolidated from four per-module copies; uplift 1.1). renderValue redacts ssh_pass at any depth
-    views/                    → workspace view registry (registry.ts + index.ts): top-level views register {panelId, mount, remountOnActivate}; the tab dispatcher consults viewFor(). History + Audit are residents; Specs/drawer/Topology migrate here in uplift 1.2–1.4
+    views/                    → workspace view registry (registry.ts + index.ts): top-level views register {panelId, mount, remountOnActivate}; the tab dispatcher consults viewFor(). History + Audit are residents; drawer/Topology migrate in uplift 1.3–1.4
+    views/specs/              → the Specs view (uplift 1.2): PANELS discovery, facet subnav + General section (SSH Login/Permissions), facet panels, create/edit/override drawers, sub-rule tables, spec detail + openDetail/closeDetail. Temporary cycle with app.ts for 4 shared drawer helpers (dissolves in 1.3)
     app.ts                    → workspace entry + tab dispatch + topology view + drawers
     workspace.css             → workspace layout (consumes design-system tokens)
     shell.ts                  → app shell (sidebar, tabs, status pill, palette)
