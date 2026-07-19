@@ -35,6 +35,7 @@ import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { initTheme, toggleTheme, currentTheme } from "./theme.js";
 import { setupFabricHealthStrip } from "./fabric-health-strip.js";
+import { setupDrawerResize } from "./drawer-resize.js";
 import { type VerbContext, parseVerb } from "./verb-parser.js";
 import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
 import { fetchSpecList } from "./api/newtcon/network.js";
@@ -1074,6 +1075,7 @@ async function boot(): Promise<void> {
   setupPendingBar();
   setupNetworkSwitcher();
   setupFabricHealthStrip();
+  setupDrawerResize();
   startStatusPolling();
 }
 
