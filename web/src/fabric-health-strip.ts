@@ -1,6 +1,8 @@
-// fabric-health-strip.ts — the header fabric-health strip (uplift 4.5, #425).
-// Three cells — underlay / drift / lab — aggregated per network and visible
-// on EVERY tab (it lives in the app header). Clicking jumps to Topology.
+// fabric-health-strip.ts — the fabric-health strip (uplift 4.5, #425;
+// re-homed per operator request). Three cells — underlay / drift / lab —
+// aggregated per network. Lives in the TOPOLOGY view's header bar:
+// topology-specific health belongs to the topology view, not the global
+// chrome. Clicking triggers an immediate refresh.
 //
 // Fetch posture: one sweep at mount + every 60s — per online device one
 // bgp/check + one drift read (best-effort; a 503 just leaves that device
@@ -56,15 +58,19 @@ async function sweep(host: HTMLElement): Promise<void> {
   }
 }
 
-/** setupFabricHealthStrip — mount into #fabric-strip and keep it fresh. */
-export function setupFabricHealthStrip(): void {
-  const host = document.getElementById("fabric-strip");
-  if (!host) return;
-  host.addEventListener("click", () => {
-    location.hash = `#/${activeNetwork()}/topology`;
-  });
+let stripTimer: number | null = null;
+
+/** mountFabricHealthStrip — render the strip into the given host (the
+ *  topology header bar) and keep it fresh while that host is actually
+ *  visible. Re-mounting replaces the previous timer, so tab re-entries
+ *  never stack intervals. Click = refresh now. */
+export function mountFabricHealthStrip(host: HTMLElement): void {
+  host.title = "Fabric health — click to refresh";
+  host.addEventListener("click", () => { void sweep(host); });
+  if (stripTimer !== null) window.clearInterval(stripTimer);
   void sweep(host);
-  window.setInterval(() => {
-    if (document.visibilityState === "visible") void sweep(host);
+  stripTimer = window.setInterval(() => {
+    // offsetParent null ⇒ the topology panel is hidden — no fetches.
+    if (document.visibilityState === "visible" && host.offsetParent !== null) void sweep(host);
   }, REFRESH_MS);
 }

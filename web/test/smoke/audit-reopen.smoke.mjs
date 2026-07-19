@@ -13,6 +13,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 
+// The engine can run with the L6 audit layer disabled (as it can with L2c
+// auth off) — no events exist to expand, so the re-open behavior is
+// untestable. Skip rather than fail on that posture.
+{
+  const probe = await fetch(`${BASE}/api/networks/${NET}/audit/events?limit=1`).then((r) => r.text()).catch(() => "");
+  if (probe.includes("disabled")) {
+    console.log("SKIP: engine audit log is disabled — no events to expand");
+    process.exit(0);
+  }
+}
+
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   const page = await browser.newPage();

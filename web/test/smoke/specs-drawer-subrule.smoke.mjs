@@ -47,6 +47,10 @@ async function api(method, path, body) {
 }
 
 async function login() {
+  // Anonymous servers (auth_required:false) need no session — the login
+  // endpoint intentionally 404s there; every /api call works cookie-less.
+  const cfg = await api("GET", "/api/config");
+  try { if (JSON.parse(cfg.body)?.auth_required === false) return; } catch { /* fall through to login */ }
   const r = await api("POST", "/api/auth/login", { username: USER, password: PASSWORD });
   if (r.status !== 200) throw new Error(`login failed: ${r.status} ${r.body}`);
 }

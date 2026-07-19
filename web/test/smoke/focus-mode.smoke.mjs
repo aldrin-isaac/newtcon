@@ -21,18 +21,22 @@ try {
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  // 1. Strip lives in the header — visible from the Specs tab.
+  // 1. Strip is topology-scoped (re-homed): absent from the Specs tab,
+  //    present with all three cells in the topology header bar.
   await gotoApp(page, `${BASE}/#/${NET}/specs`, { waitUntil: "networkidle0", timeout: 30000 });
-  let stripCells = 0;
-  try {
-    await page.waitForFunction(() => document.querySelectorAll(".fabric-strip-cell").length === 3, { timeout: 45000 });
-    stripCells = 3;
-  } catch { stripCells = await page.evaluate(() => document.querySelectorAll(".fabric-strip-cell").length); }
-  expect(stripCells === 3, `fabric-health strip shows all three cells on the Specs tab (${stripCells})`);
+  await sleep(1000);
+  expect(await page.evaluate(() => !document.querySelector(".app-header .fabric-strip")),
+    "no fabric strip in the global header");
 
-  // 2. Focus mode.
+  // 2. Focus mode (+ the strip's topology home).
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 60000 });
+  let stripCells = 0;
+  try {
+    await page.waitForFunction(() => document.querySelectorAll(".topology-header-bar .fabric-strip-cell").length === 3, { timeout: 45000 });
+    stripCells = 3;
+  } catch { stripCells = await page.evaluate(() => document.querySelectorAll(".topology-header-bar .fabric-strip-cell").length); }
+  expect(stripCells === 3, `fabric-health strip shows all three cells in the topology header (${stripCells})`);
   await sleep(500);
   const first = await page.evaluate(() => {
     const g = document.querySelector(".topo-node");
