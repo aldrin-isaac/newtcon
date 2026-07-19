@@ -288,6 +288,23 @@ function renderTopologySVG(
     "aria-label": "Network topology diagram",
   });
 
+  // Canvas texture: a subtle dot grid in userSpace units, so it pans and
+  // zooms WITH the fabric (a CSS background would sit still). The rect is
+  // oversized far past any layout; bounds/fit derive from node positions,
+  // so it never affects them. Toggleable from the zoom toolbar; the
+  // preference persists per browser.
+  const gridDefs = svgEl("defs", {});
+  const gridPat = svgEl("pattern", { id: "topo-grid-pat", width: "24", height: "24", patternUnits: "userSpaceOnUse" });
+  gridPat.appendChild(svgEl("circle", { cx: "1", cy: "1", r: "1", "class": "topo-grid-dot" }));
+  gridDefs.appendChild(gridPat);
+  svg.appendChild(gridDefs);
+  const gridRect = svgEl("rect", {
+    x: "-100000", y: "-100000", width: "200000", height: "200000",
+    fill: "url(#topo-grid-pat)", "class": "topo-grid",
+  });
+  if (localStorage.getItem("newtcon.topoGrid") === "off") gridRect.classList.add("topo-grid--off");
+  svg.appendChild(gridRect);
+
   // Draw links first (under nodes). When onLinkClick is wired, each
   // visible line gets a wider invisible hit-target sibling so clicking
   // on or near the line is reliable — bare 1.5px strokes are nearly
@@ -1621,7 +1638,18 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       className: "topology-zoom-btn topology-zoom-btn--reset",
       title: "Re-run auto layout (discards manual moves)",
     }, "↺") as HTMLButtonElement;
-    zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, resetPosBtn);
+    const gridBtn = el("button", {
+      type: "button",
+      className: "topology-zoom-btn topology-grid-btn" + (localStorage.getItem("newtcon.topoGrid") === "off" ? "" : " topology-grid-btn--on"),
+      title: "Toggle canvas grid",
+    }, "⁙") as HTMLButtonElement;
+    gridBtn.addEventListener("click", () => {
+      const off = localStorage.getItem("newtcon.topoGrid") === "off";
+      try { localStorage.setItem("newtcon.topoGrid", off ? "on" : "off"); } catch { /* session-only */ }
+      gridBtn.classList.toggle("topology-grid-btn--on", off);
+      graphSlot.querySelector(".topo-grid")?.classList.toggle("topo-grid--off", !off);
+    });
+    zoomToolbar.append(zoomOutBtn, zoomInBtn, fitBtn, gridBtn, resetPosBtn);
     graphSlot.appendChild(zoomToolbar);
 
     // Navigation hint — small chip in the bottom-left of the slot so

@@ -10,6 +10,7 @@
 //     NEWTCON_TEST_PASSWORD (default "YourPaSsWoRd")
 
 import puppeteer from "puppeteer-core";
+import { authRequired } from "./_auth.mjs";
 import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
@@ -19,6 +20,11 @@ const PASSWORD = process.env.NEWTCON_TEST_PASS || "ronthenewt";
 
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
+
+if (!(await authRequired(BASE))) {
+  console.log("SKIP: server runs anonymous (auth_required:false) — the login overlay never appears");
+  process.exit(0);
+}
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,

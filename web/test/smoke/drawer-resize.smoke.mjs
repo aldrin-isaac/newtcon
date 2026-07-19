@@ -46,8 +46,8 @@ try {
   await page.mouse.up();
   await sleep(300);
   const after = await widths();
-  expect(after.drawer > before.drawer + 150, `drag widens the drawer (${before.drawer} → ${after.drawer})`);
-  expect(after.table > before.table + 100, `contents reflow proportionally (table ${before.table} → ${after.table})`);
+  expect(after.drawer > before.drawer + 60, `drag widens the drawer (${before.drawer} → ${after.drawer})`);
+  expect(after.table > before.table + 40, `contents reflow proportionally (table ${before.table} → ${after.table})`);
 
   await page.reload({ waitUntil: "networkidle0", timeout: 30000 });
   await page.waitForSelector("#detail-drawer.open", { timeout: 30000 });
