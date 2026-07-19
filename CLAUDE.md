@@ -84,8 +84,9 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     dom.ts                    → el() + renderValue — the shared DOM helpers (consolidated from four per-module copies; uplift 1.1). renderValue redacts ssh_pass at any depth
     views/                    → workspace view registry (registry.ts + index.ts): top-level views register {panelId, mount, remountOnActivate}; the tab dispatcher consults viewFor(). History + Audit are residents; drawer/Topology migrate in uplift 1.3–1.4
     views/specs/              → the Specs view (uplift 1.2): PANELS discovery, facet subnav + General section (SSH Login/Permissions), facet panels, create/edit/override drawers, sub-rule tables, spec detail + openDetail/closeDetail
-    views/drawer/             → the device drawer (uplift 1.3): index.ts = drawer core (NODE_TABS + loadNodeTab dispatch, openNodeDrawer + header, Drift/Config-DB/History tabs, lifecycle section, link drawer, shared detail-render helpers); interfaces.ts = Interfaces tab + IRB section; state.ts = State tab + Raw disclosure. One temp import (isProvisioning from app.ts) dissolves in 1.4
-    app.ts                    → workspace entry + tab dispatch + topology view + drawers
+    views/drawer/             → the device drawer (uplift 1.3): index.ts = drawer core (NODE_TABS + loadNodeTab dispatch, openNodeDrawer + header, Drift/Config-DB/History tabs, lifecycle section, link drawer, shared detail-render helpers); interfaces.ts = Interfaces tab + IRB section; state.ts = State tab + Raw disclosure. 
+    views/topology/           → the Topology view (uplift 1.4): SVG canvas + layered palette, viewport pan/zoom, layout cache, view-mode/zone/toolbar chrome, Add-link drawer, lab lifecycle modals + SSE, newtlab status poll, mountTopologyTab
+    app.ts                    → workspace entry only: mount() + setupTabs (~130 lines post-uplift-1.4; every view lives in views/)
     workspace.css             → workspace layout (consumes design-system tokens)
     shell.ts                  → app shell (sidebar, tabs, status pill, palette)
     auth-gate.ts              → login overlay + user pill + 401 redirect (slice 1.D)
