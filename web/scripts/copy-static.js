@@ -1,4 +1,4 @@
-// copy-static.js — copies *.html and *.css from web/src/ into web/dist/,
+// copy-static.js — copies *.html, *.css, *.woff2 (+ font licenses) from web/src/ into web/dist/,
 // preserving subdirectory structure.
 //
 // This script is the post-tsc step in the build pipeline defined by
@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(__dirname, "..", "src");
 const distDir = join(__dirname, "..", "dist");
 
-const STATIC_EXTENSIONS = new Set([".html", ".css"]);
+const STATIC_EXTENSIONS = new Set([".html", ".css", ".woff2", ".txt"]);
 
 /**
  * Walks srcDir recursively and copies any file whose extension is in

@@ -39,6 +39,11 @@ Three font stacks:
 
 - `--font-sans` — domain vocabulary, navigation, prose. System typeface.
 - `--font-mono` — substrate values: type badges, error codes, inline code.
+  Leads with **JetBrains Mono** (vendored woff2 in `fonts/`, OFL-1.1 — license
+  alongside), falling back to the system mono stack while it loads
+  (`font-display: swap`). Fixed-width digits make it the guarantee behind
+  "live numbers never shift layout"; `font-variant-numeric: tabular-nums` on
+  `body` extends that to proportional text on platforms whose fonts ship `tnum`.
   Signals "this is a value you can copy and use in a terminal."
 - `--font-ui` — currently `--font-sans`; split reserved for a future ADR.
 
