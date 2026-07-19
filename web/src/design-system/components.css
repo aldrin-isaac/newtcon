@@ -19,6 +19,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Universal keyboard-focus baseline (uplift 3.4): every interactive element
+ * shows the ring; more specific per-component rules may override the shape
+ * but nothing interactive is ever ringless. Mouse clicks stay clean —
+ * :focus-visible only matches keyboard-driven focus. */
+:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+
 a { color: var(--color-accent); text-decoration: none; }
 a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 
@@ -58,7 +64,7 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
 
@@ -298,7 +304,7 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 .chip--danger { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
 .chip--clickable { cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
 .chip--clickable:hover { border-color: var(--color-accent); color: var(--color-text-primary); background: var(--color-surface-hover); }
-.chip--clickable:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
+.chip--clickable:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
 .chip--ref::after { content: "→"; margin-left: 6px; opacity: 0.5; font-family: var(--font-system); }
 
 
@@ -353,7 +359,7 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
  * selection on toggle); every family keeps its own chrome (cards, counts,
  * headband titles). Apply alongside the family class on the <details>. */
 .disclosure > summary { cursor: pointer; color: var(--color-text-secondary); user-select: none; }
-.disclosure > summary:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
+.disclosure > summary:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
 .disclosure[open] > summary { color: var(--color-text-primary); }
 
 

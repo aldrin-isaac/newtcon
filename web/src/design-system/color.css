@@ -29,11 +29,16 @@
   --color-accent-bg-hover:     #d8e3ed;
   --color-accent-border:       #b8cbdb;
 
+  /* Interactive text + keyboard-focus ring. Both were referenced widely but
+   * never defined (silent fallbacks) — made real in uplift 3.4. */
+  --color-text-link:           var(--color-accent);
+  --color-focus-ring:          var(--color-accent);
+
   --color-success:             #2f7a4d;
   --color-success-bg:          #e5f1ea;
   --color-success-border:      #b8d4c2;
 
-  --color-warning:             #a76b1e;
+  --color-warning:             #9c6017;
   --color-warning-bg:          #faf0e0;
   --color-warning-border:      #e8cfa8;
 
