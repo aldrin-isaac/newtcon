@@ -25,7 +25,7 @@ import { type SpecKind, fetchSpecDetail } from "../../api/newtcon/network.js";
 import { fetchNodeConfigDBEntry, fetchNodeConfigDBTable, fetchNodeDrift, fetchNodeInfo, fetchNodeInterface, fetchNodeInterfaceBinding, fetchNodeInterfaces, fetchTopology, postNodeReconcile } from "../../api/newtcon/nodes.js";
 import { fetchSchema, resolveKindToSlug, resolveSlugToKind } from "../../api/newtcon/schema.js";
 import { ApiError } from "../../api/newtcon/services.js";
-import { isProvisioning, type TopoLink } from "../../app.js";
+import { isProvisioning, type TopoLink } from "../topology/index.js";
 import { renderEventsError, renderEventsTable } from "../../audit.js";
 import { confirmInline } from "../../confirm-inline.js";
 import { resolveDeviceStatus } from "../../device-status.js";
