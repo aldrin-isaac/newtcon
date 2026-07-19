@@ -3,7 +3,7 @@
 // device RPCs, verifies the columns + values, then deletes them.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed, loginCookie } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -25,7 +25,7 @@ async function expandSection(page, title) {
 }
 
 await skipIfNotDeployed(NET, DEVICE);
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   await rpc("create-vrf", { name: "Vrf_SMK" });
   await rpc("create-vlan", { id: 4000, description: "smk" });
@@ -37,22 +37,22 @@ try {
   await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll("button.node-tab")).find((b) => b.textContent.trim() === "State")?.click());
-  await page.waitForSelector(".node-state-section", { timeout: 6000 });
+  await page.waitForSelector(".node-state-section", { timeout: 20000 });
 
   for (const [title, header, value] of [["VRFs", "VRF", "Vrf_SMK"], ["VLANs", "VLAN", "4000"], ["ACLs", "Stage", "ACL_SMK"]]) {
     await expandSection(page, title);
     await page.waitForFunction((t) => {
       const det = Array.from(document.querySelectorAll(".node-state-section")).find((d) => d.querySelector(".node-state-section-title")?.textContent.trim() === t);
       return det?.querySelector(".resource-table");
-    }, { timeout: 6000 }, title);
+    }, { timeout: 20000 }, title);
     await sleep(150);
     const txt = await page.evaluate((t) => {
       const det = Array.from(document.querySelectorAll(".node-state-section")).find((d) => d.querySelector(".node-state-section-title")?.textContent.trim() === t);

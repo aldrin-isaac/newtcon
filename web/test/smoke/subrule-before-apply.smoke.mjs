@@ -4,22 +4,22 @@
 // parent + rules apply together in one Save (groupOrder already sequences them).
 // Staged-only (no apply) → no engine mutation; the browser close drops the queue.
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 const BASE=process.env.NEWTCON_URL||"http://127.0.0.1:8095", NET=process.env.NET||"1node-vs";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let pass=0,fail=0; const expect=(c,m)=>{c?(pass++,console.log("  ok:",m)):(fail++,console.error("  FAIL:",m));};
-const b=await puppeteer.launch({executablePath:"/usr/bin/google-chrome",headless:"new",args:["--no-sandbox","--disable-dev-shm-usage"],defaultViewport:{width:1500,height:950}});
+const b=await puppeteer.launch({executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",headless:"new",args:["--no-sandbox","--disable-dev-shm-usage","--ignore-certificate-errors"],ignoreHTTPSErrors:true,defaultViewport:{width:1500,height:950}});
 try{
   const p=await b.newPage();
   await authenticatePage(p, BASE);
   await p.evaluateOnNewDocument(n=>{try{localStorage.setItem("newtcon.activeNetwork",n);}catch{}},NET);
   p.on("pageerror",e=>console.log("  [pageerror]",e.message));
-  await p.goto(BASE,{waitUntil:"networkidle0",timeout:20000});
-  await p.click("#tab-specs"); await p.waitForSelector('[data-kind="qos-policies"]',{timeout:8000});
-  await p.click('[data-kind="qos-policies"]'); await p.waitForSelector(".panel-add-btn",{timeout:6000}); await sleep(200);
+  await gotoApp(p, BASE, {waitUntil:"networkidle0",timeout:20000});
+  await p.click("#tab-specs"); await p.waitForSelector('[data-kind="qos-policies"]', { timeout: 60000 });
+  await p.click('[data-kind="qos-policies"]'); await p.waitForSelector(".panel-add-btn",{timeout:20000}); await sleep(200);
   // create a staged qos-policy
   await p.evaluate(()=>document.querySelector(".panel-add-btn")?.click());
-  await p.waitForSelector('.form-control[name="name"], input[name="name"]',{timeout:6000});
+  await p.waitForSelector('.form-control[name="name"], input[name="name"]',{timeout:20000});
   await p.evaluate(()=>{const i=document.querySelector('input[name="name"]')||document.querySelector('[name="name"]');i.value="PCTEST";i.dispatchEvent(new Event("input",{bubbles:true}));});
   await p.evaluate(()=>Array.from(document.querySelectorAll("button.form-submit-btn")).find(b=>/Create/.test(b.textContent))?.click());
   await sleep(800);

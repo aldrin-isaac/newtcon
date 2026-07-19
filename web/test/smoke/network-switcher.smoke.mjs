@@ -10,7 +10,7 @@
 //      scaffold — that would write to disk on the operator's box)
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -21,7 +21,7 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -32,7 +32,7 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE}`);
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 15000 });
   await page.screenshot({ path: "/tmp/newtcon-smoke-n01-loaded.png" });
 
   // Trigger present + labeled with active network.

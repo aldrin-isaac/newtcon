@@ -17,7 +17,7 @@
 // the smoke self-contained — the puppeteer side only drives the UI.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -82,7 +82,7 @@ await createQoSPolicyWithQueue(NETWORK, POLICY);
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -91,7 +91,7 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE} (policy=${POLICY})`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
   await page.reload({ waitUntil: "domcontentloaded" });
 
@@ -105,23 +105,23 @@ try {
     await page.type("#auth-username", USER);
     await page.type("#auth-password", PASSWORD);
     await page.click("#auth-submit");
-    await page.waitForFunction(() => document.getElementById("auth-overlay")?.hidden, { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById("auth-overlay")?.hidden, { timeout: 20000 });
   }
   expect(true, overlayShown ? "signed in" : "cookie-authenticated (gate skipped)");
 
   // Activate the Specs tab + wait for its subnav to render (the reload uses
   // domcontentloaded, so the facet may not exist yet), then switch to the QoS
   // policies facet.
-  await page.waitForSelector("#tab-specs", { timeout: 8000 });
+  await page.waitForSelector("#tab-specs", { timeout: 20000 });
   await page.click("#tab-specs");
-  await page.waitForSelector('.specs-subnav-item[data-kind="qos-policies"]', { timeout: 8000 });
+  await page.waitForSelector('.specs-subnav-item[data-kind="qos-policies"]', { timeout: 20000 });
   await page.evaluate(() => {
     document.querySelector('.specs-subnav-item[data-kind="qos-policies"]')?.click();
   });
   await page.waitForFunction(
     (name) => Array.from(document.querySelectorAll(".panel-list-item"))
       .some((el) => (el.textContent || "").trim() === name),
-    { timeout: 8000 },
+    { timeout: 20000 },
     POLICY,
   );
 
@@ -133,7 +133,7 @@ try {
   await page.waitForFunction(() => {
     const c = document.getElementById("drawer-content");
     return c && (c.querySelector(".spec-detail") || c.querySelector(".spec-detail-empty-state"));
-  }, { timeout: 5000 });
+  }, { timeout: 20000 });
 
   const layout = await page.evaluate(() => {
     const c = document.getElementById("drawer-content");

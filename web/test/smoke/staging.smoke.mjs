@@ -2,7 +2,7 @@
 // header, confirm the apply-preview modal, verify they land in newtron.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, loginCookie } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -24,7 +24,7 @@ const facetLabel = (t) => (t ?? "").trim().replace(/\d+$/, "");
 async function saveAndConfirm(page) {
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
   try {
-    await page.waitForSelector(".apply-preview-overlay .btn-primary", { timeout: 5000 });
+    await page.waitForSelector(".apply-preview-overlay .btn-primary", { timeout: 20000 });
     await page.evaluate(() =>
       document.querySelector(".apply-preview-overlay .btn-primary")?.click());
   } catch { /* no modal — nothing to apply */ }
@@ -41,7 +41,7 @@ const zoneUrl = (name) => `${BASE}/api/networks/${NET}/zones/${name}`;
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 
@@ -53,7 +53,7 @@ try {
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
   console.log(`→ open ${BASE} (network ${NET})`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NET);
   await page.reload({ waitUntil: "networkidle0", timeout: 15000 });
   await page.screenshot({ path: "/tmp/newtcon-smoke-s01-loaded.png" });

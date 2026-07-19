@@ -4,7 +4,7 @@
 // gone, and the network base survives. Cleans up via newtron if anything leaks.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, loginCookie } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -26,7 +26,7 @@ const ZONE = ((await (await af("zones")).json()).names || [])[0];
 if (!IPVPN || !ZONE) { console.log(`SKIP: ${NET} needs an ipvpn + a zone for the override smoke`); process.exit(0); }
 const removeOverride = () => af(`ipvpns/${IPVPN}?scope=zone&scope_instance=${ZONE}`, { method: "DELETE" }).catch(() => {});
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride();
   const b = await (await af(`ipvpns/${IPVPN}`)).json();
@@ -39,14 +39,14 @@ try {
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-specs");
-  await page.waitForSelector('[data-kind="ipvpns"]', { timeout: 8000 });
+  await page.waitForSelector('[data-kind="ipvpns"]', { timeout: 60000 });
   await page.click('[data-kind="ipvpns"]');
-  await page.waitForSelector(".panel-list-row", { timeout: 8000 });
+  await page.waitForSelector(".panel-list-row", { timeout: 20000 });
   await sleep(300);
   await page.evaluate(() => document.querySelector(".panel-override-toggle")?.click()); // expand
-  await page.waitForSelector(".panel-list-row--override .panel-delete-btn", { timeout: 5000 });
+  await page.waitForSelector(".panel-list-row--override .panel-delete-btn", { timeout: 20000 });
 
   await page.evaluate(() => document.querySelector(".panel-list-row--override .panel-delete-btn")?.click());
   await sleep(400);
@@ -54,7 +54,7 @@ try {
   expect(pending === "1", `override delete staged (pending=${pending})`);
 
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 8000 });
+  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((x) => /Apply/.test(x.textContent))?.click());
   await sleep(2500);
 

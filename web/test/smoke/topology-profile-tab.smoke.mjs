@@ -13,7 +13,7 @@
 // enabled. Auth creds via NEWTCON_TEST_USER / NEWTCON_TEST_PASSWORD.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -27,7 +27,7 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -36,7 +36,7 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE}`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
 
   // Preset the active network so the topology view targets one that actually
   // exists in this dev environment.
@@ -46,7 +46,7 @@ try {
 
   // Switch to Topology tab.
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 8000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
   expect(true, "topology view loaded with at least one device");
   await page.screenshot({ path: "/tmp/newtcon-smoke-profile-tab-01-topo.png" });
 
@@ -57,7 +57,7 @@ try {
     const node = document.querySelectorAll(".topo-node")[0];
     node?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 }));
   });
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 3000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 10000 });
   await page.click(".topo-menu-header--button");
 
   // Drawer opens. The Profile tab was renamed to "Spec" in the
@@ -66,7 +66,7 @@ try {
   await page.waitForFunction(() => {
     const btns = Array.from(document.querySelectorAll(".node-tab"));
     return btns.some((b) => (b.textContent || "").trim() === "Spec");
-  }, { timeout: 5000 });
+  }, { timeout: 20000 });
   expect(true, "node drawer renders a Spec tab");
 
   // Capture the device name (drawer header h2).
@@ -91,7 +91,7 @@ try {
       return txt === "No profile found" ? "not-found" : "error";
     }
     return null;
-  }, { timeout: 5000 });
+  }, { timeout: 20000 });
 
   const value = await outcome.jsonValue();
   expect(

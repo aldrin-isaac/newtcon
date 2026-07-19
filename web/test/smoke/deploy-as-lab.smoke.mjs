@@ -7,7 +7,7 @@
 //   5. Close button enables (either after error or after stream completes)
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -15,10 +15,23 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const ok = [], failed = [];
 function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
 
+// A lab record for 2node-vs means the Deploy button is (correctly) gated
+// disabled (#356) — and a smoke must never destroy an existing lab to free
+// it. Skip instead of failing.
+{
+  const ck = await loginCookie(BASE);
+  const H = ck ? { Cookie: `${ck.name}=${ck.value}` } : {};
+  const r = await fetch(`${BASE}/api/labs/2node-vs/status`, { headers: H }).catch(() => null);
+  if (r && r.ok) {
+    console.log("SKIP: 2node-vs already has a lab — Deploy is gated; not destroying an operator lab from a smoke");
+    process.exit(0);
+  }
+}
+
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -36,11 +49,11 @@ page.on("request", (req) => {
 try {
   // Pre-seed localStorage so the active network points at a registered one.
   // Run a no-op navigation first so the origin exists for localStorage.
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate(() => localStorage.setItem("newtcon.activeNetwork", "2node-vs"));
 
   console.log(`→ reload ${BASE} with active network "2node-vs"`);
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 15000 });
 
   // Switch to Topology tab → Lab view (post-#210 the lifecycle buttons
   // are gated to the Lab view).

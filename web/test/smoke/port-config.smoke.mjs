@@ -8,7 +8,7 @@
 // + physical properties). Network-agnostic: discovers device/port, restores state.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, loginCookie } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -32,7 +32,7 @@ async function fetchTopoPort() {
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 },
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 },
 });
 let ORIGINAL = null; // pre-smoke port state, restored in finally
 try {
@@ -48,18 +48,18 @@ try {
   ORIGINAL = await fetchTopoPort();
 
   console.log(`→ open ${BASE} (network ${NET})`);
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
 
   // Open the device drawer (right-click → Inspect) → Interfaces tab.
   console.log(`→ open ${DEVICE} drawer → Interfaces`);
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll("button.node-tab")).find((b) => b.textContent.trim() === "Interfaces")?.click());
-  await page.waitForSelector(".iface-table tbody .iface-row", { timeout: 8000 });
+  await page.waitForSelector(".iface-table tbody .iface-row", { timeout: 20000 });
 
   // Expand the target port row → click "Properties".
   console.log(`→ ${PORT} → Properties`);
@@ -68,9 +68,9 @@ try {
       .find((tr) => tr.querySelector(".iface-name")?.textContent.trim() === port);
     row?.click();
   }, PORT);
-  await page.waitForFunction(() => { const d = document.querySelector(".iface-detail-row"); return d && !d.hidden; }, { timeout: 4000 });
+  await page.waitForFunction(() => { const d = document.querySelector(".iface-detail-row"); return d && !d.hidden; }, { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".iface-actions .iface-action-btn")).find((b) => /Properties/.test(b.textContent))?.click());
-  await page.waitForSelector(".iface-portprops-form .schema-form", { timeout: 8000 });
+  await page.waitForSelector(".iface-portprops-form .schema-form", { timeout: 20000 });
 
   const fields = await page.evaluate(() =>
     Array.from(document.querySelectorAll(".iface-portprops-form .schema-form [name]")).map((e) => e.getAttribute("name")));
@@ -94,7 +94,7 @@ try {
   // Apply via the workspace pending bar → apply-preview → Apply.
   console.log("→ Apply changes");
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 8000 });
+  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((b) => /Apply/.test(b.textContent))?.click());
   await sleep(2500);
 

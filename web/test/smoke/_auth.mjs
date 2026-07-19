@@ -95,3 +95,18 @@ export async function skipIfNotDeployed(net, device, base = DEFAULT_BASE) {
     process.exit(0);
   }
 }
+
+// gotoApp — navigate a puppeteer page to the app with suite-grade robustness:
+// one retry for Chromium's ERR_CERT_VERIFIER_CHANGED race (the first
+// navigation can race the ignoreHTTPSErrors setup on a loaded host) and a
+// generous timeout. Smokes run on the same box as the lab's QEMU VMs — the
+// suite's waits are calibrated for that real environment, not an idle one.
+export async function gotoApp(page, base = DEFAULT_BASE, opts = {}) {
+  const options = { waitUntil: "networkidle0", timeout: 30000, ...opts };
+  try {
+    await page.goto(base, options);
+  } catch {
+    await new Promise((r) => setTimeout(r, 1000));
+    await page.goto(base, options);
+  }
+}
