@@ -19,7 +19,7 @@ import { fetchInterfaceStatus, fetchTopology } from "../../api/newtcon/nodes.js"
 import { fetchSchema } from "../../api/newtcon/schema.js";
 import { confirmInline } from "../../confirm-inline.js";
 import { type InterfaceRow, applyFilter as applyIfaceFilter, buildDeviceInterfaceView, countView, deriveDeviceBindings, linksForDevice } from "../../device-interfaces.js";
-import { el, renderValue } from "../../dom.js";
+import { el, renderValue, makeCopyable } from "../../dom.js";
 import { type InterfaceStatus, counterPairs, formatBps, formatPps, hasCounterAlerts, lldpFarEnd, memberSummaries, neighborLines } from "../../interface-status.js";
 import { type IrbRow, deriveIrbRows, macvpnVlanHints, pendingCreateVlanIds } from "../../irb-interfaces.js";
 import { comparePorts } from "../../port-config.js";
@@ -317,7 +317,8 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       if (far || !isAggregate) {
         const lldpRow = el("div", { className: "iface-live-lldp" + (far ? "" : " iface-live-lldp--none") });
         lldpRow.appendChild(el("span", { className: "iface-live-lldp-label" }, "Cabled to"));
-        lldpRow.appendChild(el("span", { className: "iface-live-lldp-peer" }, far ?? "no LLDP neighbor heard"));
+        const peer = el("span", { className: "iface-live-lldp-peer" }, far ?? "no LLDP neighbor heard");
+        lldpRow.appendChild(far ? makeCopyable(peer) : peer);
         section.appendChild(lldpRow);
       }
 
@@ -345,7 +346,7 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       arp.appendChild(el("span", { className: "iface-live-arp-label" }, "ARP"));
       if (nbrs.length) {
         const list = el("span", { className: "iface-live-arp-list" });
-        for (const n of nbrs) list.appendChild(el("code", { className: "iface-live-arp-item" }, n));
+        for (const n of nbrs) list.appendChild(makeCopyable(el("code", { className: "iface-live-arp-item" }, n)));
         arp.appendChild(list);
       } else {
         arp.appendChild(el("span", { className: "iface-live-arp-none" }, "none resolved"));
@@ -355,8 +356,9 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       // Rates (SONiC-computed — no client-side delta math).
       if (s.rates) {
         const rates = el("div", { className: "iface-live-rates" });
-        rates.appendChild(el("span", { className: "iface-live-rate" }, `Rx ${formatBps(s.rates.rx_bps)} · ${formatPps(s.rates.rx_pps)}`));
-        rates.appendChild(el("span", { className: "iface-live-rate" }, `Tx ${formatBps(s.rates.tx_bps)} · ${formatPps(s.rates.tx_pps)}`));
+        rates.appendChild(el("span", { className: "iface-live-rates-label" }, "Rates"));
+        rates.appendChild(makeCopyable(el("span", { className: "iface-live-rate" }, `Rx ${formatBps(s.rates.rx_bps)} · ${formatPps(s.rates.rx_pps)}`)));
+        rates.appendChild(makeCopyable(el("span", { className: "iface-live-rate" }, `Tx ${formatBps(s.rates.tx_bps)} · ${formatPps(s.rates.tx_pps)}`)));
         section.appendChild(rates);
       }
 
@@ -369,11 +371,11 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
         table.appendChild(thead);
         for (const p of pairs) {
           const tr = el("tr", { className: p.alert ? "iface-live-counter--alert" : "" });
-          tr.append(
-            el("td", {}, p.label),
-            el("td", { className: "iface-live-num" }, p.rx),
-            el("td", { className: "iface-live-num" }, p.tx),
-          );
+          const rxCell = el("td", { className: "iface-live-num" });
+          rxCell.appendChild(makeCopyable(el("span", { className: "detail-num" }, p.rx)));
+          const txCell = el("td", { className: "iface-live-num" });
+          txCell.appendChild(makeCopyable(el("span", { className: "detail-num" }, p.tx)));
+          tr.append(el("td", {}, p.label), rxCell, txCell);
           table.appendChild(tr);
         }
         section.appendChild(table);

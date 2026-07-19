@@ -1429,17 +1429,26 @@
 
 /* Per-interface live diagnostics (newtron #431): LLDP far-end, ARP, rates,
  * counters. Rendered lazily in the expanded interface row. */
-.iface-live { margin: var(--space-sm) 0; padding: var(--space-sm); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-surface-sunken, var(--color-surface)); font-size: var(--text-2xs); display: flex; flex-direction: column; gap: var(--space-xs); }
+/* LIVE STATUS panel — same card treatment as the spec detail (operator
+   request): recessed card, hairline section separators, small-caps muted
+   labels vs mono values, key values copyable. */
+.iface-live { margin: var(--space-sm) 0; padding: var(--space-2xs) var(--space-md); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface-recessed); font-size: var(--text-2xs); display: flex; flex-direction: column; }
+.iface-live > * { padding: var(--space-xs) 0; }
+.iface-live > * + * { border-top: 1px solid var(--color-border-subtle); }
 .iface-live-loading, .iface-live-unavail { color: var(--color-text-muted); margin: 0; }
 .iface-live-header { display: flex; align-items: center; gap: var(--space-sm); }
 .iface-live-title { text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-medium); color: var(--color-text-secondary); }
 .iface-live-alert { color: var(--color-danger); font-weight: var(--weight-medium); }
 .iface-live-lldp { display: flex; gap: var(--space-sm); align-items: baseline; }
-.iface-live-lldp-label, .iface-live-arp-label { color: var(--color-text-secondary); min-width: 4.5em; }
+.iface-live-lldp-label, .iface-live-arp-label, .iface-live-members-label, .iface-live-rates-label {
+  font-family: var(--font-system); font-size: var(--text-2xs);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted); font-weight: var(--weight-medium);
+  min-width: 6.5em;
+}
 .iface-live-lldp-peer { font-family: var(--font-mono); color: var(--color-text-primary); font-weight: var(--weight-medium); }
 .iface-live-lldp--none .iface-live-lldp-peer { color: var(--color-text-muted); font-weight: var(--weight-regular); font-style: italic; }
 .iface-live-members { display: flex; gap: var(--space-sm); align-items: baseline; }
-.iface-live-members-label { color: var(--color-text-secondary); min-width: 4.5em; }
 .iface-live-members-list { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .iface-live-member { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); }
 .iface-live-member--down { color: var(--color-text-muted); }
@@ -1448,7 +1457,7 @@
 .iface-live-arp-list { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .iface-live-arp-item { font-family: var(--font-mono); }
 .iface-live-arp-none { color: var(--color-text-muted); font-style: italic; }
-.iface-live-rates { display: flex; gap: var(--space-md); font-family: var(--font-mono); color: var(--color-text-secondary); }
+.iface-live-rates { display: flex; gap: var(--space-md); align-items: baseline; font-family: var(--font-mono); color: var(--color-text-primary); }
 .iface-live-counters th { text-align: left; color: var(--color-text-muted); font-weight: var(--weight-regular); padding: 0 var(--space-sm) 2px 0; }
 .iface-live-counters td { padding: 1px var(--space-sm) 1px 0; }
 .iface-live-num { text-align: right; font-variant-numeric: tabular-nums; }
