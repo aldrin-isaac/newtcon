@@ -34,6 +34,7 @@ import { showToast } from "../../toast.js";
 import { showContextMenu } from "../../topology-actions-ui.js";
 import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
+import { type LensState, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
 import { type PaletteState, resolveLabDevicePalette, resolveLabStatusText, resolveLinkPalette, resolvePhysicalDevicePalette, resolvePhysicalStatusText } from "../../topology-palette.js";
 import { type PinnedPosition, clearPositions, loadPositions, savePosition } from "../../topology-positions.js";
@@ -198,6 +199,8 @@ interface TopologyRenderOpts {
   // filtered subset against the full topology context. Links touching
   // any dimmed endpoint are dimmed too.
   dimmedNames?: Set<string>;
+  /** Lens emphasis (slice 4.3): devices to draw with a halo ring. */
+  haloNames?: Set<string>;
 }
 
 interface TopologyRenderResult {
@@ -386,6 +389,18 @@ function renderTopologySVG(
       "aria-label": ariaLabelParts.join(" — "),
       "data-device": node.name,
     });
+
+    if (opts.haloNames?.has(node.name)) {
+      // Lens halo — accent ring behind the card (never moves layout).
+      g.appendChild(svgEl("rect", {
+        "class": "topo-node-halo",
+        x: String(pos.cx - NODE_W / 2 - 4),
+        y: String(pos.cy - NODE_H / 2 - 4),
+        width: String(NODE_W + 8),
+        height: String(NODE_H + 8),
+        rx: "9",
+      }));
+    }
 
     if (isSelected) {
       // Selection ring drawn behind the node rect.
@@ -1518,6 +1533,52 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     };
     if (zones.length > 1) renderFilterRow();
 
+    // Lens chip row (slice 4.3) — always mounted: lenses re-weight the
+    // canvas around one concern (VNI footprint / underlay health / drift)
+    // without touching layout. Session-scoped state; chips re-render in
+    // place, then the graph re-renders with the lens effect applied.
+    let lensState: LensState = { kind: null };
+    const lensRow = el("div", { className: "topology-filter-row topology-lens-row" });
+    root.appendChild(lensRow);
+    const renderLensRow = (): void => {
+      lensRow.textContent = "";
+      lensRow.appendChild(el("span", { className: "topology-filter-label" }, "Lens:"));
+      const lensChip = (label: string, kind: "vni" | "underlay" | "drift"): void => {
+        const active = lensState.kind === kind;
+        const chip = el("button", {
+          type: "button",
+          className: "chip chip--md chip--clickable" + (active ? " chip--accent" : ""),
+        }, label) as HTMLButtonElement;
+        chip.addEventListener("click", () => {
+          lensState = active ? { kind: null } : kind === "vni"
+            ? { kind, ...(availableVlans(rawDevices).length === 1 ? { vlanId: availableVlans(rawDevices)[0] } : {}) }
+            : { kind };
+          renderLensRow();
+          renderGraph();
+        });
+        lensRow.appendChild(chip);
+      };
+      lensChip("VNI", "vni");
+      lensChip("Underlay", "underlay");
+      lensChip("Drift", "drift");
+      if (lensState.kind === "vni") {
+        for (const vlan of availableVlans(rawDevices)) {
+          const active = lensState.vlanId === vlan;
+          const chip = el("button", {
+            type: "button",
+            className: "chip chip--sm chip--clickable" + (active ? " chip--accent" : ""),
+          }, `VLAN ${vlan}`) as HTMLButtonElement;
+          chip.addEventListener("click", () => {
+            lensState = { kind: "vni", ...(active ? {} : { vlanId: vlan }) };
+            renderLensRow();
+            renderGraph();
+          });
+          lensRow.appendChild(chip);
+        }
+      }
+    };
+    renderLensRow();
+
     // Pan/zoom viewport state — persists across renderGraph() calls so
     // the operator's view doesn't snap back to natural after every
     // selection / pending-bar / status tick.
@@ -1613,6 +1674,18 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       // renderTopologySVG which applies the dim class to nodes + links.
       const allNames = (topoData.nodes ?? []).map((n) => n.name);
       const dimmed = applyFilter(filterState, allNames, deviceMetadata).hidden;
+      // Lens effect (slice 4.3): dim merges with the zone filter; halo and
+      // badges pass through. Same positions either way — layout-stable.
+      const lens = lensEffect(lensState, {
+        allDevices: allNames,
+        ...(lensState.kind === "vni" && lensState.vlanId !== undefined
+          ? { vlanMembers: vlanMembership(rawDevices, lensState.vlanId) } : {}),
+        underlayByDevice,
+        driftByDevice,
+      });
+      for (const d of lens.dim) dimmed.add(d);
+      const lensStatusText = new Map(statusTextByDevice);
+      for (const [d, text] of lens.badge) lensStatusText.set(d, text);
       // Spec view = authoring (select + side panel + right-click
       // context menu + node delete). Observation views (Lab / Physical)
       // = left-click opens the drawer directly for inspection; right-
@@ -1634,7 +1707,8 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         : {};
       const result = renderTopologySVG(topoData, {
         paletteByDevice,
-        statusTextByDevice,
+        statusTextByDevice: lensStatusText,
+        haloNames: lens.halo,
         dimmedNames: dimmed,
         // Click a device — in EVERY view — opens the drawer, the single home for
         // device inspection + per-port/interface config. (There is no docked
