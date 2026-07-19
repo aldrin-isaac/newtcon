@@ -36,6 +36,7 @@ import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
+import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
 import { type PaletteState, resolveLabDevicePalette, resolveLabStatusText, resolveLinkPalette, resolvePhysicalDevicePalette, resolvePhysicalStatusText } from "../../topology-palette.js";
 import { type PinnedPosition, clearPositions, loadPositions, savePosition } from "../../topology-positions.js";
@@ -1802,6 +1803,50 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         onLinkClick: (link) => openLinkDrawer(link, rawDevices),
         ...specOnlyOpts,
       });
+      // Focus mode (slice 4.5): keyboard focus on a device dims everything
+      // but the device + its direct neighbors — patched IN PLACE so focus
+      // survives (a re-render would drop the focused element). Esc restores;
+      // arrow keys walk the graph geometrically.
+      const applyFocusDim = (dim: Set<string> | null): void => {
+        for (const g of result.svg.querySelectorAll<SVGGElement>(".topo-node")) {
+          const name = g.getAttribute("data-device") ?? "";
+          g.classList.toggle("topo-node--focus-dimmed", dim !== null && dim.has(name));
+        }
+        for (const line of result.svg.querySelectorAll<SVGLineElement>(".topo-link:not(.topo-link-hit)")) {
+          const a = line.getAttribute("data-local-device") ?? "";
+          const z = line.getAttribute("data-remote-device") ?? "";
+          line.classList.toggle("topo-link--focus-dimmed", dim !== null && (dim.has(a) || dim.has(z)));
+        }
+      };
+      result.svg.addEventListener("focusin", (ev) => {
+        const g = (ev.target as Element | null)?.closest?.(".topo-node");
+        const name = g?.getAttribute("data-device");
+        if (name) applyFocusDim(focusDim(name, (topoData.nodes ?? []).map((n) => n.name), topoData.links ?? []));
+      });
+      result.svg.addEventListener("focusout", (ev) => {
+        // Leaving the SVG entirely clears the focus dim; moving between
+        // nodes re-applies via the next focusin.
+        const next = (ev as FocusEvent).relatedTarget as Element | null;
+        if (!next || !result.svg.contains(next)) applyFocusDim(null);
+      });
+      result.svg.addEventListener("keydown", (ev) => {
+        const g = (ev.target as Element | null)?.closest?.(".topo-node");
+        const name = g?.getAttribute("data-device");
+        if (!name) return;
+        if (ev.key === "Escape") {
+          applyFocusDim(null);
+          (g as unknown as { blur?: () => void }).blur?.();
+          return;
+        }
+        const dir: NavDirection | null =
+          ev.key === "ArrowUp" ? "up" : ev.key === "ArrowDown" ? "down"
+          : ev.key === "ArrowLeft" ? "left" : ev.key === "ArrowRight" ? "right" : null;
+        if (dir === null) return;
+        ev.preventDefault();
+        const next = nearestInDirection(name, result.positions, dir);
+        if (next) (result.svg.querySelector(`.topo-node[data-device="${next}"]`) as unknown as { focus?: () => void })?.focus?.();
+      });
+
       // SVG sits behind the toolbar (toolbar is z-indexed above).
       graphSlot.insertBefore(result.svg, zoomToolbar);
       // Remember the natural width so the toolbar handlers can compute

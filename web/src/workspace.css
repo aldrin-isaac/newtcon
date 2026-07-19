@@ -1677,6 +1677,25 @@
 
 /* ---- Workspace pending-changes bar ------------------------------------ */
 
+.fabric-strip {
+  display: inline-flex; align-items: center; gap: var(--space-2xs);
+  background: transparent; border: none; padding: 0; cursor: pointer;
+}
+.fabric-strip:empty { display: none; }
+.fabric-strip-cell {
+  font-size: var(--text-2xs); font-family: var(--font-mono);
+  padding: 1px var(--space-xs); border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-subtle); color: var(--color-text-secondary);
+}
+.fabric-strip-cell--ok     { color: var(--color-success); border-color: var(--color-success-border); background: var(--color-success-bg); }
+.fabric-strip-cell--warn   { color: var(--color-warning); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+.fabric-strip-cell--danger { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
+.fabric-strip-cell--muted  { color: var(--color-text-muted); }
+
+/* Focus-mode dim (slice 4.5) — in-place patched, must beat palette rules. */
+.topo-node.topo-node--focus-dimmed { opacity: 0.25; }
+.topo-link.topo-link--focus-dimmed { opacity: 0.15; }
+
 .pending-bar {
   display: inline-flex;
   align-items: center;
