@@ -53,9 +53,26 @@
   --color-drift-bg:            #f3eafe;
   --color-drift-border:        #d4bff5;
 
+  /* Hover-darkened fills for solid warning/danger controls. */
+  --color-warning-strong:      #8e5817;
+  --color-danger-strong:       #8e2e25;
+
+  /* Terminal-style raw viewers (config-DB / raw state disclosures):
+   * deliberately dark in both themes — device output reads as a console. */
+  --color-terminal-bg:         #0b1220;
+  --color-terminal-text:       #e6edf3;
+
+  /* A softly recessed panel that stays lighter than surface-sunken —
+   * used for quiet framed regions inside cards. */
+  --color-surface-recessed:    #f7f8fa;
+
+  /* Modal / palette overlay scrim (ink at 45%). */
+  --color-scrim:               rgb(28 25 23 / 0.45);
+
   --shadow-xs:    0 1px 2px 0 rgb(28 25 23 / 0.04);
   --shadow-sm:    0 1px 2px 0 rgb(28 25 23 / 0.05), 0 1px 3px 0 rgb(28 25 23 / 0.06);
   --shadow-md:    0 2px 4px -1px rgb(28 25 23 / 0.06), 0 4px 6px -2px rgb(28 25 23 / 0.04);
   --shadow-lg:    0 10px 15px -3px rgb(28 25 23 / 0.08), 0 4px 6px -2px rgb(28 25 23 / 0.04);
   --shadow-overlay: 0 20px 25px -5px rgb(28 25 23 / 0.10), 0 10px 10px -5px rgb(28 25 23 / 0.04);
+  --shadow-drag:  0 4px 8px rgb(28 25 23 / 0.18);
 }

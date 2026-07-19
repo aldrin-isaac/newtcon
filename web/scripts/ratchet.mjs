@@ -10,9 +10,10 @@
 //   app_ts_lines          web/src/app.ts line count        (target ≤ 800)
 //   chip_families         distinct `.*-chip` class families across all
 //                         web/src CSS                      (target 1)
-//   raw_colors_workspace  raw hex / rgb() occurrences in workspace.css —
-//                         includes var() fallbacks, which duplicate token
-//                         values and go away in Phase 3.1  (target 0)
+//   raw_colors_workspace  raw hex / rgb() occurrences in workspace.css,
+//                         comments stripped (issue refs like "#169" are
+//                         hex-shaped). Zero since Phase 3.1: every color
+//                         is a design-system token reference.
 //
 // Being UNDER a ceiling prints a tighten-me nudge but passes — lowering is
 // the responsibility (and the credit) of the slice that did the work.
@@ -44,6 +45,7 @@ const metrics = {
   ).size,
   raw_colors_workspace:
     (readFileSync(path.join(webRoot, "src/workspace.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
       .match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? []).length,
 };
 

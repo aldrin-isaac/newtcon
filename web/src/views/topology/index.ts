@@ -575,7 +575,7 @@ function renderTopologySVG(
       "text-anchor": "middle",
       "dominant-baseline": "central",
       "font-size": "13",
-      fill: "#57534e",
+      fill: "var(--color-text-secondary)",
     });
     msg.textContent = "No devices in topology";
     svg.appendChild(msg);
