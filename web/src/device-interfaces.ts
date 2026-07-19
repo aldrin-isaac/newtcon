@@ -12,6 +12,7 @@
 // Pure: no I/O, no DOM. Mirrors buildPicker / deriveServiceBindings.
 
 import { comparePorts } from "./port-config.js";
+import { parseDeviceSteps } from "./device-steps.js";
 
 export interface PlatformPort {
   name: string;
@@ -92,18 +93,14 @@ export function normalizeSpeed(raw: unknown): string {
  *  per-interface binding (service + interface-config) keyed by interface. */
 export function deriveDeviceBindings(entry: TopoDeviceEntry | null | undefined): Map<string, IfaceBinding> {
   const out = new Map<string, IfaceBinding>();
-  const steps = Array.isArray(entry?.steps) ? entry!.steps! : [];
-  for (const raw of steps) {
-    const step = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-    const url = typeof step.url === "string" ? step.url : "";
-    const m = url.match(/^\/interfaces\/(.+)\/(apply-service|configure-interface)$/);
-    if (!m) continue;
-    const iface = m[1]!;
-    const verb = m[2]!;
-    const params = step.params && typeof step.params === "object" ? step.params as Record<string, unknown> : {};
+  for (const step of parseDeviceSteps(entry?.steps)) {
+    if (!step.iface || (step.verb !== "apply-service" && step.verb !== "configure-interface")) continue;
+    const iface = step.iface;
+    const verb = step.verb;
+    const params = step.params;
     const cur = out.get(iface) ?? {};
     if (verb === "apply-service") {
-      const svc = typeof step.spec_name === "string" ? step.spec_name : strOrUndef(params.service);
+      const svc = step.specName ?? strOrUndef(params.service);
       if (svc) cur.service = svc;
       assignIf(cur, "ip", strOrUndef(params.ip_address));
       assignIf(cur, "vlan", strOrUndef(params.vlan));

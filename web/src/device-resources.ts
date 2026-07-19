@@ -7,6 +7,7 @@
 // (by service). Pure: no I/O, no DOM. Mirrors device-interfaces.ts.
 
 import { comparePorts } from "./port-config.js";
+import { parseDeviceSteps } from "./device-steps.js";
 
 export interface ServiceInstance {
   iface: string;
@@ -34,16 +35,12 @@ const str = (v: unknown): string | undefined => {
  * Services are sorted by name; instances by interface (numeric).
  */
 export function deviceServiceUsage(entry: TopoDeviceEntry | null | undefined): ServiceUsage[] {
-  const steps = Array.isArray(entry?.steps) ? entry!.steps! : [];
   const byService = new Map<string, ServiceInstance[]>();
-  for (const raw of steps) {
-    const step = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-    const url = typeof step.url === "string" ? step.url : "";
-    const m = url.match(/^\/interfaces\/(.+)\/apply-service$/);
-    if (!m) continue;
-    const iface = m[1]!;
-    const params = step.params && typeof step.params === "object" ? step.params as Record<string, unknown> : {};
-    const service = str(step.spec_name) ?? str(params.service);
+  for (const step of parseDeviceSteps(entry?.steps)) {
+    if (!step.iface || step.verb !== "apply-service") continue;
+    const iface = step.iface;
+    const params = step.params;
+    const service = step.specName ?? str(params.service);
     if (!service) continue;
     const inst: ServiceInstance = { iface };
     const vlan = str(params.vlan);
