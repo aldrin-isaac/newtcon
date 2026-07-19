@@ -228,7 +228,7 @@ function renderOtherApiError(box: HTMLElement, err: ApiError): void {
     box.appendChild(el("p", { className: "error-message" }, err.message));
   }
 
-  const details = el("details", { className: "error-details" });
+  const details = el("details", { className: "disclosure error-details" });
   const summary = el("summary", {}, "HTTP " + String(err.status) + " — details");
   details.appendChild(summary);
   const pre = el("pre", { className: "error-details-body" });

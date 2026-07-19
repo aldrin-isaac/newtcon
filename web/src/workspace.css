@@ -160,7 +160,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
    Schema-driven create form (web/src/schema-form.ts) — newtron #240
    ────────────────────────────────────────────────────────────────────── */
 .schema-create-wrapper { display: flex; flex-direction: column; gap: var(--space-sm); }
-.schema-form { display: flex; flex-direction: column; gap: var(--space-sm); }
 .schema-form-row { display: flex; flex-direction: column; gap: var(--space-2xs); }
 /* A row hidden by `applies_when` (newtron #265). The class selector on
  * .schema-form-row would otherwise out-specify the [hidden] UA rule and
@@ -386,8 +385,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .audit-filter-reset:hover { color: var(--color-text-primary); }
 
 .audit-table-host { margin-top: var(--space-md); }
-.audit-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-family: var(--font-mono); }
-.audit-table thead { background: var(--color-surface-sunken); }
 .audit-th { text-align: left; padding: var(--space-2xs) var(--space-xs); font-family: var(--font-system); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-subtle); }
 .audit-row { border-bottom: 1px solid var(--color-border-subtle); }
 .audit-row:hover { background: var(--color-surface-hover); }
@@ -409,7 +406,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .audit-detail-key { color: var(--color-text-muted); }
 .audit-detail-val { margin: 0; color: var(--color-text-primary); word-break: break-word; }
 .audit-detail-raw { font-family: var(--font-mono); font-size: var(--text-xs); white-space: pre-wrap; margin: 0; }
-.audit-changes-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-xs); }
 .audit-changes-th { text-align: left; padding: 2px var(--space-xs); color: var(--color-text-muted); font-family: var(--font-system); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); border-bottom: 1px solid var(--color-border-subtle); }
 .audit-changes-td { padding: 2px var(--space-xs); vertical-align: top; word-break: break-word; }
 .audit-changes-type--add { color: var(--color-success); }
@@ -994,7 +990,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .node-tab-panel { padding-top: var(--space-xs); }
 
 /* Existing form classes */
-.spec-form { display: flex; flex-direction: column; gap: var(--space-md); }
 .spec-form-group { display: flex; flex-direction: column; gap: var(--space-2xs); }
 .spec-form-label { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
 .spec-form-control,
@@ -1070,7 +1065,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .svc-bindings-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--space-2xs); }
 .svc-bindings-count { font-size: var(--text-xs); color: var(--color-text-muted); margin: 0 0 var(--space-2xs); }
 .svc-bindings-empty { font-size: var(--text-sm); color: var(--color-text-muted); font-style: italic; margin: 0; }
-.svc-bindings-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-xs); }
 .svc-bindings-th { text-align: left; padding: 2px var(--space-xs); color: var(--color-text-muted); font-family: var(--font-system); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); border-bottom: 1px solid var(--color-border-subtle); }
 .svc-bindings-td { padding: 2px var(--space-xs); vertical-align: top; word-break: break-word; border-bottom: 1px solid var(--color-border-subtle); }
 .svc-bindings-iface { color: var(--color-text-secondary); }
@@ -1088,8 +1082,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .svc-usage-link:hover { text-decoration: underline; }
 .svc-usage-via { font-size: var(--text-xs); color: var(--color-text-muted); }
 
-.subrule-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-xs); margin-bottom: var(--space-sm); }
-.subrule-table thead { background: var(--color-surface-sunken); }
 .subrule-th { text-align: left; padding: var(--space-2xs) var(--space-xs); font-family: var(--font-system); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-subtle); }
 .subrule-th--actions { width: 32px; }
 .subrule-row { border-bottom: 1px solid var(--color-border-subtle); }
@@ -1245,12 +1237,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .iface-seg-btn--active { background: var(--color-accent-bg); color: var(--color-text-link); font-weight: var(--weight-medium); }
 .iface-search { flex: 1 1 auto; min-width: 0; max-width: 260px; }
 
-.iface-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
-.iface-table th {
-  text-align: left; padding: 4px 8px; color: var(--color-text-secondary);
-  font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default);
-}
-.iface-table td { padding: 4px 8px; border-bottom: 1px solid var(--color-border-subtle); vertical-align: middle; }
 .iface-row { cursor: pointer; }
 .iface-row:hover > td { background: var(--color-surface-sunken); }
 .iface-row--available > td { color: var(--color-text-muted); }
@@ -1285,7 +1271,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .iface-detail-svc-meta { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary); }
 .iface-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
 .iface-detail-raw { margin-top: var(--space-sm); font-size: var(--text-2xs); }
-.iface-detail-raw summary { cursor: pointer; color: var(--color-text-secondary); }
 .iface-table-empty { color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-md); text-align: center; }
 
 /* IRB interfaces (VLAN) section — SVIs below the physical-port table. */
@@ -1323,16 +1308,12 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .iface-live-arp-item { font-family: var(--font-mono); }
 .iface-live-arp-none { color: var(--color-text-muted); font-style: italic; }
 .iface-live-rates { display: flex; gap: var(--space-md); font-family: var(--font-mono); color: var(--color-text-secondary); }
-.iface-live-counters { border-collapse: collapse; font-family: var(--font-mono); }
 .iface-live-counters th { text-align: left; color: var(--color-text-muted); font-weight: var(--weight-regular); padding: 0 var(--space-sm) 2px 0; }
 .iface-live-counters td { padding: 1px var(--space-sm) 1px 0; }
 .iface-live-num { text-align: right; font-variant-numeric: tabular-nums; }
 .iface-live-counter--alert td { color: var(--color-danger); }
 
 /* Tailored State resource tables (VRFs / VLANs / ACLs). */
-.resource-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
-.resource-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
-.resource-table td { padding: 2px 8px; border-bottom: 1px solid var(--color-border-subtle); font-family: var(--font-mono); }
 .resource-pill { display: inline-block; padding: 0 6px; border-radius: var(--radius-full); font-size: var(--text-2xs); }
 .resource-pill--ok { background: var(--color-success-bg); color: var(--color-success); }
 .resource-pill--warn { background: var(--color-warning-bg); color: var(--color-warning); }
@@ -1343,9 +1324,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .svc-lens-card { margin-bottom: var(--space-sm); }
 .svc-lens-head { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: 2px; }
 .svc-lens-count { font-size: var(--text-2xs); color: var(--color-text-secondary); }
-.svc-lens-table { width: 100%; border-collapse: collapse; font-size: var(--text-2xs); }
-.svc-lens-table th { text-align: left; padding: 2px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
-.svc-lens-table td { padding: 2px 8px; border-bottom: 1px solid var(--color-border-subtle); }
 
 /* Pending overlay + staged per-port action forms. */
 .iface-row--pending > td { background: var(--color-warning-bg, #fff8e1); }
@@ -1353,13 +1331,8 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .iface-detail-queued-list { font-size: var(--text-2xs); color: var(--color-text-secondary); }
 .iface-action-form-host { margin-top: var(--space-sm); }
 .iface-portmode-menu { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
-.iface-action-form {
-  display: flex; flex-direction: column; gap: var(--space-xs);
-  border: 1px solid var(--color-border-default); border-radius: var(--radius-sm);
-  padding: var(--space-sm); background: var(--color-surface-sunken); margin-top: var(--space-xs);
-}
+.iface-action-form { margin-top: var(--space-xs); }
 .iface-action-form-title { font-size: var(--text-2xs); font-weight: var(--weight-medium); margin: 0; }
-.iface-action-form-actions { display: flex; gap: var(--space-xs); }
 .iface-field { display: flex; flex-direction: column; gap: 2px; }
 .iface-field-label { font-size: var(--text-2xs); color: var(--color-text-secondary); }
 
@@ -1896,9 +1869,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
   margin: var(--space-sm) 0 var(--space-2xs);
 }
 .node-state-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-xs);
   font-family: var(--font-mono);
 }
 .node-state-th {
@@ -1965,9 +1935,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
   cursor: pointer;
 }
 .node-spec-port-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-2xs);
 }
 .node-spec-port-table th, .node-spec-port-table td {
   text-align: left;
@@ -2432,7 +2399,6 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 
 /* ---- Topology: action form drawer ------------------------------------- */
 
-.topo-action-form { display: flex; flex-direction: column; gap: var(--space-sm); }
 .topo-action-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -2558,6 +2524,8 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 }
 .toast-close:hover { color: var(--color-text-primary); }
 .spec-detail-redacted { color: var(--color-text-muted); font-family: var(--font-mono); }
+
+.subrule-table { margin-bottom: var(--space-sm); }
 
 /* Contextual spacing for status dots inside interface rows/chips (was baked into the old .iface-dot). */
 .iface-cell-port .status-dot, .irb-row .status-dot, .iface-live-member .status-dot { margin-right: 6px; vertical-align: middle; }

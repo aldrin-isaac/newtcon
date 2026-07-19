@@ -261,7 +261,7 @@ function makeFilterField(
 }
 
 export function renderEventsTable(events: AuditEvent[]): HTMLElement {
-  const table = el("table", { className: "audit-table" });
+  const table = el("table", { className: "table table--sm table--mono-all table--headband audit-table" });
   const head = el("thead");
   const headRow = el("tr");
   for (const h of ["Time", "User", "Device", "Operation", "Status"]) {
@@ -381,7 +381,7 @@ function renderEventDetail(host: HTMLElement, e: AuditEvent): void {
   const changes: AuditChange[] = Array.isArray(e.changes) ? e.changes : [];
   if (changes.length > 0) {
     wrap.appendChild(el("p", { className: "audit-detail-label" }, `Device changes (${changes.length})`));
-    const table = el("table", { className: "audit-changes-table" });
+    const table = el("table", { className: "table table--dense table--mono-all audit-changes-table" });
     const head = el("tr");
     for (const h of ["Table", "Key", "Type", "Fields"]) head.appendChild(el("th", { className: "audit-changes-th" }, h));
     table.appendChild(head);

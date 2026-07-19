@@ -212,7 +212,7 @@ function openActionDrawer(action: ActionDef, ctx: MenuContext): void {
   content.appendChild(title);
 
   const form = document.createElement("form");
-  form.className = "topo-action-form";
+  form.className = "vform topo-action-form";
   form.noValidate = true;
 
   const refs: Map<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> = new Map();
@@ -399,7 +399,7 @@ export function openLinkBetweenDrawer(
   content.appendChild(title);
 
   const form = document.createElement("form");
-  form.className = "topo-action-form";
+  form.className = "vform topo-action-form";
   form.noValidate = true;
 
   const aField = endpointPicker(aDevice, "a", interfacesByDevice.get(aDevice) ?? []);

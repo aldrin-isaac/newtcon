@@ -321,3 +321,45 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 .kv--xs { grid-template-columns: max-content 1fr; gap: var(--space-2xs) var(--space-sm); font-size: var(--text-xs); }
 .kv--wide { grid-template-columns: minmax(220px, max-content) 1fr; gap: var(--space-sm) var(--space-md); }
 .kv dd { margin: 0; }
+
+
+/* ---- Data table — the one table primitive (uplift 2.1) -------------------
+ * Skeleton: full-width collapsed, left-aligned medium headers with a
+ * default-border underline, subtle row separators, middle-aligned cells.
+ * Density: base 4px pad | --dense 2px. Size: base text-xs | --2xs | --sm.
+ * Voice: --mono (value cells) | --mono-all (whole table).
+ * Chrome: --headband (sunken thead) | --bare (auto width, no borders).
+ * Numeric cells: .num (right-aligned, tabular numerals). */
+.table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.table th { text-align: left; padding: 4px 8px; color: var(--color-text-secondary); font-weight: var(--weight-medium); border-bottom: 1px solid var(--color-border-default); }
+.table td { padding: 4px 8px; border-bottom: 1px solid var(--color-border-subtle); vertical-align: middle; }
+.table--dense th, .table--dense td { padding: 2px 8px; }
+.table--2xs { font-size: var(--text-2xs); }
+.table--sm { font-size: var(--text-sm); }
+.table--mono td { font-family: var(--font-mono); }
+.table--mono-all { font-family: var(--font-mono); }
+.table--headband thead { background: var(--color-surface-sunken); }
+.table--bare { width: auto; }
+.table--bare th, .table--bare td { border-bottom: none; }
+.table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+
+/* ---- Disclosure — the one <details> behavior primitive (uplift 2.1) ------
+ * Owns summary BEHAVIOR (pointer, focus ring, open-state emphasis, no text
+ * selection on toggle); every family keeps its own chrome (cards, counts,
+ * headband titles). Apply alongside the family class on the <details>. */
+.disclosure > summary { cursor: pointer; color: var(--color-text-secondary); user-select: none; }
+.disclosure > summary:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
+.disclosure[open] > summary { color: var(--color-text-primary); }
+
+
+/* ---- Inline form — the one form-container primitive (uplift 2.1) ---------
+ * Column stack + gap. Base gap: sm | --tight xs | --roomy md.
+ * --card: the sunken bordered inline-form treatment.
+ * .form-foot: the button row (left-packed base, --end right-aligned). */
+.vform { display: flex; flex-direction: column; gap: var(--space-sm); }
+.vform--tight { gap: var(--space-xs); }
+.vform--roomy { gap: var(--space-md); }
+.vform--card { border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); padding: var(--space-sm); background: var(--color-surface-sunken); }
+.form-foot { display: flex; gap: var(--space-sm); align-items: center; }
+.form-foot--end { justify-content: flex-end; }

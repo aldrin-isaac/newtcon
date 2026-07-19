@@ -165,7 +165,7 @@ export function renderSpecDetailInto(container: HTMLElement, fields: SpecField[]
   container.appendChild(dl);
 
   if (shape.extras.length > 0) {
-    const det = el("details", { className: "spec-detail-extras" });
+    const det = el("details", { className: "disclosure spec-detail-extras" });
     det.appendChild(el("summary", { className: "spec-detail-extras-summary" },
       `All fields (${shape.extras.length} additional)`));
     const dlx = el("dl", { className: "kv spec-detail" });
@@ -234,7 +234,7 @@ function renderTopologyIntentInto(host: HTMLElement, entry: unknown): void {
   if (portNames.length > 0) {
     host.appendChild(el("h5", { className: "node-spec-subtitle" }, `Port config (${portNames.length})`));
     const cols = ["admin_status", "mtu", "speed", "description"];
-    const table = el("table", { className: "node-spec-port-table" });
+    const table = el("table", { className: "table table--2xs node-spec-port-table" });
     const thead = el("thead");
     const hr = el("tr");
     for (const l of ["Port", "Admin", "MTU", "Speed", "Description"]) hr.appendChild(el("th", {}, l));

@@ -538,7 +538,7 @@ function buildFormFields(fields: FieldDef[], opts: FormOptions = {}): {
   // round-trip failure.
   validate: () => boolean;
 } {
-  const form = el("form", { className: "spec-form" });
+  const form = el("form", { className: "vform vform--roomy spec-form" });
   const prefill = opts.prefill ?? {};
   const exclude = new Set(opts.excludeNames ?? []);
   const renderFields = fields.filter((f) => !exclude.has(f.name));
@@ -1534,7 +1534,7 @@ function renderSubRuleTable(
     headingText.charAt(0).toUpperCase() + headingText.slice(1)));
 
   // Table
-  const table = el("table", { className: "subrule-table" });
+  const table = el("table", { className: "table table--mono-all table--headband subrule-table" });
   const thead = el("thead");
   const headRow = el("tr");
   for (const col of conf.columns) {
@@ -2145,7 +2145,7 @@ function renderServiceBindings(container: HTMLElement, serviceName: string): voi
       }
       body.appendChild(el("p", { className: "svc-bindings-count" },
         `Applied to ${bindings.length} interface${bindings.length === 1 ? "" : "s"}.`));
-      const table = el("table", { className: "svc-bindings-table" });
+      const table = el("table", { className: "table table--mono-all svc-bindings-table" });
       const head = el("tr");
       for (const h of ["Device", "Interface", "Details"]) {
         head.appendChild(el("th", { className: "svc-bindings-th" }, h));

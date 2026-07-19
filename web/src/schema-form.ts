@@ -101,7 +101,7 @@ export async function renderSchemaForm(
   opts: SchemaFormOpts,
 ): Promise<SchemaFormResult> {
   const form = document.createElement("form");
-  form.className = "schema-form";
+  form.className = "vform schema-form";
 
   const valueReaders = new Map<string, () => unknown>();
   const prefill = opts.prefill ?? {};

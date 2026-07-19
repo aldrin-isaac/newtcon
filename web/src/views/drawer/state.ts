@@ -50,7 +50,7 @@ export async function renderStateTab(container: HTMLElement, device: string): Pr
   container.appendChild(renderServicesDisclosure(device));
 
   for (const sub of STATE_SUBSECTIONS) {
-    const details = el("details", { className: "node-state-section" }) as HTMLDetailsElement;
+    const details = el("details", { className: "disclosure node-state-section" }) as HTMLDetailsElement;
     const summary = el("summary", { className: "node-state-section-summary" });
     const title = el("span", { className: "node-state-section-title" }, sub.label);
     summary.appendChild(title);
@@ -87,7 +87,7 @@ export async function renderStateTab(container: HTMLElement, device: string): Pr
 // (derived from the topology's apply-service steps; the inverse of the
 // per-interface service column in the Interfaces table).
 function renderServicesDisclosure(device: string): HTMLElement {
-  const details = el("details", { className: "node-state-section node-state-section--services" }) as HTMLDetailsElement;
+  const details = el("details", { className: "disclosure node-state-section node-state-section--services" }) as HTMLDetailsElement;
   details.open = true;
   const summary = el("summary", { className: "node-state-section-summary" });
   summary.appendChild(el("span", { className: "node-state-section-title" }, "Services"));
@@ -126,7 +126,7 @@ function renderServiceLensInto(body: HTMLElement, usage: ServiceUsage[]): void {
     head.appendChild(el("span", { className: "svc-lens-count" },
       `${u.instances.length} interface${u.instances.length === 1 ? "" : "s"}`));
     card.appendChild(head);
-    const table = el("table", { className: "svc-lens-table" });
+    const table = el("table", { className: "table table--dense table--2xs svc-lens-table" });
     const hr = el("tr");
     for (const h of ["Interface", "VLAN", "IP", "Peer AS"]) hr.appendChild(el("th", {}, h));
     table.appendChild(hr);
@@ -200,7 +200,7 @@ function renderResourceTable(body: HTMLElement, data: unknown, columns: Resource
     body.appendChild(el("p", { className: "node-summary-stat-clean" }, "(none)"));
     return;
   }
-  const table = el("table", { className: "resource-table" });
+  const table = el("table", { className: "table table--dense table--2xs table--mono resource-table" });
   const hr = el("tr");
   for (const h of headers) hr.appendChild(el("th", {}, h));
   table.appendChild(hr);
@@ -331,7 +331,7 @@ function renderAutoTable(body: HTMLElement, data: unknown): void {
       if (!seen.has(k)) { seen.add(k); cols.push(k); }
     }
   }
-  const table = el("table", { className: "node-state-table" });
+  const table = el("table", { className: "table node-state-table" });
   const thead = el("thead", {});
   const trHead = el("tr", {});
   for (const c of cols) {
@@ -397,14 +397,14 @@ function humanizeKey(key: string): string {
 // power-user / debugging surfaces (Config DB · Projection · Intent
 // Tree). Hidden by default below the primary tab panels.
 export function renderRawSection(host: HTMLElement, device: string): void {
-  const wrap = el("details", { className: "node-raw-wrap" }) as HTMLDetailsElement;
+  const wrap = el("details", { className: "disclosure node-raw-wrap" }) as HTMLDetailsElement;
   const sum = el("summary", { className: "node-raw-summary" }, "Raw (debugging)");
   wrap.appendChild(sum);
   const inner = el("div", { className: "node-raw-body" });
   wrap.appendChild(inner);
 
   for (const sec of RAW_SECTIONS) {
-    const d = el("details", { className: "node-raw-section" }) as HTMLDetailsElement;
+    const d = el("details", { className: "disclosure node-raw-section" }) as HTMLDetailsElement;
     d.appendChild(el("summary", { className: "node-raw-section-summary" }, sec.label));
     const body = el("div", { className: "node-raw-section-body" });
     body.appendChild(el("p", { className: "node-summary-loading" }, "Loading…"));

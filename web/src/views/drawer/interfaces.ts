@@ -117,7 +117,7 @@ function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[
   populateBtn.addEventListener("click", () => void openPopulateDefaultPorts(populateHost, device, reload));
 
   // Table.
-  const table = el("table", { className: "iface-table" });
+  const table = el("table", { className: "table table--2xs iface-table" });
   const thead = el("thead");
   const hr = el("tr");
   for (const h of ["Port", "Role", "Speed/MTU", "VLAN / VRF / IP", "Service", "Link"]) hr.appendChild(el("th", {}, h));
@@ -277,7 +277,7 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
 
   // Raw, tucked for power users (replaces the old always-on JSON dump).
   if (row.live) {
-    const raw = el("details", { className: "iface-detail-raw" });
+    const raw = el("details", { className: "disclosure iface-detail-raw" });
     raw.appendChild(el("summary", {}, "Raw"));
     raw.appendChild(renderValue(row.live));
     host.appendChild(raw);
@@ -363,7 +363,7 @@ function renderIfaceLiveStatus(host: HTMLElement, device: string, iface: string)
       // Counters — Rx/Tx table, error/discard rows flagged.
       const pairs = counterPairs(s.counters);
       if (pairs.length) {
-        const table = el("table", { className: "iface-live-counters" });
+        const table = el("table", { className: "table table--bare table--mono-all iface-live-counters" });
         const thead = el("tr", {});
         thead.append(el("th", {}, ""), el("th", { className: "iface-live-num" }, "Rx"), el("th", { className: "iface-live-num" }, "Tx"));
         table.appendChild(thead);
@@ -490,7 +490,7 @@ function renderIrbRow(device: string, row: IrbRow, reload: () => void): HTMLElem
 // pins the VLAN id for an irb service, so authored macvpns surface as hints.
 async function openAddVlanForm(formHost: HTMLElement, device: string, reload: () => void): Promise<void> {
   formHost.textContent = "";
-  const form = el("form", { className: "iface-action-form" });
+  const form = el("form", { className: "vform vform--tight vform--card iface-action-form" });
   form.appendChild(el("p", { className: "iface-action-form-title" }, "Add VLAN interface (SVI)"));
   const row = el("div", { className: "iface-field" });
   row.appendChild(el("label", { className: "iface-field-label" }, "VLAN ID *"));
@@ -501,7 +501,7 @@ async function openAddVlanForm(formHost: HTMLElement, device: string, reload: ()
   form.appendChild(hintEl);
   const errOut = el("div", { className: "form-error-out" });
   form.appendChild(errOut);
-  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const btnRow = el("div", { className: "form-foot iface-action-form-actions" });
   const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
   cancel.addEventListener("click", () => { formHost.textContent = ""; });
   const queueBtn = el("button", { type: "submit", className: "btn btn-primary btn-sm" }, "Queue");
@@ -562,7 +562,7 @@ async function openPortPropsForm(formHost: HTMLElement, device: string, port: st
   wrap.appendChild(sf.form);
   const errOut = el("div", { className: "form-error-out" });
   wrap.appendChild(errOut);
-  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const btnRow = el("div", { className: "form-foot iface-action-form-actions" });
   const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
   cancel.addEventListener("click", () => { formHost.textContent = ""; });
   const stage = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Queue");
@@ -637,7 +637,7 @@ async function openPopulateDefaultPorts(host: HTMLElement, device: string, reloa
   }
   wrap.appendChild(list);
 
-  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const btnRow = el("div", { className: "form-foot iface-action-form-actions" });
   const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
   cancel.addEventListener("click", () => { host.textContent = ""; });
   const add = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Add ports") as HTMLButtonElement;
@@ -695,7 +695,7 @@ function portModeMenu(formHost: HTMLElement, device: string, iface: string, relo
 function openIfaceForm(formHost: HTMLElement, device: string, iface: string, action: ActionDef | undefined, reload: () => void): void {
   formHost.textContent = "";
   if (!action) return;
-  const form = el("form", { className: "iface-action-form" });
+  const form = el("form", { className: "vform vform--tight vform--card iface-action-form" });
   form.appendChild(el("p", { className: "iface-action-form-title" }, `${action.label} · ${iface}`));
   const reads: Array<{ field: ActionField; get: () => string | number }> = [];
   for (const field of action.fields ?? []) {
@@ -705,7 +705,7 @@ function openIfaceForm(formHost: HTMLElement, device: string, iface: string, act
   }
   const errOut = el("div", { className: "form-error-out" });
   form.appendChild(errOut);
-  const btnRow = el("div", { className: "iface-action-form-actions" });
+  const btnRow = el("div", { className: "form-foot iface-action-form-actions" });
   const cancel = el("button", { type: "button", className: "btn btn-ghost btn-sm" }, "Cancel");
   cancel.addEventListener("click", () => { formHost.textContent = ""; });
   const stage = el("button", { type: "submit", className: "btn btn-primary btn-sm" + (action.danger ? " btn-danger" : "") }, "Queue");
