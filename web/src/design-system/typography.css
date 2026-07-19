@@ -1,8 +1,34 @@
+/* JetBrains Mono (OFL-1.1, vendored — see fonts/OFL.txt): the console's
+ * identity face for device names, counters, addresses, and raw output.
+ * woff2 only; system mono stack remains the fallback while loading
+ * (font-display: swap keeps first paint unblocked). */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Typography tokens — system fonts, deliberate scale + weight. */
 
 :root {
   --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono:   ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", "Roboto Mono", Consolas, "Courier New", monospace;
+  --font-mono:   "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", "Roboto Mono", Consolas, "Courier New", monospace;
 
   --text-2xs:  0.6875rem;  /* 11px */
   --text-xs:   0.75rem;    /* 12px */

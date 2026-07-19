@@ -11,6 +11,10 @@ body {
   font-family: var(--font-system);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
+  /* Live numbers (rates, counters, badges) must not shift layout as they
+   * tick — tabular digits console-wide. Mono surfaces are inherently
+   * fixed-width; this covers every proportional-type number (3.3). */
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
