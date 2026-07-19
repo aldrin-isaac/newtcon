@@ -332,8 +332,8 @@ describe("renderError() — other ApiError (non-503)", () => {
     assert.ok(kindEl !== null);
     const kindText = kindEl._collectText();
     assert.ok(
-      kindText.includes("internal error"),
-      `kind text should be translated to "internal error"; got: "${kindText}"`
+      kindText.includes("engine error"),
+      `kind text should be translated to "engine error"; got: "${kindText}"`
     );
 
     const msgEl = findByClassDeep(root, "error-message");

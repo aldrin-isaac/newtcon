@@ -75,9 +75,11 @@ async function loadPanels(): Promise<Panel[]> {
         });
       }
     } catch {
-      // Schema endpoint unavailable — no panels. The Specs view will
-      // mount with an empty subnav; the operator sees the error in the
-      // network panel via standard ApiError flow.
+      // Schema endpoint unavailable — no panels THIS attempt. Reset the
+      // cache so the next call retries instead of replaying the failure
+      // forever (#390: a transient schema fetch used to dead-mount the
+      // Specs view until a full page reload).
+      panelsLoaded = null;
     }
     PANELS = out;
     return out;
@@ -2297,11 +2299,33 @@ let activeFacet: SpecKind = "services";
 // list; the facet subnav items go inactive.
 let activeGeneral: null | "ssh" | "permissions" = null;
 
+/** specsViewDegraded — true when the schema never loaded (empty PANELS): the
+ *  view mounted dead (#390). The tab dispatcher re-mounts on activation while
+ *  this holds, and the error state below offers an explicit Retry. */
+export function specsViewDegraded(): boolean {
+  return PANELS.length === 0;
+}
+
 export async function mountSpecsView(root: HTMLElement): Promise<void> {
   root.textContent = "";
   // Schema-driven panel discovery — fetch the kind list before
   // building the subnav. Cached for the session after the first call.
   await loadPanels();
+
+  if (PANELS.length === 0) {
+    // Schema unavailable — render an explicit, retryable error state instead
+    // of a dead empty subnav (#390).
+    root.textContent = "";
+    const box = el("div", { className: "panel-empty specs-degraded" });
+    box.appendChild(el("h3", {}, "Couldn't load the spec catalog"));
+    box.appendChild(el("p", {},
+      "The engine's schema wasn't reachable, so no spec facets are available. This is usually transient."));
+    const retry = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Retry");
+    retry.addEventListener("click", () => { void mountSpecsView(root); });
+    box.appendChild(retry);
+    root.appendChild(box);
+    return;
+  }
 
   const layout = el("div", { className: "specs-layout" });
   const subnav = el("aside", { className: "specs-subnav" });

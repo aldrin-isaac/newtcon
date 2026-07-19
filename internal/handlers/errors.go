@@ -41,6 +41,7 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
 	"maps"
 	"net/http"
@@ -79,6 +80,16 @@ func writeUpstreamErrorWithStatus(w http.ResponseWriter, corrID string, err erro
 			fmt.Sprintf("%s: not found", endpoint), details)
 	case *newtronc.ConflictError:
 		setIfAbsent(details, "underlying_error_message", string(e.Body))
+		// Post-newtron#448, precondition refusals arrive as 409s whose body
+		// carries newtron's "precondition failed for <verb> ..." prefix. Those
+		// are "not ready / refused by a gate", not device-state drift — classify
+		// them as precondition_failure so the operator headline says so.
+		// True drift + referential-integrity conflicts keep drift_refusal.
+		if bytes.Contains(e.Body, []byte("precondition failed")) {
+			types.WriteError(w, http.StatusConflict, types.KindPreconditionFailure,
+				fmt.Sprintf("%s: refused (precondition)", endpoint), details)
+			return
+		}
 		// Referential-integrity guard (newtron #319): surface the referencing
 		// endpoints + whether ?force=true can cascade, so the operator sees
 		// what's applied and can force the delete.

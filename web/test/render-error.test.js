@@ -47,13 +47,15 @@ describe("formatErrorBrief() — drift_refusal with references", () => {
 
 describe("translateErrorKind()", () => {
   test("known kinds map to operator-readable text", () => {
-    assert.equal(translateErrorKind("validation_failure"), "validation failed");
-    assert.equal(translateErrorKind("precondition_failure"), "precondition not met");
-    assert.equal(translateErrorKind("drift_refusal"), "drift detected — refused to apply");
-    assert.equal(translateErrorKind("authorization_failure"), "permission denied");
+    // Operator taxonomy (uplift 2.2): headlines carry triage meaning —
+    // refused / not ready / not permitted / unreachable — never plumbing words.
+    assert.equal(translateErrorKind("validation_failure"), "invalid input");
+    assert.equal(translateErrorKind("precondition_failure"), "not ready — refused by a precondition");
+    assert.equal(translateErrorKind("drift_refusal"), "refused — conflicts with device state");
+    assert.equal(translateErrorKind("authorization_failure"), "not permitted");
     assert.equal(translateErrorKind("authentication_failure"), "not signed in");
-    assert.equal(translateErrorKind("newtron_unavailable"), "newtron is unreachable");
-    assert.equal(translateErrorKind("internal"), "internal error");
+    assert.equal(translateErrorKind("newtron_unavailable"), "engine unreachable");
+    assert.equal(translateErrorKind("internal"), "engine error");
   });
 
   test("unknown kind falls back to snake-case humanised", () => {
@@ -101,7 +103,7 @@ describe("formatErrorBrief()", () => {
         details: { caller: "alice", permission: "spec.author", resource: "svc-b" },
       },
     });
-    assert.equal(formatErrorBrief(err), "permission denied: alice lacks spec.author on svc-b");
+    assert.equal(formatErrorBrief(err), "not permitted: alice lacks spec.author on svc-b");
   });
 
   test("authorization_failure without typed details falls back to server message", () => {
@@ -112,14 +114,14 @@ describe("formatErrorBrief()", () => {
         details: {},
       },
     });
-    assert.equal(formatErrorBrief(err), "permission denied: some bare 403 from the substrate");
+    assert.equal(formatErrorBrief(err), "not permitted: some bare 403 from the substrate");
   });
 
   test("validation_failure renders translated kind + server message", () => {
     const err = new ApiError(400, {
       error: { kind: "validation_failure", message: "spec name required", details: {} },
     });
-    assert.equal(formatErrorBrief(err), "validation failed: spec name required");
+    assert.equal(formatErrorBrief(err), "invalid input: spec name required");
   });
 
   test("authentication_failure renders translated kind + server message", () => {
@@ -140,7 +142,7 @@ describe("formatErrorBrief()", () => {
       },
     });
     assert.equal(formatErrorBrief(err),
-      "drift detected — refused to apply: IPVPNSpec 'IRB' has 2 references: ServiceSpec 'OVERLAY_IRB_A' (ipvpn), ServiceSpec 'OVERLAY_IRB_B' (ipvpn)");
+      "refused — conflicts with device state: IPVPNSpec 'IRB' has 2 references: ServiceSpec 'OVERLAY_IRB_A' (ipvpn), ServiceSpec 'OVERLAY_IRB_B' (ipvpn)");
   });
 
   test("surfaces underlying unresolved-references (forward 400) over the generic envelope", () => {
@@ -152,16 +154,16 @@ describe("formatErrorBrief()", () => {
       },
     });
     assert.equal(formatErrorBrief(err),
-      "validation failed: unresolved references: ipvpn references IPVPNSpec 'GHOST' which does not exist");
+      "invalid input: unresolved references: ipvpn references IPVPNSpec 'GHOST' which does not exist");
   });
 
   test("falls back to envelope message when no underlying (or non-JSON underlying surfaced raw)", () => {
     // no underlying → envelope message (unchanged behavior)
     const a = new ApiError(400, { error: { kind: "validation_failure", message: "spec name required", details: {} } });
-    assert.equal(formatErrorBrief(a), "validation failed: spec name required");
+    assert.equal(formatErrorBrief(a), "invalid input: spec name required");
     // non-JSON underlying → surfaced raw
     const b = new ApiError(503, { error: { kind: "newtron_unavailable", message: "x", details: { underlying_error_message: "dial tcp: connection refused" } } });
-    assert.equal(formatErrorBrief(b), "newtron is unreachable: dial tcp: connection refused");
+    assert.equal(formatErrorBrief(b), "engine unreachable: dial tcp: connection refused");
   });
 
   test("plain Error returns its message", () => {

@@ -15,6 +15,9 @@ export interface ViewDef {
   mount: (panel: HTMLElement) => void | Promise<void>;
   /** True → re-mount on every tab activation (fresh-data views). */
   remountOnActivate: boolean;
+  /** Optional predicate: re-mount on activation only when it returns true
+   *  (degraded-mount recovery, e.g. Specs after a failed schema load, #390). */
+  shouldRemount?: () => boolean;
 }
 
 const views = new Map<string, ViewDef>();

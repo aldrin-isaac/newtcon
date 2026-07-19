@@ -8,6 +8,7 @@
 import { registerView } from "./registry.js";
 import { mountHistoryTab } from "../history.js";
 import { mountAuditTab } from "../audit.js";
+import { mountSpecsView, specsViewDegraded } from "./specs/index.js";
 
 export { viewFor } from "./registry.js";
 
@@ -23,4 +24,14 @@ registerView({
   panelId: "panel-audit",
   remountOnActivate: true,
   mount: (panel) => { void mountAuditTab(panel); },
+});
+
+registerView({
+  id: "specs",
+  panelId: "panel-specs",
+  remountOnActivate: false,
+  // Dead-mount recovery (#390): a transient schema failure leaves the Specs
+  // view degraded (empty PANELS); re-mount on activation until it heals.
+  shouldRemount: specsViewDegraded,
+  mount: (panel) => { void mountSpecsView(panel); },
 });

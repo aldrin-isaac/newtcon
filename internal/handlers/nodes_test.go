@@ -575,3 +575,34 @@ func TestProjectionDiff_MalformedJSON(t *testing.T) {
 		t.Errorf("error.kind: want validation_failure, got %q", kind)
 	}
 }
+
+
+// TestConflictClassification_Precondition verifies that a 409 whose body
+// carries newtron's "precondition failed" prefix surfaces as
+// precondition_failure ("not ready / refused by a gate"), not drift_refusal
+// (uplift 2.2; post-newtron#448 preconditions arrive as 409s).
+func TestConflictClassification_Precondition(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprintln(w, `{"error":"precondition failed for apply-service on Vlan100: ..."}`)
+	}))
+	defer upstream.Close()
+
+	mux := http.NewServeMux()
+	handlers.RegisterNodesRoutes(mux, handlers.NodesDeps{Client: newtronc.New(upstream.URL)})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/networks/default/nodes/switch1/rpc/apply-service", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct{ Error struct{ Kind string } }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if body.Error.Kind != "precondition_failure" {
+		t.Errorf("kind: want precondition_failure, got %q", body.Error.Kind)
+	}
+}

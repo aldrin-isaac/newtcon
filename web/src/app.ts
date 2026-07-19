@@ -80,7 +80,7 @@ function setupTabs(): void {
     // on every activation — History so newly-applied entries surface
     // immediately, Audit for fresh events + integrity status (no auto-poll).
     const view = viewFor(name);
-    if (view?.remountOnActivate) {
+    if (view && (view.remountOnActivate || view.shouldRemount?.())) {
       const panel = document.getElementById(view.panelId);
       if (panel) void view.mount(panel);
     }
