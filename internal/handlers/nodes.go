@@ -39,6 +39,7 @@ type NodesDeps struct {
 //	GET  /api/networks/{netID}/topology                                — full topology
 //	GET  /api/networks/{netID}/nodes/{device}/info                     — device overview
 //	GET  /api/networks/{netID}/nodes/{device}/health                   — health check
+//	GET  /api/networks/{netID}/nodes/{device}/db/{db}/{table}          — operational-DB bulk table read
 //	GET  /api/networks/{netID}/nodes/{device}/interfaces               — interface list
 //	GET  /api/networks/{netID}/nodes/{device}/interfaces/{name}        — interface detail
 //	GET  /api/networks/{netID}/nodes/{device}/interfaces/{name}/binding — bound service
@@ -117,6 +118,18 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
 			return c.NodeHealth(ctx, netID, device)
 		}, "/api/networks/"+netID+"/nodes/"+device+"/health")
+	}))
+
+	// Operational-DB bulk table read (slice 4.2: link truth). {db} and
+	// {table} pass through verbatim — newtron validates the pair.
+	mux.Handle("GET /api/networks/{netID}/nodes/{device}/db/{db}/{table}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		netID := r.PathValue("netID")
+		device := r.PathValue("device")
+		db := r.PathValue("db")
+		table := r.PathValue("table")
+		proxyNode(w, r, func(ctx context.Context) (json.RawMessage, error) {
+			return c.NodeDBTable(ctx, netID, device, db, table)
+		}, "/api/networks/"+netID+"/nodes/"+device+"/db/"+db+"/"+table)
 	}))
 
 	// Interface list.

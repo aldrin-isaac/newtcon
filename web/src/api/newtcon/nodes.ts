@@ -120,6 +120,12 @@ export async function fetchNodeConfigDBEntry(
   ));
 }
 
+// fetchNodeDBTable reads one operational-DB table for a device in bulk
+// (newtron's kind-aware /db/{DB}/{TABLE}; slice 4.2 link truth).
+export async function fetchNodeDBTable(device: string, db: string, table: string, network?: string): Promise<unknown> {
+  return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/db/${encodeURIComponent(db)}/${encodeURIComponent(table)}`, network));
+}
+
 // fetchNodeDrift returns intent-vs-CONFIG_DB drift for a device.
 export async function fetchNodeDrift(device: string, network?: string): Promise<unknown> {
   return fetchNodeRaw(pathFor(`nodes/${encodeURIComponent(device)}/drift`, network));

@@ -14,7 +14,12 @@
 // to find them.
 import { type LabState, fetchLabStatus, labEvents, postLabDeploy, postLabDestroy, postLabProvision } from "../../api/newtcon/lab.js";
 import { fetchPlatformPorts, fetchSpecDetail, fetchSpecList } from "../../api/newtcon/network.js";
-import { fetchNodeDrift, fetchNodeInfo, fetchTopology } from "../../api/newtcon/nodes.js";
+import { fetchNodeBGPCheck, fetchNodeDBTable, fetchNodeDrift, fetchNodeInfo, fetchTopology } from "../../api/newtcon/nodes.js";
+import {
+  type LldpNeighbor, type UnderlayState,
+  parseLldpTable, parsePortSpeeds, parseBgpCheckOk,
+  classifyLink, linkSpeedForLink, linkStrokeWidth, linkUnderlayState,
+} from "../../topology-links.js";
 import { ApiError } from "../../api/newtcon/services.js";
 import { confirmInline } from "../../confirm-inline.js";
 import { type DeviceStatus, resolveDeviceStatus } from "../../device-status.js";
@@ -156,6 +161,11 @@ interface TopologyRenderOpts {
   onNodeContextMenu?: (name: string, ev: MouseEvent) => void;
   driftByDevice?: Map<string, number>;
   statusByDevice?: Map<string, DeviceStatus>;
+  // Link truth (slice 4.2) — LLDP far-ends / actuated speeds / underlay
+  // health per device; the link loop derives verdict + width + state class.
+  lldpByDevice?: Map<string, LldpNeighbor[]>;
+  speedsByDevice?: Map<string, Map<string, number>>;
+  underlayByDevice?: Map<string, UnderlayState>;
   selected?: Set<string>;
   pendingByDevice?: Map<string, number>;  // count of unsaved-intent items per device
   // Staging overlays — render device cards in green/red according to queue state.
@@ -310,12 +320,28 @@ function renderTopologySVG(
       });
       svg.appendChild(hit);
     }
+    // Link truth (slice 4.2): LLDP verdict → solid/dashed/mismatch class;
+    // configured speed → stroke-width ATTRIBUTE (CSS palette rules for
+    // down/drift still win over attributes, keeping their emphasis).
+    let truthClass = "";
+    let widthAttr: string | undefined;
+    if (opts.lldpByDevice) {
+      const verdict = classifyLink(link, opts.lldpByDevice);
+      truthClass += ` topo-link--${verdict}`;
+    }
+    if (opts.underlayByDevice && linkUnderlayState(link, opts.underlayByDevice) === "down") {
+      truthClass += " topo-link--underlay-down";
+    }
+    if (opts.speedsByDevice) {
+      widthAttr = String(linkStrokeWidth(linkSpeedForLink(link, opts.speedsByDevice)));
+    }
     const line = svgEl("line", {
-      "class": "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : ""),
+      "class": "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass,
       x1: String(from.cx),
       y1: String(from.cy),
       x2: String(to.cx),
       y2: String(to.cy),
+      ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
     });
     if (link.local_device) line.setAttribute("data-local-device", link.local_device);
     if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
@@ -1135,6 +1161,12 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
 
     const onlineByDevice = new Map<string, boolean>();
     const driftByDevice = new Map<string, number>();
+    // Link truth (slice 4.2): three bulk reads per ONLINE device — LLDP
+    // far-ends, actuated port speeds, underlay session health. All
+    // best-effort: a failed read just leaves that device silent.
+    const lldpByDevice = new Map<string, LldpNeighbor[]>();
+    const speedsByDevice = new Map<string, Map<string, number>>();
+    const underlayByDevice = new Map<string, UnderlayState>();
     const probeResults = await Promise.allSettled(
       deviceNames.map(async (name) => {
         // Hit /info as the cheapest available liveness probe. Success → online.
@@ -1158,6 +1190,15 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
           const drift = await fetchNodeDrift(name);
           if (Array.isArray(drift)) driftByDevice.set(name, drift.length);
         } catch { /* drift unavailable; leave count undefined */ }
+        // Link truth, same online-only rule.
+        const [lldp, ports, bgp] = await Promise.allSettled([
+          fetchNodeDBTable(name, "APPL_DB", "LLDP_ENTRY_TABLE"),
+          fetchNodeDBTable(name, "APPL_DB", "PORT_TABLE"),
+          fetchNodeBGPCheck(name),
+        ]);
+        if (lldp.status === "fulfilled") lldpByDevice.set(name, parseLldpTable(lldp.value));
+        if (ports.status === "fulfilled") speedsByDevice.set(name, parsePortSpeeds(ports.value));
+        if (bgp.status === "fulfilled") underlayByDevice.set(name, parseBgpCheckOk(bgp.value));
       })
     );
     void probeResults;
@@ -1519,6 +1560,31 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     );
     graphSlot.appendChild(navHint);
 
+    // Link-truth legend (slice 4.2) — bottom-right twin of the nav hint.
+    // Tiny inline SVG swatches teach the line grammar: solid = LLDP-verified,
+    // dashed = intent-only, red = mis-cabled/underlay-down, thickness = speed.
+    const legend = el("div", { className: "topo-legend", ariaHidden: "true" });
+    const swatch = (cls: string, w: number, dash?: string): SVGElement => {
+      const sw = svgEl("svg", { width: "22", height: "8", viewBox: "0 0 22 8" });
+      sw.appendChild(svgEl("line", {
+        "class": cls, x1: "1", y1: "4", x2: "21", y2: "4",
+        "stroke-width": String(w), ...(dash !== undefined ? { "stroke-dasharray": dash } : {}),
+      }));
+      return sw;
+    };
+    const legendItem = (label: string, cls: string, w: number, dash?: string): HTMLElement => {
+      const item = el("span", { className: "topo-legend-item" });
+      item.append(swatch(cls, w, dash), el("span", {}, label));
+      return item;
+    };
+    legend.append(
+      legendItem("verified", "topo-link topo-elem--actuated-ok", 2),
+      legendItem("intent-only", "topo-link topo-elem--spec-only", 1.5, "4 3"),
+      legendItem("mis-cable / underlay down", "topo-link topo-link--mismatch", 3),
+      legendItem("thickness = speed", "topo-link topo-elem--unknown", 3),
+    );
+    graphSlot.appendChild(legend);
+
     // Interface lists pulled from the topology declaration (works offline);
     // live-fetched lists merge in via the panel module's source cache.
     const interfacesByDevice: Map<string, string[]> = new Map();
@@ -1576,6 +1642,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         onNodeClick: (deviceName) => { openNodeDrawer(deviceName, viewMode); },
         driftByDevice,
         statusByDevice,
+        lldpByDevice,
+        speedsByDevice,
+        underlayByDevice,
         selected: new Set<string>(),
         viewState,
         onViewStateChange: (next) => { viewState = next; },

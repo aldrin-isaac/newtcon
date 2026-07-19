@@ -279,6 +279,15 @@
 .topo-link.topo-elem--actuated-down { stroke: var(--color-danger);       stroke-width: 2.5; }
 .topo-link.topo-elem--drift         { stroke: var(--color-drift);        stroke-width: 2.5; }
 .topo-link.topo-elem--unknown       { stroke: var(--color-border-strong); }
+/* Link truth (slice 4.2) — placed AFTER the palette rules so equal-specificity
+   verdict classes win. Dashed stays reserved for "not actuated yet" (the
+   spec-only law): intent-only links dash; a VERIFIED link is always solid;
+   a MISMATCH (LLDP hears the wrong far end — mis-cable) or an underlay-down
+   link overrides to danger and stays solid so it cannot be read as pending. */
+.topo-link.topo-link--intent-only   { stroke-dasharray: 4 3; }
+.topo-link.topo-link--verified      { stroke-dasharray: none; }
+.topo-link.topo-link--mismatch      { stroke: var(--color-danger); stroke-dasharray: none; stroke-width: 3; }
+.topo-link.topo-link--underlay-down { stroke: var(--color-danger); }
 
 /* Layered filter dimming (slice #174.E) — non-matching nodes stay in
  * place so the operator keeps context, but fade out so the filtered
