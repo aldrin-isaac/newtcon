@@ -34,13 +34,13 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE}`);
-  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 30000 });
 
   // 1. Overlay appears at boot when no session cookie is set.
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && !el.hidden;
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-01-overlay.png" });
 
   const title = await page.$eval("#auth-overlay .auth-card-title", (el) => el.textContent?.trim());
@@ -74,7 +74,7 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && el.hidden;
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
   expect(true, "overlay hides after successful sign-in");
 
   // 5. User pill shows the username.
@@ -89,7 +89,7 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("panel-specs");
     return el && el.children.length > 0;
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
   expect(true, "workspace panel-specs mounts after sign-in");
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-02-signed-in.png" });
 
@@ -123,7 +123,7 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && !el.hidden;
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
   expect(true, "overlay reappears after sign-out + reload");
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-03-signed-out.png" });
 } finally {

@@ -594,7 +594,7 @@
 .view-empty { color: var(--color-text-muted); font-style: italic; padding: var(--space-md) 0; }
 
 /* Apply-preview modal (slice #171.A) */
-.apply-preview-overlay { position: fixed; inset: 0; background: rgba(28, 25, 23, 0.45); z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; animation: fade-in var(--duration-fast) var(--ease-standard); }
+.apply-preview-overlay { position: fixed; inset: 0; background: var(--color-scrim); z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; animation: fade-in var(--duration-fast) var(--ease-standard); }
 .apply-preview-card { width: min(720px, 92vw); max-height: 84vh; display: flex; flex-direction: column; background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-overlay); border: 1px solid var(--color-border-subtle); overflow: hidden; }
 .apply-preview-head { padding: var(--space-md) var(--space-lg) var(--space-sm); border-bottom: 1px solid var(--color-border-subtle); }
 .apply-preview-title { font-size: var(--text-lg); margin: 0; color: var(--color-text-primary); }
@@ -669,7 +669,7 @@
 .apply-preview-foot { display: flex; justify-content: flex-end; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--color-border-subtle); background: var(--color-surface-sunken); }
 
 /* Command palette */
-.palette-overlay { position: fixed; inset: 0; background: rgba(28, 25, 23, 0.4); z-index: 30; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; animation: fade-in var(--duration-fast) var(--ease-standard); }
+.palette-overlay { position: fixed; inset: 0; background: var(--color-scrim); z-index: 30; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; animation: fade-in var(--duration-fast) var(--ease-standard); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .palette { width: min(640px, 92vw); background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-overlay); border: 1px solid var(--color-border-subtle); overflow: hidden; }
 .palette-search { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-border-subtle); }
@@ -1170,7 +1170,7 @@
 .reconcile-btn--preview { background: var(--color-accent); color: var(--color-text-on-accent); border-color: var(--color-accent); }
 .reconcile-btn--preview:hover { background: var(--color-accent-hover); }
 .reconcile-btn--apply { background: var(--color-warning); color: var(--color-surface); border-color: var(--color-warning); }
-.reconcile-btn--apply:hover { background: #8e5817; }
+.reconcile-btn--apply:hover { background: var(--color-warning-strong); }
 .reconcile-mode-label { display: inline-flex; align-items: center; gap: var(--space-xs); font-size: var(--text-sm); color: var(--color-text-secondary); }
 
 /* Topology toolbar (existing app.ts emits this) */
@@ -1214,8 +1214,8 @@
 .deploy-modal-log {
   margin: var(--space-md) 0;
   padding: var(--space-sm);
-  background: var(--color-surface-recessed, #0b1220);
-  color: var(--color-text-on-recessed, #e6edf3);
+  background: var(--color-terminal-bg);
+  color: var(--color-terminal-text);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-xs);
   line-height: 1.45;
@@ -1344,7 +1344,7 @@
 .svc-lens-count { font-size: var(--text-2xs); color: var(--color-text-secondary); }
 
 /* Pending overlay + staged per-port action forms. */
-.iface-row--pending > td { background: var(--color-warning-bg, #fff8e1); }
+.iface-row--pending > td { background: var(--color-warning-bg); }
 .iface-detail-queued { display: flex; gap: var(--space-sm); align-items: center; margin-bottom: var(--space-sm); }
 .iface-detail-queued-list { font-size: var(--text-2xs); color: var(--color-text-secondary); }
 .iface-action-form-host { margin-top: var(--space-sm); }
@@ -1584,7 +1584,7 @@
 .network-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(28, 25, 23, 0.4);
+  background: var(--color-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2013,7 +2013,7 @@
 .lifecycle-section {
   margin: var(--space-md) 0;
   padding: var(--space-md);
-  background: var(--color-surface-recessed, #f7f8fa);
+  background: var(--color-surface-recessed);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-sm);
 }
@@ -2059,13 +2059,13 @@
   text-transform: capitalize;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  color: #fff;
+  color: var(--color-text-on-accent);
 }
 .lifecycle-pill--running    .lifecycle-pill-state { background: var(--color-success); }
-.lifecycle-pill--booting    .lifecycle-pill-state { background: var(--color-warning, #d97706); }
-.lifecycle-pill--provisioning .lifecycle-pill-state { background: var(--color-warning, #d97706); }
-.lifecycle-pill--unreachable .lifecycle-pill-state { background: var(--color-warning, #d97706); }
-.lifecycle-pill--down       .lifecycle-pill-state { background: var(--color-danger, #dc2626); }
+.lifecycle-pill--booting    .lifecycle-pill-state { background: var(--color-warning); }
+.lifecycle-pill--provisioning .lifecycle-pill-state { background: var(--color-warning); }
+.lifecycle-pill--unreachable .lifecycle-pill-state { background: var(--color-warning); }
+.lifecycle-pill--down       .lifecycle-pill-state { background: var(--color-danger); }
 .lifecycle-pill--unrealized .lifecycle-pill-state { background: var(--color-text-muted); }
 .lifecycle-pill-detail { color: var(--color-text-muted); font-size: var(--text-xs); }
 
@@ -2107,15 +2107,15 @@
   stroke-width: 1.5;
 }
 .topo-status-dot--running    { fill: var(--color-success); }
-.topo-status-dot--booting    { fill: var(--color-warning, #d97706); }
+.topo-status-dot--booting    { fill: var(--color-warning); }
 /* Provisioning: solid amber + pulse (like booting) — the device is "in motion"
  * while newtron reconfigures it. The pill/tooltip text disambiguates from booting. */
-.topo-status-dot--provisioning { fill: var(--color-warning, #d97706); animation: topo-booting-pulse 1.4s ease-in-out infinite; }
+.topo-status-dot--provisioning { fill: var(--color-warning); animation: topo-booting-pulse 1.4s ease-in-out infinite; }
 /* Up but unreachable: hollow amber-ringed dot — the process is alive (has a
  * ring) but its interior is empty (can't confirm live state). Distinct from
  * solid-green running and pulsing-amber booting. */
-.topo-status-dot--unreachable { fill: var(--color-surface); stroke: var(--color-warning, #d97706); stroke-width: 2px; }
-.topo-status-dot--down       { fill: var(--color-danger, #dc2626); }
+.topo-status-dot--unreachable { fill: var(--color-surface); stroke: var(--color-warning); stroke-width: 2px; }
+.topo-status-dot--down       { fill: var(--color-danger); }
 .topo-status-dot--unrealized { fill: var(--color-text-muted); }
 
 /* Booting devices: pulse to signal "in motion" while we wait for newtlab. */
@@ -2273,7 +2273,7 @@
 /* Node drag cursor + visual lift when actively dragging. */
 .topo-node { cursor: move; }
 .topo-node--dragging { opacity: 0.85; }
-.topo-node--dragging > rect { filter: drop-shadow(0 4px 8px rgb(28 25 23 / 0.18)); }
+.topo-node--dragging > rect { filter: drop-shadow(var(--shadow-drag)); }
 
 /* Reset-positions button gets a slightly muted treatment so it doesn't
  * compete with the primary zoom controls. */
@@ -2429,7 +2429,7 @@
    ────────────────────────────────────────────────────────────────────── */
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 100;
-  background: rgb(28 25 23 / 0.45);
+  background: var(--color-scrim);
   display: flex; align-items: center; justify-content: center;
   padding: var(--space-md);
 }
@@ -2486,11 +2486,11 @@
 .confirm-modal-btn--danger {
   border-color: var(--color-danger);
   background: var(--color-danger);
-  color: #ffffff;
+  color: var(--color-text-on-accent);
 }
 .confirm-modal-btn--danger:hover {
-  background: #8e2e25; /* hand-darkened from --color-danger */
-  border-color: #8e2e25;
+  background: var(--color-danger-strong);
+  border-color: var(--color-danger-strong);
 }
 
 /* ──────────────────────────────────────────────────────────────────────
