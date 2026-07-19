@@ -109,15 +109,7 @@
 .spec-row-delete-btn:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 /* Topology */
-/* The detail drawer is a fixed overlay on the right. When it's open, shrink the
- * Topology view by the drawer's width so the whole graph stays visible + pan/zoom-
- * able to the left of it, instead of the drawer sitting on top of the canvas
- * (which swallows pointer events over its half). Body class set from the drawer's
- * state in app.ts. Scoped to the Topology view — other views are fine overlaid. */
-.view-topology { box-sizing: border-box; transition: padding-right var(--duration-base) var(--ease-standard); }
-body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
-.topology-canvas { display: flex; flex-direction: column; }
-.topology-graph-host { background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: var(--space-md); min-height: 360px; overflow: auto; }
+.view-topology { box-sizing: border-box; }
 /* SVG fills its slot — pan/zoom is via viewBox, not via the element
  * dimensions. width:100% height:100% lets the wrapper sizing drive
  * the visible canvas; the SVG's own width/height attributes set the
@@ -309,9 +301,35 @@ body.drawer-open .view-topology { padding-right: min(640px, 92vw); }
 .topology-error { color: var(--color-danger); font-size: var(--text-sm); }
 
 
-/* Drawer */
+/* Drawer.
+ * Below 1400px (narrow viewports) it is a fixed overlay that
+ * slides in from the right — it covers content, which is the price of a
+ * small screen. At ≥1400px it DOCKS: a third .app-shell grid column beside
+ * the workspace, so the canvas and the inspector coexist with no overlap
+ * and no shrink hacks (uplift 2.5; replaces the body.drawer-open
+ * MutationObserver + canvas padding-right). */
 .drawer { position: fixed; top: 0; right: 0; width: min(640px, 92vw); height: 100vh; background: var(--color-surface); border-left: 1px solid var(--color-border-subtle); box-shadow: var(--shadow-overlay); transform: translateX(100%); transition: transform var(--duration-base) var(--ease-standard); z-index: 20; display: flex; flex-direction: column; }
 .drawer.open { transform: translateX(0); }
+@media (min-width: 1400px) {
+  .app-shell { grid-template-columns: var(--sidebar-width) 1fr auto; }
+  .drawer {
+    position: static;
+    width: 0;
+    height: 100vh;
+    transform: none;
+    transition: none;
+    box-shadow: none;
+    border-left: none;
+    overflow: hidden;
+  }
+  .drawer.open {
+    width: min(560px, 38vw);
+    border-left: 1px solid var(--color-border-subtle);
+  }
+  /* The docked pane's inner content must not squeeze during the 0-width
+   * closed state (text reflow flash on open): pin the content width. */
+  .drawer.open .drawer-header, .drawer.open .drawer-content { min-width: 0; }
+}
 .drawer-header { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-border-subtle); min-height: var(--header-height); }
 .drawer-breadcrumb { flex: 1; display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-sm); color: var(--color-text-secondary); }
 .drawer-breadcrumb .crumb-main { font-family: var(--font-mono); color: var(--color-text-primary); font-weight: var(--weight-medium); }
