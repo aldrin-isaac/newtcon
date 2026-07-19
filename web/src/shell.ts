@@ -35,6 +35,10 @@ import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { initTheme, toggleTheme, currentTheme } from "./theme.js";
 import { setupFabricHealthStrip } from "./fabric-health-strip.js";
+import { type VerbContext, parseVerb } from "./verb-parser.js";
+import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
+import { fetchSpecList } from "./api/newtcon/network.js";
+import { parseDeviceSteps } from "./device-steps.js";
 
 // ---- Theme toggle ---------------------------------------------------------
 // The button lives in the sidebar footer (index.html); theme.ts owns the
@@ -280,10 +284,82 @@ function setupPalette(): void {
     });
   }
 
+  // ---- Cmd-K verbs (uplift 5.1) ------------------------------------------
+  // Sentences stage INTENT into the queue — the same preview/undo path as
+  // every other write; nothing applies directly from the palette. The verb
+  // catalog (services / devices / interfaces / networks) is fetched lazily
+  // on first verb-shaped input and cached for the palette session.
+  let verbCtx: VerbContext | null = null;
+  let verbCtxLoading = false;
+  function loadVerbContext(): void {
+    if (verbCtx !== null || verbCtxLoading) return;
+    verbCtxLoading = true;
+    void (async () => {
+      try {
+        const [services, topo, nets] = await Promise.allSettled([
+          fetchSpecList("services"),
+          fetchTopology(),
+          fetch("/api/networks", { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
+        ]);
+        // fetchSpecList returns bare names (strings); tolerate {name} rows too.
+        const serviceNames = services.status === "fulfilled" && Array.isArray(services.value)
+          ? (services.value as Array<string | { name?: string }>)
+              .map((s) => (typeof s === "string" ? s : s.name ?? "")).filter(Boolean)
+          : [];
+        const nodes = topo.status === "fulfilled" ? ((topo.value as { nodes?: Record<string, { steps?: unknown[] }> }).nodes ?? {}) : {};
+        const interfacesByDevice = new Map<string, readonly string[]>();
+        for (const [name, entry] of Object.entries(nodes)) {
+          const ifaces = new Set<string>();
+          for (const step of parseDeviceSteps(entry?.steps)) {
+            if (step.iface !== undefined) ifaces.add(step.iface);
+          }
+          interfacesByDevice.set(name, [...ifaces]);
+        }
+        const rawNets = nets.status === "fulfilled" ? nets.value : [];
+        const netList = Array.isArray(rawNets) ? rawNets : (rawNets as { networks?: unknown[] }).networks ?? [];
+        const networks = (netList as Array<{ id?: string; name?: string }>).map((n) => n.id ?? n.name ?? "").filter(Boolean);
+        verbCtx = { services: serviceNames, devices: Object.keys(nodes), interfacesByDevice, networks };
+        renderPaletteResults(input!.value);
+      } finally {
+        verbCtxLoading = false;
+      }
+    })();
+  }
+
+  function verbItems(query: string): PaletteItem[] {
+    const head = query.trim().split(/\s/, 1)[0]?.toLowerCase() ?? "";
+    if (head === "" || !["apply", "create", "deploy"].some((v) => v.startsWith(head) || head.startsWith(v))) return [];
+    loadVerbContext();
+    if (verbCtx === null) return [];
+    return parseVerb(query, verbCtx).map((s) => ({
+      label: s.label + (s.complete ? "" : "  (keep typing)"),
+      kind: "Action",
+      action: () => {
+        if (!s.complete) return; // incomplete sentences are hints, not actions
+        if (s.kind === "apply" && s.service && s.device && s.iface) {
+          enqueueInterfaceAction(s.device, s.iface, "apply-service", `Bind ${s.service} on ${s.device}:${s.iface}`, { service: s.service });
+          showToast({ kind: "success", title: "Staged", body: `${s.service} on ${s.device}:${s.iface} — review in the pending bar` });
+          close();
+        } else if (s.kind === "create-vlan" && s.device && s.vlanId !== undefined) {
+          enqueueDeviceAction(s.device, "create-vlan", `Create VLAN ${s.vlanId} on ${s.device}`, { vlan_id: String(s.vlanId) });
+          showToast({ kind: "success", title: "Staged", body: `VLAN ${s.vlanId} on ${s.device} — review in the pending bar` });
+          close();
+        } else if (s.kind === "deploy") {
+          close();
+          location.hash = `#/${s.network ?? activeNetwork()}/topology`;
+        }
+      },
+    }));
+  }
+
   function renderPaletteResults(query: string): void {
     resultsEl!.textContent = "";
     const q = query.toLowerCase().trim();
-    const filtered = q === "" ? paletteItems : paletteItems.filter((it) => it.label.toLowerCase().includes(q));
+    const verbs = verbItems(query);
+    const filtered = [
+      ...verbs,
+      ...(q === "" ? paletteItems : paletteItems.filter((it) => it.label.toLowerCase().includes(q))),
+    ];
     if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "palette-empty";
