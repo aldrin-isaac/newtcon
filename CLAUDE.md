@@ -121,6 +121,12 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     audit.ts                  → mountAuditTab — Audit tab view: integrity badge + filter row + paged event table; reads newtron's audit endpoints via the typed client (slice #175.B)
     undo-plan.ts              → planUndo — pure planner that turns a HistoryEntry into the inverse Pending[]; undo is just a forward Apply via the existing modal (slice #175.C.1)
     topology-undo-capture.ts  → extractRemoveDeviceBody + extractRemoveLinkEndpoints + captureTopologyBodies — pure helpers that walk a fetched topology to extract pre-bodies for topology.remove-device + topology.remove-link undo (slice #175.C.1 polish)
+    topology-links.ts         → pure link-truth engine (uplift 4.2): parseLldpTable/parsePortSpeeds/classifyLink (verified/intent-only/mismatch) + linkStrokeWidth/linkSpeedForLink + parseBgpCheckOk/linkUnderlayState
+    topology-lenses.ts        → pure lens engine (uplift 4.3): vlanMembership/availableVlans/lensEffect — vni/underlay/drift/live lenses resolve to halo/dim/badge sets, never layout
+    topology-live.ts          → pure live-layer derivations (uplift 4.4): COUNTERS_DB parsing (port-name-map, RATES), portUtilization, heat tiers, shouldPollLive gate
+    topology-focus.ts         → pure focus-mode derivations (uplift 4.5): neighborsOf/focusDim + nearestInDirection arrow-nav
+    fabric-health.ts          → pure header-strip aggregation (uplift 4.5): aggregateFabricHealth folds underlay/drift/lab maps into three toned cells
+    fabric-health-strip.ts    → the header fabric-health strip: 60s visible-only sweep (bgp/check + drift per device + lab status), mounts #fabric-strip, click → Topology
     topology-palette.ts       → resolvePalette + resolveDevicePalette — pure resolver from per-element actuation observation to the unified five-state palette (spec-only / actuated-ok / actuated-down / drift / unknown); foundation for the layered Topology views (slice #210.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)

@@ -34,6 +34,7 @@ import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { initTheme, toggleTheme, currentTheme } from "./theme.js";
+import { setupFabricHealthStrip } from "./fabric-health-strip.js";
 
 // ---- Theme toggle ---------------------------------------------------------
 // The button lives in the sidebar footer (index.html); theme.ts owns the
@@ -996,6 +997,7 @@ async function boot(): Promise<void> {
   setupPalette();
   setupPendingBar();
   setupNetworkSwitcher();
+  setupFabricHealthStrip();
   startStatusPolling();
 }
 
