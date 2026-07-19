@@ -127,6 +127,14 @@
 .topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; pointer-events: none; }
 .topo-link-hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 .topo-link-hit:hover + .topo-link { stroke: var(--color-accent); stroke-width: 2; }
+/* Canvas dot-grid texture (toggle in the zoom toolbar). Token-colored so
+   both themes stay subtle; never interactive. */
+.topo-grid { pointer-events: none; }
+.topo-grid--off { display: none; }
+.topo-grid-dot { fill: var(--color-border-default); opacity: 0.55; }
+.topology-grid-btn { opacity: 0.6; }
+.topology-grid-btn--on { opacity: 1; color: var(--color-accent); }
+
 .topo-node rect { fill: var(--color-surface-raised); stroke: var(--color-border-strong); stroke-width: 1.5; filter: drop-shadow(var(--shadow-node)); transition: fill var(--duration-fast) var(--ease-standard), stroke var(--duration-fast) var(--ease-standard); }
 .topo-node-halo { fill: none; stroke: var(--color-accent); stroke-width: 2.5; opacity: 0.85; pointer-events: none; }
 .topo-node-glyph { pointer-events: none; }
