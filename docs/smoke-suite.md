@@ -24,9 +24,20 @@ node web/test/smoke/seed-fixture.mjs
 # 2. Run one smoke (NET + DEVICE override the target; defaults smoke-fixture / switch1)
 NET=smoke-fixture node web/test/smoke/drawer-header.smoke.mjs
 
-# 3. Run the whole suite
-for f in web/test/smoke/*.smoke.mjs; do NET=smoke-fixture node "$f"; done
+# 3. Run the whole suite (console-uplift 0.1): sequential, per-smoke
+#    PASS/FAIL/SKIP summary, non-zero exit on any failure.
+cd web && npm run smoke                    # all smokes
+cd web && npm run smoke -- --filter iface  # filename substring filter
 ```
+
+The runner passes the environment through untouched. One convenience: when
+`NEWTCON_URL` is `https://` and `NODE_TLS_REJECT_UNAUTHORIZED` is unset, it
+sets it to `0` for the child processes — the smokes' Node-side `fetch()`
+must tolerate the dev server's self-signed cert, matching the
+`--ignore-certificate-errors` flag every smoke's browser launch carries.
+Per-smoke wall-clock cap: `SMOKE_TIMEOUT_MS` (default 180000). Smokes that
+exit 0 after printing a `SKIP:` line (deploy-gated reads against an
+un-deployed network) count as skipped, not passed.
 
 A smoke exits 0 on pass, non-zero on fail, and prints `SKIP: …` + exits 0 when it
 can't run (a device-state smoke against a device with no live state).

@@ -4,7 +4,7 @@
 // node via the form, applies, asserts the persisted scaffold, then deletes it.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, loginCookie } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -26,7 +26,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
@@ -37,17 +37,21 @@ try {
   }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
-  await page.click("#tab-topology"); await page.waitForSelector(".topo-node", { timeout: 10000 });
-  await page.evaluate(() => Array.from(document.querySelectorAll(".topology-toolbar-btn")).find((b) => /Create node/.test(b.textContent))?.click());
-  await page.waitForSelector('input[name="name"]', { timeout: 6000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  // Node creation is Specs-only (#353): Specs -> Node facet -> "+ New".
+  await page.click("#tab-specs");
+  await page.waitForSelector('[data-kind="nodes"]', { timeout: 60000 });
+  await page.click('[data-kind="nodes"]');
+  await page.waitForSelector(".panel-add-btn", { timeout: 20000 });
+  await page.evaluate(() => document.querySelector(".panel-add-btn")?.click());
+  await page.waitForSelector('input[name="name"]', { timeout: 20000 });
   // Wait for the SPECIFIC options we fill to populate. A count > 1 is wrong for a
   // 1-zone fixture (smoke-fixture has only "myzone"), which left the zone select
   // on its placeholder and silently blocked the required-field submit.
   await page.waitForFunction((zone, platform) =>
     Array.from(document.querySelector('select[name="zone"]')?.options ?? []).some((o) => o.value === zone) &&
     Array.from(document.querySelector('select[name="platform"]')?.options ?? []).some((o) => o.value === platform),
-    { timeout: 8000 }, ZONE, PLATFORM);
+    { timeout: 20000 }, ZONE, PLATFORM);
 
   await page.evaluate((dev, zone, platform) => {
     const set = (sel, val, evt) => { const e = document.querySelector(sel); e.value = val; e.dispatchEvent(new Event(evt, { bubbles: true })); };
@@ -56,14 +60,13 @@ try {
     set('input[name="loopback_ip"]', "10.9.9.9", "input");
     set('select[name="zone"]', zone, "change");
     set('select[name="platform"]', platform, "change");
-    set('select[name="role"]', "LeafRouter", "change");
     set('input[name="underlay_asn"]', "65004", "input");
   }, DEV, ZONE, PLATFORM);
-  await page.evaluate(() => Array.from(document.querySelectorAll("button")).find((b) => b.textContent.trim() === "Stage node")?.click());
+  await page.evaluate(() => Array.from(document.querySelectorAll("button.form-submit-btn")).find((b) => /Create/.test(b.textContent))?.click());
   await sleep(500);
   // Save → confirm in the apply-preview modal (its own Apply button).
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 8000 });
+  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((b) => /Apply/.test(b.textContent))?.click());
   await sleep(3000);
 

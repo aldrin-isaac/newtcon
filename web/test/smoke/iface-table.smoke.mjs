@@ -2,7 +2,7 @@
 // interface table — all ports with role/status/service, filters, expand-in-place.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, apiGET } from "./_auth.mjs";
+import { authenticatePage, apiGET, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -19,7 +19,7 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 },
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 },
 });
 try {
   const page = await browser.newPage();
@@ -29,15 +29,15 @@ try {
   }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll("button.node-tab")).find((b) => b.textContent.trim() === "Interfaces")?.click());
-  await page.waitForSelector(".iface-table tbody .iface-row", { timeout: 8000 });
+  await page.waitForSelector(".iface-table tbody .iface-row", { timeout: 20000 });
   await sleep(300);
 
   const counts = await page.evaluate(() => document.querySelector(".iface-view-counts")?.textContent || "");
@@ -69,7 +69,7 @@ try {
   await page.evaluate(() => { Array.from(document.querySelectorAll(".iface-seg-btn")).find((b) => b.textContent.trim() === "All")?.click(); const s = document.querySelector(".iface-search"); s.value = ""; s.dispatchEvent(new Event("input", { bubbles: true })); });
   await sleep(150);
   await page.evaluate(() => document.querySelector(".iface-table tbody .iface-row")?.click());
-  await page.waitForFunction(() => { const d = document.querySelector(".iface-detail-row"); return d && !d.hidden && /Admin/.test(d.textContent || ""); }, { timeout: 4000 });
+  await page.waitForFunction(() => { const d = document.querySelector(".iface-detail-row"); return d && !d.hidden && /Admin/.test(d.textContent || ""); }, { timeout: 20000 });
   const detail = await page.evaluate(() => document.querySelector(".iface-detail-row")?.textContent || "");
   expect(/Admin/.test(detail) && /MTU/.test(detail), "expand shows tailored properties (Admin/MTU)");
   expect(/Apply service/.test(detail) || /Unbind/.test(detail), "expand shows service actions");

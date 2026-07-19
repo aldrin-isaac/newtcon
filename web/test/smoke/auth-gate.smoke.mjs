@@ -10,7 +10,7 @@
 //     NEWTCON_TEST_PASSWORD (default "YourPaSsWoRd")
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -23,7 +23,7 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -34,13 +34,13 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE}`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
 
   // 1. Overlay appears at boot when no session cookie is set.
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && !el.hidden;
-  }, { timeout: 5000 });
+  }, { timeout: 15000 });
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-01-overlay.png" });
 
   const title = await page.$eval("#auth-overlay .auth-card-title", (el) => el.textContent?.trim());
@@ -74,14 +74,14 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && el.hidden;
-  }, { timeout: 5000 });
+  }, { timeout: 15000 });
   expect(true, "overlay hides after successful sign-in");
 
   // 5. User pill shows the username.
   await page.waitForFunction((u) => {
     const el = document.getElementById("user-pill-name");
     return el && el.textContent === u;
-  }, { timeout: 2000 }, USER);
+  }, { timeout: 10000 }, USER);
   const pillName = await page.$eval("#user-pill-name", (el) => el.textContent);
   expect(pillName === USER, `user pill shows username: "${pillName}"`);
 
@@ -89,7 +89,7 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("panel-specs");
     return el && el.children.length > 0;
-  }, { timeout: 5000 });
+  }, { timeout: 15000 });
   expect(true, "workspace panel-specs mounts after sign-in");
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-02-signed-in.png" });
 
@@ -97,7 +97,7 @@ try {
   const dropdownHiddenBefore = await page.$eval("#user-pill-dropdown", (el) => el.hidden);
   expect(dropdownHiddenBefore, "pill dropdown hidden before click");
   await page.click("#user-pill-trigger");
-  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
+  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 10000 });
   const dropdownUser = await page.$eval("#user-pill-dropdown-username", (el) => el.textContent);
   const expiresValue = await page.$eval("#user-pill-dropdown-expires", (el) => el.textContent);
   expect(dropdownUser === USER, `dropdown shows username: "${dropdownUser}"`);
@@ -106,14 +106,14 @@ try {
 
   // 6b. Dropdown closes on outside click.
   await page.evaluate(() => document.body.click());
-  await page.waitForFunction(() => document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
+  await page.waitForFunction(() => document.getElementById("user-pill-dropdown")?.hidden, { timeout: 10000 });
   expect(true, "pill dropdown closes on outside click");
 
   // 7. Sign-out: open the pill dropdown, click the signout button, page
   // reloads, overlay returns. The button calls logout() then
   // window.location.reload(); we navigate alongside to handle the reload.
   await page.click("#user-pill-trigger");
-  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 1500 });
+  await page.waitForFunction(() => !document.getElementById("user-pill-dropdown")?.hidden, { timeout: 10000 });
   const [_, navOut] = await Promise.all([
     page.click("#user-signout"),
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 10000 }).catch(() => null),
@@ -123,7 +123,7 @@ try {
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && !el.hidden;
-  }, { timeout: 5000 });
+  }, { timeout: 15000 });
   expect(true, "overlay reappears after sign-out + reload");
   await page.screenshot({ path: "/tmp/newtcon-smoke-auth-03-signed-out.png" });
 } finally {

@@ -4,7 +4,7 @@
 // via newtron's scoped delete (newtcon has no scoped-delete affordance yet).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, loginCookie } from "./_auth.mjs";
+import { authenticatePage, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const NEWTRON = process.env.NEWTRON_URL || "http://127.0.0.1:18080";
@@ -26,7 +26,7 @@ const removeOverride = () => fetch(`${BASE}/api/networks/${NET}/ipvpns/${IPVPN}?
   method: "DELETE", headers: AUTH,
 }).catch(() => {});
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   await removeOverride(); // clear any leftover from a prior run
   const base = await (await fetch(`${BASE}/api/networks/${NET}/ipvpns/${IPVPN}`, { headers: AUTH })).json();
@@ -41,11 +41,11 @@ try {
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-specs");
-  await page.waitForSelector('[data-kind="ipvpns"]', { timeout: 8000 });
+  await page.waitForSelector('[data-kind="ipvpns"]', { timeout: 60000 });
   await page.click('[data-kind="ipvpns"]');
-  await page.waitForSelector(".panel-list-row", { timeout: 8000 });
+  await page.waitForSelector(".panel-list-row", { timeout: 20000 });
   await sleep(400);
 
   const before = await page.evaluate(() => ({

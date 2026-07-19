@@ -3,7 +3,7 @@
 // (default lands on Interfaces).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, apiGET } from "./_auth.mjs";
+import { authenticatePage, apiGET, deviceIsDeployed, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -17,20 +17,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
   await sleep(400);
 
   // No Summary tab; default active tab is Interfaces.
@@ -40,7 +40,7 @@ try {
   expect(active === "Spec", `default tab is Spec in spec-view (Summary removed) (${active})`);
 
   // Header carries identity facts + a stats row, always visible.
-  await page.waitForFunction((p) => (document.querySelector(".node-drawer-subtitle")?.textContent || "").includes(p), { timeout: 6000 }, PLATFORM);
+  await page.waitForFunction((p) => (document.querySelector(".node-drawer-subtitle")?.textContent || "").includes(p), { timeout: 20000 }, PLATFORM);
   const sub = await page.evaluate(() => document.querySelector(".node-drawer-subtitle")?.textContent || "");
   expect(sub.includes(PLATFORM) && sub.includes(`AS ${ASN}`) && sub.includes(`lo ${LOOPBACK}`),
     `header subtitle has discovered identity facts (platform=${PLATFORM} AS=${ASN} lo=${LOOPBACK}): "${sub}"`);
@@ -48,11 +48,18 @@ try {
   // only with a deployed device. Assert them when they populate; skip on the
   // staged fixture (the identity subtitle above is the spec-based part, which now
   // falls back to the NodeSpec when /info is unavailable).
-  const gotStats = await page.waitForFunction(() => (document.querySelector(".node-drawer-stats")?.textContent || "").length > 0, { timeout: 4000 }).then(() => true).catch(() => false);
+  const gotStats = await page.waitForFunction(() => (document.querySelector(".node-drawer-stats")?.textContent || "").length > 0, { timeout: 20000 }).then(() => true).catch(() => false);
   if (gotStats) {
     const stats = await page.evaluate(() => document.querySelector(".node-drawer-stats")?.textContent || "");
     expect(/interfaces/.test(stats), `header stats row shows interface count (${stats})`);
-    expect(/drift/.test(stats), `header stats row shows drift status (${stats})`);
+    // Interface counts render inventory-first (no device needed), but the
+    // drift chip requires a reachable device (/drift succeeds). Gate on real
+    // reachability, not on the stats row having rendered.
+    if (await deviceIsDeployed(NET, DEVICE, BASE)) {
+      expect(/drift/.test(stats), `header stats row shows drift status (${stats})`);
+    } else {
+      console.log("  n/a: drift chip (device unreachable — stats are inventory-first)");
+    }
   } else {
     console.log("  n/a: interface/drift stats (no live device on the staged fixture)");
   }

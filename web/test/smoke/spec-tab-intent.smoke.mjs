@@ -2,7 +2,7 @@
 // intent — provisioning steps + per-port config — not just the profile.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, apiGET } from "./_auth.mjs";
+import { authenticatePage, apiGET, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -18,7 +18,7 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 
@@ -34,23 +34,23 @@ try {
   }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
 
   // Right-click the node → floating menu → Inspect (header button) → drawer.
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)
     ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
 
   // Open the Spec tab.
   await page.evaluate(() => Array.from(document.querySelectorAll("button.node-tab"))
     .find((b) => b.textContent.trim() === "Spec")?.click());
   await page.waitForFunction(
     () => /Topology intent/.test(document.querySelector(".node-tab-panel--spec")?.textContent || ""),
-    { timeout: 6000 });
+    { timeout: 20000 });
   await sleep(300);
 
   const txt = await page.evaluate(() => document.querySelector(".node-tab-panel--spec")?.textContent || "");

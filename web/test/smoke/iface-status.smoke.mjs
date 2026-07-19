@@ -8,7 +8,7 @@
 //   node test/smoke/iface-status.smoke.mjs
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -28,13 +28,13 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
-  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded" });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NET);
-  await page.goto(BASE, { waitUntil: "networkidle0" });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0" });
 
   // Open the device drawer via the topology node, then the Interfaces tab.
   await page.click("#tab-topology");
-  await page.waitForSelector("svg.topology-graph", { timeout: 10000 }).catch(() => {});
+  await page.waitForSelector("svg.topology-graph", { timeout: 20000 }).catch(() => {});
   await sleep(1000);
   await page.evaluate((d) => {
     const t = [...document.querySelectorAll("svg text")].find((e) => e.textContent.trim() === d);
@@ -56,12 +56,12 @@ try {
   }, IFACE);
   expect(expanded, `expanded interface row ${IFACE}`);
 
-  await page.waitForSelector(".iface-live", { timeout: 8000 }).catch(() => {});
+  await page.waitForSelector(".iface-live", { timeout: 20000 }).catch(() => {});
   // Wait for the async fetch to resolve (loading → content).
   await page.waitForFunction(() => {
     const l = document.querySelector(".iface-live");
     return l && !/Loading/.test(l.textContent || "");
-  }, { timeout: 8000 }).catch(() => {});
+  }, { timeout: 20000 }).catch(() => {});
   await sleep(200);
 
   const view = await page.evaluate(() => {

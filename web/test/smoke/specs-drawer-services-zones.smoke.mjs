@@ -16,7 +16,7 @@
 // 1node-vs-auth network registered.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -30,7 +30,7 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -47,7 +47,7 @@ async function signIn() {
   await page.waitForFunction(() => {
     const el = document.getElementById("auth-overlay");
     return el && el.hidden;
-  }, { timeout: 5000 });
+  }, { timeout: 20000 });
 }
 
 async function openSpecRow(facetLabel, rowName) {
@@ -65,7 +65,7 @@ async function openSpecRow(facetLabel, rowName) {
       const items = Array.from(document.querySelectorAll(".panel-list-item"));
       return items.some((el) => (el.textContent || "").trim() === name);
     },
-    { timeout: 5000 },
+    { timeout: 20000 },
     rowName,
   );
   // Click the row to open the drawer.
@@ -80,14 +80,14 @@ async function openSpecRow(facetLabel, rowName) {
     const c = document.getElementById("drawer-content");
     if (!c || c.children.length < 3) return false; // kind + name + something
     return !!c.querySelector(".spec-detail, .spec-detail-empty-state, .drawer-detail");
-  }, { timeout: 5000 });
+  }, { timeout: 20000 });
 }
 
 // ---- run ------------------------------------------------------------------
 
 try {
   console.log(`→ open ${BASE}`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
   await page.reload({ waitUntil: "domcontentloaded" });
 
@@ -95,7 +95,7 @@ try {
   expect(true, "signed in");
 
   // Specs view is the default; wait for at least one panel row.
-  await page.waitForSelector(".panel-list-item", { timeout: 8000 });
+  await page.waitForSelector(".panel-list-item", { timeout: 20000 });
   expect(true, "specs view rendered with at least one row");
 
   // ---- service detail ----

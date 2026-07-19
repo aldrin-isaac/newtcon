@@ -1,136 +1,79 @@
-// Headless smoke for the Create-node flow on the Topology tab.
+// Headless smoke for the node-create form — Specs → Inventory → Node → "+ New"
+// (node creation is Specs-only since #353; the canvas creates nothing, #369 —
+// this smoke previously asserted the removed toolbar/canvas Create-node flow).
 //
-// Verifies:
-//   1. Toolbar button is labelled "+ Create node" (renamed from "+ Add device")
-//   2. Right-clicking the empty topology canvas pops a context menu with
-//      "Create node"
-//   3. Clicking either affordance opens a drawer with the full profile-fields
-//      form: name, mgmt_ip, loopback_ip, zone (dropdown), platform (dropdown),
-//      ssh_user
-//   4. The drawer's submit doesn't fire if required fields are missing
+// Verifies the schema-driven create form's wire-level structure:
+//   1. The Node facet offers a "+ New" (panel-add-btn) affordance
+//   2. The form has the NodeSpec fields: name, mgmt_ip, loopback_ip, zone,
+//      platform — and NOT ssh_user (credentials moved wholly to the scoped
+//      SSH Login store: Specs → General → SSH Login)
+//   3. zone + platform render as dropdowns (ref-to-kind → <select>)
+//   4. Empty-submit is blocked by required-field validation (form stays open)
 //
-// The smoke does NOT exercise actual Save (would mutate operator state); it
-// asserts the wire-level structure of the form.
+// Does NOT exercise Save (would mutate operator state); form structure only.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
-const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
+const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
+const NET = process.env.NET || "smoke-fixture";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let pass = 0, fail = 0;
+const expect = (c, m) => { if (c) { pass++; console.log("  ok: ", m); } else { fail++; console.error("  FAIL:", m); } };
 
-const ok = [], failed = [];
-function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : "  FAIL:") + m); }
-
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  defaultViewport: { width: 1500, height: 950 },
-});
-const page = await browser.newPage();
-await authenticatePage(page, BASE);
-// "+ Create node" is a Spec-view toolbar affordance (Lab view shows
-// Deploy/Provision/Destroy). Set the network + spec view before the load.
-await page.evaluateOnNewDocument(() => {
-  localStorage.setItem("newtcon.activeNetwork", "2node-vs");
-  localStorage.setItem("newtcon:topology-view:2node-vs", "spec");
-});
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
-  await page.click("#tab-topology");
-  await new Promise((r) => setTimeout(r, 1500));
+  const page = await browser.newPage();
+  await authenticatePage(page, BASE);
+  await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
 
-  // ── 1. Toolbar button label ────────────────────────────────────────────
-  const btnLabels = await page.evaluate(() =>
-    Array.from(document.querySelectorAll(".topology-toolbar-btn")).map((b) => b.textContent.trim()));
-  expect(btnLabels.includes("+ Create node"),
-    `toolbar has "+ Create node" button: ${JSON.stringify(btnLabels)}`);
-  expect(!btnLabels.includes("+ Add device"),
-    `legacy "+ Add device" label is gone: ${JSON.stringify(btnLabels)}`);
+  // Specs → Node facet.
+  await page.click("#tab-specs");
+  await page.waitForSelector('[data-kind="nodes"]', { timeout: 60000 });
+  await page.click('[data-kind="nodes"]');
+  await page.waitForSelector(".panel-add-btn", { timeout: 20000 });
+  expect(true, 'Node facet offers "+ New" (panel-add-btn)');
 
-  // ── 2. Right-click on canvas background → context menu ────────────────
-  await page.evaluate(() => {
-    const slot = document.querySelector(".topology-graph-slot");
-    if (!slot) return;
-    const rect = slot.getBoundingClientRect();
-    // Click in the bottom-right corner where there's likely empty space.
-    slot.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: rect.right - 30,
-      clientY: rect.bottom - 30,
-    }));
+  await page.evaluate(() => document.querySelector(".panel-add-btn")?.click());
+  const formOpened = await page.waitForSelector('input[name="name"]', { timeout: 20000 }).then(() => true).catch(() => false);
+  expect(formOpened, "create-node form opens from the Specs facet");
+
+  const fields = await page.evaluate(() => {
+    const el = (n) => document.querySelector(`input[name="${n}"], select[name="${n}"], textarea[name="${n}"]`);
+    const probe = (n) => { const e = el(n); return e ? { tag: e.tagName.toLowerCase(), required: e.hasAttribute("required") } : null; };
+    return {
+      name: probe("name"), mgmt_ip: probe("mgmt_ip"), loopback_ip: probe("loopback_ip"),
+      zone: probe("zone"), platform: probe("platform"), ssh_user: probe("ssh_user"),
+      underlay_asn: probe("underlay_asn"),
+    };
   });
-  await new Promise((r) => setTimeout(r, 300));
-
-  const canvasMenu = await page.evaluate(() => {
-    const m = document.querySelector(".topo-menu--canvas");
-    if (!m) return null;
-    const items = Array.from(m.querySelectorAll(".topo-menu-item-label")).map((el) => el.textContent.trim());
-    return { items };
-  });
-  expect(canvasMenu !== null, "right-click on canvas background pops .topo-menu--canvas");
-  expect(canvasMenu?.items?.includes("Create node"),
-    `canvas menu has "Create node" item: ${JSON.stringify(canvasMenu?.items)}`);
-
-  await page.screenshot({ path: "/tmp/newtcon-smoke-create-node-01-canvas-menu.png" });
-
-  // ── 3. Click "Create node" → drawer opens with full profile fields ─────
-  await page.evaluate(() => {
-    const items = Array.from(document.querySelectorAll(".topo-menu--canvas .topo-menu-item"));
-    const create = items.find((b) => b.textContent.includes("Create node"));
-    if (create instanceof HTMLElement) create.click();
-  });
-  await new Promise((r) => setTimeout(r, 400));
-
-  const drawerFields = await page.evaluate(() => {
-    const drawer = document.getElementById("detail-drawer");
-    if (!drawer || drawer.getAttribute("aria-hidden") !== "false") return null;
-    const inputs = Array.from(drawer.querySelectorAll("input[name], select[name]"));
-    return inputs.map((i) => ({ name: i.getAttribute("name"), tag: i.tagName.toLowerCase(), required: i.hasAttribute("required") }));
-  });
-  expect(drawerFields !== null, "Create-node drawer opens");
-
-  // Required-field presence. buildFormFields sets the HTML5 `required`
-  // attribute on inputs but not on selects (validation is enforced in the
-  // submit handler for selects — covered by step 4 below).
-  const required = ["name", "mgmt_ip", "loopback_ip", "zone"];
-  for (const r of required) {
-    const f = drawerFields?.find((d) => d.name === r);
-    expect(!!f, `required field "${r}" present: ${JSON.stringify(f)}`);
-    if (f && f.tag === "input") {
-      expect(f.required, `input "${r}" marked required: ${JSON.stringify(f)}`);
-    }
+  for (const req of ["name", "mgmt_ip", "loopback_ip", "zone"]) {
+    expect(!!fields[req], `required field "${req}" present: ${JSON.stringify(fields[req])}`);
   }
-  const optionals = ["platform", "ssh_user"];
-  for (const o of optionals) {
-    const f = drawerFields?.find((d) => d.name === o);
-    expect(!!f, `optional field "${o}" present: ${JSON.stringify(f)}`);
+  for (const opt of ["platform", "underlay_asn"]) {
+    expect(!!fields[opt], `optional field "${opt}" present: ${JSON.stringify(fields[opt])}`);
   }
-  const zoneField = drawerFields?.find((d) => d.name === "zone");
-  expect(zoneField?.tag === "select", `zone is a dropdown: ${JSON.stringify(zoneField)}`);
-  const platformField = drawerFields?.find((d) => d.name === "platform");
-  expect(platformField?.tag === "select", `platform is a dropdown: ${JSON.stringify(platformField)}`);
+  expect(fields.ssh_user === null,
+    "ssh_user is NOT in the create form — credentials live in Specs → General → SSH Login");
+  expect(fields.zone?.tag === "select", `zone is a dropdown: ${JSON.stringify(fields.zone)}`);
+  expect(fields.platform?.tag === "select", `platform is a dropdown: ${JSON.stringify(fields.platform)}`);
 
-  await page.screenshot({ path: "/tmp/newtcon-smoke-create-node-02-drawer.png" });
+  await page.screenshot({ path: "/tmp/newtcon-smoke-create-node-specs-form.png" });
 
-  // ── 4. Submit with empty form surfaces a validation error ──────────────
-  await page.evaluate(() => {
-    const btn = document.querySelector(".form-submit-btn");
-    if (btn instanceof HTMLButtonElement) btn.click();
-  });
-  await new Promise((r) => setTimeout(r, 200));
-  // The schema form uses HTML5 `required`, so an empty submit is blocked by the
-  // browser (the first required field goes :invalid) rather than surfacing a
-  // server-side .panel-error. Assert the submit was blocked by native validation.
+  // Empty-submit must not stage anything: blocked by native required-field
+  // validation (the empty name input goes :invalid, form stays open).
+  await page.evaluate(() => Array.from(document.querySelectorAll("button.form-submit-btn")).find((b) => /Create/.test(b.textContent))?.click());
+  await sleep(300);
   const blocked = await page.evaluate(() => {
     const f = document.querySelector('input[name="name"]');
     return !!(f && f.matches(":invalid"));
   });
   expect(blocked, "empty-submit blocked by required-field validation (name is :invalid)");
 
-  console.log("");
-  if (failed.length === 0) console.log("✅ all checks passed");
-  else { console.log(`❌ ${failed.length} failed`); process.exitCode = 1; }
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exitCode = fail ? 1 : 0;
 } catch (err) {
   console.error("test threw:", err.stack || err.message);
   process.exitCode = 1;

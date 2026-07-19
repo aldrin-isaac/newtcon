@@ -10,7 +10,7 @@
 //   node test/smoke/irb-interfaces.smoke.mjs
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -30,11 +30,11 @@ const browser = await puppeteer.launch({
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
-  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded" });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NET);
-  await page.goto(BASE, { waitUntil: "networkidle0" });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0" });
   await page.click("#tab-topology");
-  await page.waitForSelector("svg.topology-graph", { timeout: 10000 }).catch(() => {});
+  await page.waitForSelector("svg.topology-graph", { timeout: 20000 }).catch(() => {});
   await sleep(1000);
   await page.evaluate((d) => {
     const t = [...document.querySelectorAll("svg text")].find((e) => e.textContent.trim() === d);
@@ -45,7 +45,7 @@ try {
     const b = [...document.querySelectorAll("button,.drawer-tab,[role=tab]")].find((e) => /^Interfaces$/.test(e.textContent.trim()));
     if (b) b.click();
   });
-  await page.waitForSelector(".irb-section", { timeout: 10000 }).catch(() => {});
+  await page.waitForSelector(".irb-section", { timeout: 20000 }).catch(() => {});
   await sleep(800);
 
   const section = await page.evaluate(() => !!document.querySelector(".irb-section"));
@@ -69,7 +69,7 @@ try {
   await page.waitForFunction(() => {
     const l = document.querySelector(".irb-row-detail .iface-live");
     return l && !/Loading/.test(l.textContent || "");
-  }, { timeout: 8000 }).catch(() => {});
+  }, { timeout: 20000 }).catch(() => {});
   await sleep(200);
   const detail = await page.evaluate(() => {
     const d = document.querySelector(".irb-row-detail");

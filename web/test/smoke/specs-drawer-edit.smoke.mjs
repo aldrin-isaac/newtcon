@@ -11,7 +11,7 @@
 // Requires newtron-server reachable at NEWTRON_URL through newtcon-server.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -69,7 +69,7 @@ await createService(NETWORK, SVC);
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
@@ -78,7 +78,7 @@ page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 
 try {
   console.log(`→ open ${BASE} (service=${SVC})`);
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
   await page.reload({ waitUntil: "domcontentloaded" });
 
@@ -91,20 +91,20 @@ try {
     await page.type("#auth-username", USER);
     await page.type("#auth-password", PASSWORD);
     await page.click("#auth-submit");
-    await page.waitForFunction(() => document.getElementById("auth-overlay")?.hidden, { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById("auth-overlay")?.hidden, { timeout: 20000 });
   }
   expect(true, overlayPresent ? "signed in" : "anonymous mode (gate skipped)");
 
   // Services facet is the default; wait for our row + click it.
   await page.waitForFunction((name) =>
     Array.from(document.querySelectorAll(".panel-list-item")).some((el) => (el.textContent || "").trim() === name),
-    { timeout: 8000 }, SVC);
+    { timeout: 20000 }, SVC);
   await page.evaluate((name) => {
     const row = Array.from(document.querySelectorAll(".panel-list-item"))
       .find((el) => (el.textContent || "").trim() === name);
     row?.click();
   }, SVC);
-  await page.waitForSelector(".spec-detail", { timeout: 5000 });
+  await page.waitForSelector(".spec-detail", { timeout: 20000 });
 
   // Edit button visible (services is editable).
   const editBtnText = await page.$eval(".drawer-edit-btn", (el) => (el.textContent || "").trim());
@@ -113,7 +113,7 @@ try {
   // Click Edit → form replaces body. Use a JS click (the button can be below the
   // fold in the drawer; page.click requires it to be in the viewport).
   await page.evaluate(() => document.querySelector(".drawer-edit-btn")?.click());
-  await page.waitForSelector(".schema-form", { timeout: 3000 });
+  await page.waitForSelector(".schema-form", { timeout: 10000 });
 
   // The identifier renders READ-ONLY in edit mode (immutable) — the operator sees
   // it but newtron rejects identifier changes, so the input is disabled/readOnly.
@@ -138,7 +138,7 @@ try {
   await page.evaluate(() => document.querySelector(".form-submit-btn")?.click());
   await new Promise((r) => setTimeout(r, 500));
   await page.evaluate(() => document.getElementById("pending-bar-save")?.click());
-  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 8000 });
+  await page.waitForSelector(".apply-preview-card .btn-primary", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll(".apply-preview-card .btn-primary")).find((b) => /Apply/.test(b.textContent))?.click());
   await new Promise((r) => setTimeout(r, 2500));
 

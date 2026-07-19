@@ -5,7 +5,7 @@
 //   - Sidebar nav shrinks to Specs + Topology
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage } from "./_auth.mjs";
+import { authenticatePage, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8082";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -16,15 +16,15 @@ function expect(c, m) { (c ? ok : failed).push(m); console.log((c ? "  ok:  " : 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: "new",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true,
   defaultViewport: { width: 1500, height: 950 },
 });
 const page = await browser.newPage();
 await authenticatePage(page, BASE);
 try {
-  await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate(() => localStorage.setItem("newtcon.activeNetwork", "2node-vs"));
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 15000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 15000 });
 
   // ── 1. Sidebar nav is Specs + Topology only ─────────────────────────────
   const navLabels = await page.evaluate(() =>

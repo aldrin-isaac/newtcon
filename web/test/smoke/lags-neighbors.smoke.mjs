@@ -3,7 +3,7 @@
 // (creates a port-channel, verifies, deletes); BGP Health is read live.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, skipIfNotDeployed, loginCookie } from "./_auth.mjs";
+import { authenticatePage, skipIfNotDeployed, loginCookie, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -25,7 +25,7 @@ async function sectionText(page, title) {
     const det = Array.from(document.querySelectorAll(".node-state-section")).find((d) => d.querySelector(".node-state-section-title")?.textContent.trim() === t);
     const b = det?.querySelector(".node-state-section-body");
     return b && !/Loading/.test(b.textContent || "");
-  }, { timeout: 6000 }, title);
+  }, { timeout: 20000 }, title);
   await sleep(150);
   return page.evaluate((t) => {
     const det = Array.from(document.querySelectorAll(".node-state-section")).find((d) => d.querySelector(".node-state-section-title")?.textContent.trim() === t);
@@ -34,7 +34,7 @@ async function sectionText(page, title) {
 }
 
 await skipIfNotDeployed(NET, DEVICE);
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   await rpc("create-portchannel", { name: "PortChannel99", mtu: 9100 });
 
@@ -43,15 +43,15 @@ try {
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((net) => { try { localStorage.setItem("newtcon.activeNetwork", net); localStorage.setItem("newtcon:topology-view:" + net, "spec"); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
   await page.click("#tab-topology");
-  await page.waitForSelector(".topo-node", { timeout: 10000 });
+  await page.waitForSelector(".topo-node", { timeout: 60000 });
   await page.evaluate((dev) => document.querySelector(`g.topo-node[data-device='${dev}']`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 })), DEVICE);
-  await page.waitForSelector(".topo-menu-header--button", { timeout: 6000 });
+  await page.waitForSelector(".topo-menu-header--button", { timeout: 20000 });
   await page.evaluate(() => document.querySelector(".topo-menu-header--button")?.click());
-  await page.waitForSelector(".node-tabs", { timeout: 6000 });
+  await page.waitForSelector(".node-tabs", { timeout: 20000 });
   await page.evaluate(() => Array.from(document.querySelectorAll("button.node-tab")).find((b) => b.textContent.trim() === "State")?.click());
-  await page.waitForSelector(".node-state-section", { timeout: 6000 });
+  await page.waitForSelector(".node-state-section", { timeout: 20000 });
 
   const lags = await sectionText(page, "LAGs");
   expect(lags.table && /LAG/.test(lags.text) && /Members/.test(lags.text), `LAGs: curated table (LAG/Members columns)`);

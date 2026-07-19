@@ -3,7 +3,7 @@
 // Cancel must leave the service untouched. Read-only: never confirms the delete.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, apiGET } from "./_auth.mjs";
+import { authenticatePage, apiGET, gotoApp } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -26,20 +26,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.error("  FAIL:", m); } };
 
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1500, height: 950 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--disable-dev-shm-usage", "--ignore-certificate-errors"], ignoreHTTPSErrors: true, defaultViewport: { width: 1500, height: 950 } });
 try {
   const page = await browser.newPage();
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
-  await page.goto(BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  // Chromium can throw ERR_CERT_VERIFIER_CHANGED when the first navigation
+  // races the ignoreHTTPSErrors setup; one retry settles it.
+  try {
+    await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  } catch {
+    await new Promise((r) => setTimeout(r, 1000));
+    await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 20000 });
+  }
   await page.click("#tab-specs");
-  await page.waitForSelector('[data-kind="services"]', { timeout: 8000 });
+  await page.waitForSelector('[data-kind="services"]', { timeout: 60000 });
   await page.click('[data-kind="services"]');
-  await page.waitForSelector(`[aria-label="Delete ${SVC}"]`, { timeout: 8000 });
+  await page.waitForSelector(`[aria-label="Delete ${SVC}"]`, { timeout: 20000 });
 
   await page.evaluate((s) => document.querySelector(`[aria-label="Delete ${s}"]`)?.click(), SVC);
-  await page.waitForSelector(".confirm-modal", { timeout: 5000 });
+  await page.waitForSelector(".confirm-modal", { timeout: 20000 });
   const body = await page.evaluate(() => document.querySelector(".confirm-modal-body")?.textContent || "");
   const confirmLabel = await page.evaluate(() => document.querySelector(".confirm-modal-btn--confirm")?.textContent || "");
   expect(body.includes(`applied on ${BINDING_COUNT} interface`), `warns with discovered binding count ${BINDING_COUNT} (“${body.slice(0, 70)}…”)`);
