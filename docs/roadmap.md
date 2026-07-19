@@ -323,3 +323,24 @@ free-form canvas action that bypasses the spec layer.
 - Persistence of manual-placement preferences — local to the
   operator's browser session, or stored in newtcon's observation
   history layer (entry: future) as a user preference?
+
+### 3. Server-side apply history
+
+**Status:** future
+
+The Changes tab records Apply-All runs in localStorage — one browser's
+memory, honestly labeled as such (uplift 5.2). The shared record is
+newtron's audit log, which the Audit tab reads directly.
+
+A server-side history would correlate an Apply-All BATCH (the console's
+unit of operator intent) with the individual newtron audit events it
+produced — most likely by stamping a batch correlation ID into each
+forwarded write and teaching an endpoint to group audit events by it.
+That gives every operator the same "what changed, as batches" view
+without a second source of truth: the audit log stays authoritative;
+the batch grouping is a projection over it.
+
+Not started because the local history + audit log covers the operator
+loop today; promote when multi-operator teams need shared batch-level
+history (the demand signal: "who applied this?" answered from another
+browser).
