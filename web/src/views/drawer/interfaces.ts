@@ -213,7 +213,7 @@ function renderIfaceDetail(host: HTMLElement, device: string, row: InterfaceRow,
   ];
   if (row.live?.pc_member === true) props.push(["Port-channel member", "yes"]);
   if (row.link) props.push(["Link", row.link]);
-  const dl = el("dl", { className: "iface-prop-grid" });
+  const dl = el("dl", { className: "kv kv--tight iface-prop-grid" });
   for (const [k, v] of props) { dl.appendChild(el("dt", {}, k)); dl.appendChild(el("dd", {}, v)); }
   host.appendChild(dl);
 

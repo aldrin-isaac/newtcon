@@ -34,7 +34,7 @@ export function renderValue(value: unknown): HTMLElement | Text {
     return list;
   }
   if (typeof value === "object") {
-    const dl = el("dl", { className: "detail-object" });
+    const dl = el("dl", { className: "kv detail-object" });
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       dl.appendChild(el("dt", {}, k));
       const dd = el("dd");

@@ -128,7 +128,7 @@ function renderIntegrity(r: AuditIntegrityResult): HTMLElement {
     `${r.entry_count} integrity-protected ${r.entry_count === 1 ? "entry" : "entries"}`));
   box.appendChild(head);
 
-  const meta = el("dl", { className: "audit-integrity-meta" });
+  const meta = el("dl", { className: "kv kv--xs audit-integrity-meta" });
   meta.appendChild(el("dt", {}, "Chain head"));
   const hashDd = el("dd", { className: "audit-integrity-hash", title: r.chain_head_hash },
     shortHash(r.chain_head_hash));

@@ -257,7 +257,7 @@ function renderUserSummary(s: UserSummary): HTMLElement {
   for (const [groupId, eps] of namesByGroup) {
     const sub = el("section", { className: "authz-subsection" });
     sub.appendChild(el("h4", { className: "authz-subsection-heading" }, groupLabelFor(groupId as PermissionGroupId)));
-    const dl = el("dl", { className: "authz-grants" });
+    const dl = el("dl", { className: "kv kv--wide authz-grants" });
     for (const ep of eps) {
       const desc = describePermission(ep.name);
       const dt = el("dt", { className: "authz-grant-name" });
@@ -424,7 +424,7 @@ function renderUserGroups(groups: Record<string, string[]>, total: number): HTML
     return section;
   }
   entries.sort(([a], [b]) => a.localeCompare(b));
-  const dl = el("dl", { className: "authz-grants" });
+  const dl = el("dl", { className: "kv kv--wide authz-grants" });
   for (const [name, members] of entries) {
     dl.appendChild(el("dt", { className: "authz-grant-name" }, name));
     const dd = el("dd", { className: "authz-grant-value" });
@@ -475,7 +475,7 @@ function renderPermissionGroup(
 ): HTMLElement {
   const sub = el("section", { className: "authz-subsection" });
   sub.appendChild(el("h4", { className: "authz-subsection-heading" }, groupLabelFor(groupId)));
-  const dl = el("dl", { className: "authz-grants" });
+  const dl = el("dl", { className: "kv kv--wide authz-grants" });
   for (const name of names) {
     const desc = describePermission(name);
     // dt has the friendly title + the wire name as a small caption so
