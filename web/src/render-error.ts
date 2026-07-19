@@ -24,13 +24,18 @@ import { ApiError } from "./api/newtcon/services.js";
  */
 export function translateErrorKind(kind: string): string {
   switch (kind) {
-    case "validation_failure":     return "validation failed";
-    case "precondition_failure":   return "precondition not met";
-    case "drift_refusal":          return "drift detected — refused to apply";
-    case "authorization_failure":  return "permission denied";
+    // Operator taxonomy (uplift 2.2): headlines say what it MEANS for the
+    // operator — refused / not ready / not permitted / unreachable — never
+    // transport or plumbing words. The verbatim upstream detail always
+    // renders beneath (formatErrorBrief / detail lines), so precision is
+    // preserved; the headline carries the triage.
+    case "validation_failure":     return "invalid input";
+    case "precondition_failure":   return "not ready — refused by a precondition";
+    case "drift_refusal":          return "refused — conflicts with device state";
+    case "authorization_failure":  return "not permitted";
     case "authentication_failure": return "not signed in";
-    case "newtron_unavailable":    return "newtron is unreachable";
-    case "internal":               return "internal error";
+    case "newtron_unavailable":    return "engine unreachable";
+    case "internal":               return "engine error";
     default:                       return kind.replace(/_/g, " ");
   }
 }
