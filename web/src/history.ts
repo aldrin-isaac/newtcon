@@ -74,7 +74,7 @@ export function mountHistoryTab(root: HTMLElement): void {
 
 function renderEntry(entry: HistoryEntry): HTMLElement {
   const li = el("li", { className: "history-entry" });
-  const details = el("details", { className: "history-entry-details" });
+  const details = el("details", { className: "disclosure history-entry-details" });
 
   const head = el("summary", { className: "history-entry-head" });
   head.appendChild(el("span", { className: "history-time" }, formatTime(entry.timestamp)));
@@ -219,7 +219,7 @@ function renderItem(item: HistoryItem): HTMLElement {
   // without leaving the History tab.
   const detail = item.body ?? item.preBody;
   if (detail && Object.keys(detail).length > 0) {
-    const det = el("details", { className: "history-item-details" });
+    const det = el("details", { className: "disclosure history-item-details" });
     det.appendChild(el("summary", { className: "history-item-details-summary" },
       item.effect === "delete" ? "Deleted values" : "Details"));
     const dl = el("dl", { className: "history-item-body" });
