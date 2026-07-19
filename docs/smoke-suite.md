@@ -109,3 +109,22 @@ coverage):
 - `topology-menu`, `topology-scope-services-only` — tested the docked action panel,
   retired in #333 (a single left-click a device now opens the drawer; link/node
   creation lives on the toolbar). Replaced by `topology-click-drawer`.
+
+## Visual baseline (console-uplift 0.2)
+
+`web/scripts/screenshots.mjs` captures the canonical view set (Specs,
+Permissions, Topology spec/lab, drawer Interfaces/State/Spec, Apply-All
+modal, Audit) to `web/test/visual-baseline/` (gitignored — per-host review
+artifacts):
+
+```sh
+node web/scripts/screenshots.mjs            # capture/refresh the baseline set
+node web/scripts/screenshots.mjs --compare  # capture "current" + build
+                                            #   visual-baseline/compare.html
+node web/scripts/screenshots.mjs --filter drawer   # subset by capture id
+```
+
+Same env as the smokes. The compare page shows baseline/current side by
+side with a byte-size delta as a hint — review by eye; there is no
+pixel-diff verdict. The uplift program's move-only phases use this to prove
+"zero visual change"; the visual phases use it to review deliberate change.
