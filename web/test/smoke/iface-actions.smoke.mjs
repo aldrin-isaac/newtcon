@@ -48,10 +48,10 @@ try {
   expect(await page.evaluate(() => !!document.querySelector(".iface-action-form input[type=number]")), "Configure→access form has a VLAN field");
   await page.evaluate(() => { const i = document.querySelector(".iface-action-form input[type=number]"); i.value = "100"; i.dispatchEvent(new Event("input", { bubbles: true })); });
   await page.evaluate(() => document.querySelector(".iface-action-form button[type=submit]")?.click());
-  await page.waitForSelector(".iface-pending-chip", { timeout: 20000 });
+  await page.waitForSelector(".chip--warning", { timeout: 20000 });
   await sleep(200);
 
-  expect(await page.evaluate(() => document.querySelectorAll(".iface-pending-chip").length) > 0, "staged action shows a pending overlay on the row");
+  expect(await page.evaluate(() => document.querySelectorAll(".chip--warning").length) > 0, "staged action shows a pending overlay on the row");
   expect(await page.evaluate(() => { const m = (document.body.textContent || "").match(/(\d+)\s+pending/i); return m ? Number(m[1]) : 0; }) > 0, "workspace pending bar reflects the staged change");
 
   // "+ Apply" CTA opens the staged apply-service form (with a service dropdown).

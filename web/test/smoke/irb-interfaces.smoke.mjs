@@ -54,7 +54,7 @@ try {
   const row = await page.evaluate((vlan) => {
     const r = [...document.querySelectorAll(".irb-row")].find((x) => x.textContent.includes(vlan));
     if (!r) return null;
-    return { meta: r.querySelector(".irb-row-meta")?.textContent || "", svc: r.querySelector(".iface-svc-chip")?.textContent || null };
+    return { meta: r.querySelector(".irb-row-meta")?.textContent || "", svc: r.querySelector(".chip--link")?.textContent || null };
   }, VLAN);
   expect(!!row, `${VLAN} row present`);
   if (row) {

@@ -272,3 +272,27 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
   white-space: nowrap;
   border: 0;
 }
+
+/* ---- Chip — the one pill primitive (console-uplift 2.1, issue #401) -----
+ * Nine ad-hoc chip families collapsed onto one base + modifiers. Compose:
+ *   size:     (base = text-2xs) | --md (text-xs) | --sm (tight padding)
+ *   voice:    --caps | --mono | --muted | --dashed | --sunken
+ *   color:    --link | --accent | --success | --warning | --danger
+ *   behavior: --clickable | --ref (trailing arrow, for spec-ref navigation) */
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-2xs); padding: 1px var(--space-sm); border-radius: 999px; border: 1px solid var(--color-border-default); background: var(--color-surface); color: var(--color-text-secondary); font-family: var(--font-system); }
+.chip--md { font-size: var(--text-xs); padding: 2px var(--space-sm); }
+.chip--sm { padding: 0 var(--space-xs); }
+.chip--caps { text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-medium); }
+.chip--mono { font-family: var(--font-mono); color: var(--color-text-primary); }
+.chip--muted { color: var(--color-text-muted); font-style: italic; text-transform: none; letter-spacing: normal; }
+.chip--dashed { border-style: dashed; }
+.chip--sunken { background: var(--color-surface-sunken); border-color: var(--color-border-subtle); }
+.chip--link { background: var(--color-accent-bg); color: var(--color-text-link); border-color: transparent; }
+.chip--accent { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); font-weight: var(--weight-medium); }
+.chip--success { color: var(--color-success); border-color: var(--color-success-border); background: var(--color-success-bg); }
+.chip--warning { color: var(--color-warning); border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+.chip--danger { color: var(--color-danger); border-color: var(--color-danger-border); background: var(--color-danger-bg); }
+.chip--clickable { cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
+.chip--clickable:hover { border-color: var(--color-accent); color: var(--color-text-primary); background: var(--color-surface-hover); }
+.chip--clickable:focus-visible { outline: 2px solid var(--color-focus-ring, var(--color-text-link)); outline-offset: 1px; }
+.chip--ref::after { content: "→"; margin-left: 6px; opacity: 0.5; font-family: var(--font-system); }

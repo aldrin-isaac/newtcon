@@ -35,7 +35,7 @@ try {
   // toolbar (post-#210 view-mode gating: Spec view doesn't carry lab
   // lifecycle).
   await page.evaluate(() => {
-    const chip = Array.from(document.querySelectorAll(".topology-view-chip"))
+    const chip = Array.from(document.querySelectorAll(".topology-view-row .chip"))
       .find((el) => el.textContent.trim() === "Lab");
     if (chip instanceof HTMLElement) chip.click();
   });

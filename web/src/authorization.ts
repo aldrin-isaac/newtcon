@@ -404,7 +404,7 @@ function renderSuperUsers(users: string[], total: number): HTMLElement {
   }
   const list = el("ul", { className: "authz-chip-list" });
   for (const u of users) {
-    list.appendChild(el("li", { className: "authz-chip" }, u));
+    list.appendChild(el("li", { className: "chip chip--md chip--mono chip--sunken" }, u));
   }
   section.appendChild(list);
   return section;
@@ -575,7 +575,7 @@ function renderTypedGrant(grant: unknown): HTMLElement {
 function renderMemberList(members: string[]): HTMLElement {
   const list = el("ul", { className: "authz-chip-list" });
   for (const m of members) {
-    list.appendChild(el("li", { className: "authz-chip" }, m));
+    list.appendChild(el("li", { className: "chip chip--md chip--mono chip--sunken" }, m));
   }
   return list;
 }
