@@ -91,7 +91,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     router.ts                 → navigation owner (uplift 2.4): tab switching (was app.ts setupTabs), hash ↔ state sync, deep-link apply on boot, back/forward via hashchange; views announce params via "newtcon:route-state" CustomEvents
     workspace.css             → workspace layout (consumes design-system tokens)
     shell.ts                  → app shell (sidebar, tabs, status pill, palette, theme toggle)
-    theme.ts                  → light/dark theme owner (uplift 3.2): data-theme stamp at boot (stored pref ?? prefers-color-scheme, live-follows system while unpinned), toggleTheme persistence
+    theme.ts                  → light/dark theme owner: data-theme stamp at boot (stored pref ?? DARK — the default per Phase-6 exit), toggleTheme persistence
     auth-gate.ts              → login overlay + user pill + 401 redirect (slice 1.D)
     auth-gate.css             → styling for the login overlay + user pill
     api-path.ts               → /api/networks/{netID}/... URL helper (PR #135)

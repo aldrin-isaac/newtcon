@@ -204,9 +204,9 @@ flake-retry discipline (✓~ FLAKY tally; 61.6s noise class retired), a
 ratchet remediation (posture chips folded into the chip primitive after
 grep-piped verification masked a chip_families failure for two merges —
 green-outs now assert exit codes), and posture-aware smokes for
-auth-less/audit-less engines. Standing operator decisions: default
-theme (system-follow today) and the canvas review against the Phase-0
-baseline (web/test/visual-baseline/compare.html).
+auth-less/audit-less engines. Phase-6 exit resolved: DARK is the default theme (operator decision,
+2026-07-19); the canvas review ran against the Phase-3 baseline and the
+reference was re-captured post-Phase-6 (18 views, both themes).
 
 All five phases landed: 0.1–0.3 (instruments), 1.1–1.5 (extractions),
 2.1–2.5 (primitives, error taxonomy, toasts, hash router, docked
