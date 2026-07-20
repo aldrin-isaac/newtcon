@@ -194,7 +194,19 @@ now-solid bones. Issues #444–#451.*
 | 6.7 | **Springy drawer motion** — dock/undock/open with one engineered spring; reduced-motion instant. | No jank; reduced-motion respected. | S |
 | 6.8 | **Zone tinting** — barely-visible topographic zone regions. | Screenshots; no pointer interference. | S |
 
-## Program status — Phases 0–5 COMPLETE (2026-07-19); Phase 6 in progress
+## Program status — Phases 0–6 COMPLETE (2026-07-19)
+
+Phase 6 landed same-day (PRs #452–#459): canvas command bar, drawer
+mini-header, Cmd-K click-through pickers, engine-posture surface, mono
+display identity, canvas composition (arcs / switch weight / footer
+status), drawer spring, zone tinting. Alongside: the runner's
+flake-retry discipline (✓~ FLAKY tally; 61.6s noise class retired), a
+ratchet remediation (posture chips folded into the chip primitive after
+grep-piped verification masked a chip_families failure for two merges —
+green-outs now assert exit codes), and posture-aware smokes for
+auth-less/audit-less engines. Standing operator decisions: default
+theme (system-follow today) and the canvas review against the Phase-0
+baseline (web/test/visual-baseline/compare.html).
 
 All five phases landed: 0.1–0.3 (instruments), 1.1–1.5 (extractions),
 2.1–2.5 (primitives, error taxonomy, toasts, hash router, docked
