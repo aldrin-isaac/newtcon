@@ -875,6 +875,31 @@ export function openNodeDrawer(device: string, viewMode?: TopologyViewMode): voi
   drawer.classList.add("open");
   content.textContent = "";
 
+  // ── Pinned mini-header (uplift 6.2, #445) ───────────────────────
+  // The drawer's FIXED header row (outside the scrolling content) carries
+  // the device identity + a live substrate chip — visible through every
+  // tab switch and any scroll depth. The chip fills when the substrate
+  // resolves (same resolver the lifecycle section uses).
+  const crumb = document.getElementById("drawer-breadcrumb");
+  if (crumb) {
+    crumb.textContent = "";
+    crumb.appendChild(el("span", { className: "crumb-main" }, device));
+    const miniStatus = el("span", { className: "drawer-mini-status" });
+    crumb.appendChild(miniStatus);
+    void (async () => {
+      try {
+        const [labState, online] = await Promise.all([
+          fetchLabStatus(activeNetwork()).catch(() => null),
+          fetchNodeInfo(device).then(() => true).catch(() => false),
+        ]);
+        const status = resolveDeviceStatus(device, labState, online, isProvisioning(activeNetwork()));
+        if (!miniStatus.isConnected) return; // drawer moved on
+        miniStatus.appendChild(el("span", { className: `status-dot status-dot--${status.state === "running" ? "ok" : status.state === "down" ? "error" : status.state === "unrealized" ? "muted" : "warning"}` }));
+        miniStatus.appendChild(el("span", { className: "drawer-mini-status-label" }, status.state));
+      } catch { /* identity alone is fine */ }
+    })();
+  }
+
   // ── Header ──────────────────────────────────────────────────────
   // Three rows: name + status badges · subtitle · quick-action row.
   // All three fill in async — name + viewMode are sync; identity
