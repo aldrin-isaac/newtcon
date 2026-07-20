@@ -148,6 +148,12 @@
 .topology-grid-btn { opacity: 0.6; }
 .topology-grid-btn--on { opacity: 1; color: var(--color-accent); }
 
+/* Composition (uplift 6.6): switches are the spine of meaning — heavier
+   card (stroke + shadow); hosts stay light. Status text lives in the card
+   footer, quieter and smaller than the type label above it. */
+.topo-node--switch > rect { stroke-width: 2; filter: drop-shadow(var(--shadow-node)) drop-shadow(var(--shadow-node)); }
+.topo-node--host > rect { stroke-width: 1.25; }
+
 .topo-node rect { fill: var(--color-surface-raised); stroke: var(--color-border-strong); stroke-width: 1.5; filter: drop-shadow(var(--shadow-node)); transition: fill var(--duration-fast) var(--ease-standard), stroke var(--duration-fast) var(--ease-standard); }
 .topo-node-halo { fill: none; stroke: var(--color-accent); stroke-width: 2.5; opacity: 0.85; pointer-events: none; }
 .topo-node-glyph { pointer-events: none; }
@@ -170,7 +176,9 @@
 /* Per-device corner status text (Lab / Physical views). Sits below the
  * rect's bottom-right; small + muted so it reads as a footnote. Empty
  * text suppresses rendering (Spec view; in-flight probe). */
-.topo-status-text {
+/* Beats .topo-node text's middle-anchor (element+class specificity). */
+.topo-node text.topo-status-text, .topo-status-text {
+  text-anchor: end;
   font-family: var(--font-mono);
   font-size: 9px;
   text-transform: lowercase;

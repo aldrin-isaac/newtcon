@@ -312,6 +312,29 @@ function renderTopologySVG(
   // impossible to hit.
   const dimmed = opts.dimmedNames ?? new Set<string>();
   const paletteByDevice = opts.paletteByDevice;
+  // Parallel-link arcs (uplift 6.6): links sharing a device pair fan out
+  // as quadratic arcs with symmetric perpendicular offsets instead of
+  // overdrawing one straight line. Singleton links stay straight.
+  const pairCounts = new Map<string, number>();
+  const pairSeen = new Map<string, number>();
+  const pairKey = (l: TopoLink): string => [l.local_device ?? "", l.remote_device ?? ""].sort().join("\u0000");
+  for (const l of links) pairCounts.set(pairKey(l), (pairCounts.get(pairKey(l)) ?? 0) + 1);
+  const arcOffset = (l: TopoLink): number => {
+    const key = pairKey(l);
+    const n = pairCounts.get(key) ?? 1;
+    if (n <= 1) return 0;
+    const i = pairSeen.get(key) ?? 0;
+    pairSeen.set(key, i + 1);
+    return (i - (n - 1) / 2) * 16;
+  };
+  const arcPath = (x1: number, y1: number, x2: number, y2: number, off: number): string => {
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const px = -(y2 - y1) / len;
+    const py = (x2 - x1) / len;
+    return `M ${x1} ${y1} Q ${mx + px * off * 2} ${my + py * off * 2} ${x2} ${y2}`;
+  };
   for (const link of links) {
     const from = link.local_device ? positions.get(link.local_device) : undefined;
     const to = link.remote_device ? positions.get(link.remote_device) : undefined;
@@ -328,14 +351,11 @@ function renderTopologySVG(
       const z = paletteByDevice.get(link.remote_device) ?? "unknown";
       linkPalette = resolveLinkPalette(a, z);
     }
+    const off = arcOffset(link);
     if (opts.onLinkClick) {
-      const hit = svgEl("line", {
-        "class": "topo-link-hit",
-        x1: String(from.cx),
-        y1: String(from.cy),
-        x2: String(to.cx),
-        y2: String(to.cy),
-      });
+      const hit = off === 0
+        ? svgEl("line", { "class": "topo-link-hit", x1: String(from.cx), y1: String(from.cy), x2: String(to.cx), y2: String(to.cy) })
+        : svgEl("path", { "class": "topo-link-hit", d: arcPath(from.cx, from.cy, to.cx, to.cy, off), fill: "none" });
       const onLinkClick = opts.onLinkClick;
       hit.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -358,14 +378,19 @@ function renderTopologySVG(
     if (opts.speedsByDevice) {
       widthAttr = String(linkStrokeWidth(linkSpeedForLink(link, opts.speedsByDevice)));
     }
-    const line = svgEl("line", {
-      "class": "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass,
-      x1: String(from.cx),
-      y1: String(from.cy),
-      x2: String(to.cx),
-      y2: String(to.cy),
-      ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
-    });
+    const linkClass = "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass;
+    const line = off === 0
+      ? svgEl("line", {
+          "class": linkClass,
+          x1: String(from.cx), y1: String(from.cy), x2: String(to.cx), y2: String(to.cy),
+          ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
+        })
+      : svgEl("path", {
+          "class": linkClass,
+          d: arcPath(from.cx, from.cy, to.cx, to.cy, off),
+          fill: "none",
+          ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
+        });
     if (link.local_device) line.setAttribute("data-local-device", link.local_device);
     if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
     if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
@@ -400,6 +425,7 @@ function renderTopologySVG(
     const isDimmed = dimmed.has(node.name);
     const g = svgEl("g", {
       "class": "topo-node"
+        + (String(node.type) === "host" ? " topo-node--host" : " topo-node--switch")
         + (isSelected ? " topo-node--selected" : "")
         + (pendingCount > 0 ? " topo-node--pending" : "")
         + (isDimmed ? " topo-node--dimmed" : "")
@@ -480,11 +506,13 @@ function renderTopologySVG(
     // with empty / missing entries so Spec view stays text-free.
     const statusText = opts.statusTextByDevice?.get(node.name) ?? "";
     if (statusText !== "") {
+      // Card footer (uplift 6.6): status lives INSIDE the card's bottom-right
+      // corner — anchored, not floating in canvas space.
       const statusLabel = svgEl("text", {
         "class": "topo-status-text",
         "data-status-text": node.name,
-        x: String(pos.cx + NODE_W / 2),
-        y: String(pos.cy + NODE_H / 2 + 12),
+        x: String(pos.cx + NODE_W / 2 - 6),
+        y: String(pos.cy + NODE_H / 2 - 8),
       });
       statusLabel.textContent = statusText;
       g.appendChild(statusLabel);
@@ -494,8 +522,8 @@ function renderTopologySVG(
       const placeholder = svgEl("text", {
         "class": "topo-status-text topo-status-text--empty",
         "data-status-text": node.name,
-        x: String(pos.cx + NODE_W / 2),
-        y: String(pos.cy + NODE_H / 2 + 12),
+        x: String(pos.cx + NODE_W / 2 - 6),
+        y: String(pos.cy + NODE_H / 2 - 8),
       });
       g.appendChild(placeholder);
     }
