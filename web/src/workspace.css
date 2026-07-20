@@ -338,15 +338,24 @@
 .topology-header-bar .topology-view-row { padding-bottom: 0; }
 .topology-header-bar .topology-toolbar { margin-bottom: 0; }
 .topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-md); flex-wrap: wrap; }
-/* View-mode chips + lens chips share one row: both re-weight the canvas.
-   A hairline rule separates the two families. */
-.topology-mode-row { display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap; }
-.topology-mode-row .topology-view-row { padding: 0; }
-.topology-mode-row .topology-lens-row {
+/* Canvas command bar (uplift 6.1): one compact line steers the canvas —
+   view · lens · zones · health · actions. Groups divide with hairlines;
+   labels shrink to whispers; health pushes right, actions rightmost. */
+.topology-command-bar { justify-content: flex-start; row-gap: var(--space-2xs); }
+.topology-command-bar .topology-view-row,
+.topology-command-bar .topology-filter-row { padding: 0; margin: 0; display: flex; align-items: center; gap: var(--space-2xs); flex-wrap: wrap; }
+.topology-command-bar .topology-lens-row,
+.topology-command-bar .topology-filter-row:not(.topology-lens-row) {
   padding-left: var(--space-md);
   border-left: 1px solid var(--color-border-subtle);
-  margin: 0;
 }
+.topology-command-bar .topology-view-label,
+.topology-command-bar .topology-filter-label {
+  font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+}
+.topology-command-bar .fabric-strip { margin-left: auto; margin-right: 0; }
+.topology-command-bar .topology-toolbar { margin-left: var(--space-md); }
 .topology-view-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); margin-right: var(--space-xs); }
 
 /* Filter chip row — sits between toolbar and SVG split. Only mounted

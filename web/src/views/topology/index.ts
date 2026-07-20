@@ -1485,15 +1485,14 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // buttons (Add link / Deploy / Provision / Destroy) pushed right, so the
     // operator reads "what am I looking at" on the left and "what can I do"
     // on the right instead of everything stacked into the left gutter.
-    const headerBar = el("div", { className: "topology-header-bar" });
-    // Fabric-health strip (uplift 4.5, re-homed): the header bar carries
-    // health (left) and lifecycle actions (right). The view-mode chips sit
-    // below, WITH the lens row — both re-weight what the canvas shows, so
-    // they read as one control family (operator request).
+    // Canvas command bar (uplift 6.1, #444): EVERYTHING that steers the
+    // canvas lives in one compact bar — view modes, lenses, zone filter,
+    // fabric health, lifecycle actions. The canvas is the home; chrome is
+    // one line. Legacy row classes stay on the groups so existing smokes'
+    // selectors keep meaning what they meant.
+    const headerBar = el("div", { className: "topology-header-bar topology-command-bar" });
     const healthStrip = el("button", { type: "button", className: "fabric-strip" });
     mountFabricHealthStrip(healthStrip);
-    headerBar.append(healthStrip, toolbar);
-    root.appendChild(headerBar);
     const viewRow = el("div", { className: "topology-view-row" });
     const renderViewRow = (): void => {
       viewRow.textContent = "";
@@ -1535,7 +1534,6 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // re-render the row without disturbing other DOM.
     const zones = uniqueZones(deviceMetadata);
     const filterRow = el("div", { className: "topology-filter-row" });
-    if (zones.length > 1) root.appendChild(filterRow);
     const renderFilterRow = (): void => {
       filterRow.textContent = "";
       const label = el("span", { className: "topology-filter-label" }, "Zone:");
@@ -1574,9 +1572,10 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // place, then the graph re-renders with the lens effect applied.
     let lensState: LensState = { kind: null };
     const lensRow = el("div", { className: "topology-filter-row topology-lens-row" });
-    const modeRow = el("div", { className: "topology-mode-row" });
-    modeRow.append(viewRow, lensRow);
-    root.appendChild(modeRow);
+    headerBar.append(viewRow, lensRow);
+    if (zones.length > 1) headerBar.appendChild(filterRow);
+    headerBar.append(healthStrip, toolbar);
+    root.appendChild(headerBar);
     const renderLensRow = (): void => {
       lensRow.textContent = "";
       lensRow.appendChild(el("span", { className: "topology-filter-label" }, "Lens:"));
