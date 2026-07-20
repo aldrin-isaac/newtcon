@@ -419,6 +419,10 @@
 .drawer-header { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-border-subtle); min-height: var(--header-height); }
 .drawer-breadcrumb { flex: 1; display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-sm); color: var(--color-text-secondary); }
 .drawer-breadcrumb .crumb-main { font-family: var(--font-mono); color: var(--color-text-primary); font-weight: var(--weight-medium); }
+/* Pinned mini-header (uplift 6.2): device + substrate chip in the fixed
+   drawer header — survives tab switches and any scroll depth. */
+.drawer-mini-status { display: inline-flex; align-items: center; gap: var(--space-2xs); margin-left: var(--space-sm); }
+.drawer-mini-status-label { font-size: var(--text-2xs); color: var(--color-text-secondary); font-family: var(--font-mono); }
 .drawer-content { flex: 1; overflow: auto; padding: var(--space-md); }
 .subtabs { display: flex; gap: 1px; margin: 0 calc(var(--space-md) * -1) var(--space-md); padding: 0 var(--space-md); border-bottom: 1px solid var(--color-border-subtle); overflow-x: auto; }
 .subtab { padding: var(--space-xs) var(--space-sm); background: transparent; border: none; border-bottom: 2px solid transparent; font-size: var(--text-sm); color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; transition: color var(--duration-fast) var(--ease-standard); margin-bottom: -1px; }
