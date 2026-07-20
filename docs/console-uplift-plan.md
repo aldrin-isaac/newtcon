@@ -178,7 +178,23 @@ later re-earns scope at its phase boundary.
 | Deep-linkable views | 0 | all primary views | **all** (#/{net}/{view} + facet/detail/device params) |
 | Unit tests / smokes | 695 / 30 | only up | **770 / 40** |
 
-## Program status — COMPLETE (2026-07-19)
+## Phase 6 — Composition (operator-commissioned, 2026-07-19)
+
+*From the fresh-lens critique: fewer, denser, calmer surfaces on the
+now-solid bones. Issues #444–#451.*
+
+| # | Slice | Definition of done | Size |
+|---|-------|--------------------|------|
+| 6.1 | **Canvas command bar** — view+lens+zones+health in one compact bar; the canvas is the home. | One bar; no vertical regression; smokes updated. | M |
+| 6.2 | **Drawer mini-header** — device + palette state pinned across tabs + scroll. | Pinned through scroll/tab-switch; smoke. | S |
+| 6.3 | **Cmd-K argument pickers** — click-through chips; typing still works. | Verb stageable mouse-only; smoke. | M |
+| 6.4 | **Engine posture surface** — auth/audit/reachability honest in one place. | Posture visible without 404-tripping; smoke. | S |
+| 6.5 | **Mono display identity** — JetBrains Mono brand + headings. | Both themes reviewed. | S |
+| 6.6 | **Canvas composition** — arced parallel links, heavier switch cards, status in card footer. | Screenshots; palette/link smokes green. | M |
+| 6.7 | **Springy drawer motion** — dock/undock/open with one engineered spring; reduced-motion instant. | No jank; reduced-motion respected. | S |
+| 6.8 | **Zone tinting** — barely-visible topographic zone regions. | Screenshots; no pointer interference. | S |
+
+## Program status — Phases 0–5 COMPLETE (2026-07-19); Phase 6 in progress
 
 All five phases landed: 0.1–0.3 (instruments), 1.1–1.5 (extractions),
 2.1–2.5 (primitives, error taxonomy, toasts, hash router, docked
