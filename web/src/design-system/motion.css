@@ -1,6 +1,10 @@
 /* Motion tokens. */
 
 :root {
+  /* Drawer spring (uplift 6.7): one engineered curve for dock/undock/open —
+   * a restrained overshoot that reads as sprung mass, not bounce. */
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.5, 1);
+  --duration-drawer: 280ms;
   --duration-instant: 80ms;
   --duration-fast:    120ms;
   --duration-base:    180ms;
@@ -17,6 +21,7 @@
     --duration-instant: 0ms;
     --duration-fast:    0ms;
     --duration-base:    0ms;
+    --duration-drawer:  0ms;
     --duration-slow:    0ms;
     --duration-slower:  0ms;
   }
