@@ -1,19 +1,16 @@
-// theme.ts — light/dark theme owner (uplift 3.2 draft).
+// theme.ts — light/dark theme owner (uplift 3.2; dark-by-default per the
+// Phase-6 exit decision).
 //
 // The <html> element ALWAYS carries data-theme ("light" | "dark"): stamped at
-// boot from the stored preference, falling back to the system's
-// prefers-color-scheme. CSS therefore needs exactly one dark block
-// (:root[data-theme="dark"]) and no @media duplication. While the operator
-// has no explicit preference, system theme changes are followed live; an
-// explicit toggle pins the choice (persisted per browser).
+// boot from the stored preference, falling back to DARK — the console's
+// default face. CSS therefore needs exactly one dark block
+// (:root[data-theme="dark"]) and no @media duplication. An explicit toggle
+// pins the choice (persisted per browser); system preference is not
+// consulted (the operator chose the default).
 
 const STORAGE_KEY = "newtcon.theme";
 
 export type Theme = "light" | "dark";
-
-function systemTheme(): Theme {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
 
 function storedTheme(): Theme | null {
   try {
@@ -40,10 +37,7 @@ export function toggleTheme(): Theme {
   return next;
 }
 
-/** initTheme — stamp data-theme at boot; follow the system while unpinned. */
+/** initTheme — stamp data-theme at boot: stored preference, else dark. */
 export function initTheme(): void {
-  apply(storedTheme() ?? systemTheme());
-  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", (e) => {
-    if (storedTheme() === null) apply(e.matches ? "dark" : "light");
-  });
+  apply(storedTheme() ?? "dark");
 }

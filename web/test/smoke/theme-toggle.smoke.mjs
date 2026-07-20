@@ -1,5 +1,6 @@
-// Browser smoke: dark theme (uplift 3.2, #415).
-//   1. Default follows prefers-color-scheme (emulated dark → data-theme=dark).
+// Browser smoke: dark theme (uplift 3.2; dark-by-default per Phase-6 exit).
+//   1. Fresh profile boots DARK even under an emulated LIGHT system
+//      preference — dark is the console's default, not an inheritance.
 //   2. The sidebar-footer toggle flips the theme and actually restyles
 //      (body background changes).
 //   3. The explicit choice persists across reload (localStorage), beating
@@ -23,14 +24,14 @@ try {
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
   const bodyBg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
-  // 1. System preference is the default when nothing is stored.
-  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+  // 1. Dark is the default — even against a LIGHT system preference.
+  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 30000 });
   // Gate on the theme stamp: initTheme() sets data-theme and setupThemeToggle
   // wires the button in the same synchronous boot block — once the stamp is
   // there, the toggle is live (under suite load, boot can lag navigation).
   await page.waitForFunction(() => !!document.documentElement.dataset.theme, { timeout: 30000 });
-  expect(await theme() === "dark", "emulated dark system preference boots dark");
+  expect(await theme() === "dark", "fresh profile boots dark despite a light system preference");
   const darkBg = await bodyBg();
 
   // 2. Toggle flips to light and restyles.
@@ -44,7 +45,7 @@ try {
   // 3. The explicit choice persists across reload, beating the system pref.
   await page.reload({ waitUntil: "networkidle0", timeout: 30000 });
   await page.waitForFunction(() => !!document.documentElement.dataset.theme, { timeout: 30000 });
-  expect(await theme() === "light", "explicit light choice survives reload under a dark system preference");
+  expect(await theme() === "light", "explicit light choice survives reload (pin beats default)");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
