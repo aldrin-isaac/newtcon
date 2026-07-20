@@ -1486,13 +1486,15 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // operator reads "what am I looking at" on the left and "what can I do"
     // on the right instead of everything stacked into the left gutter.
     const headerBar = el("div", { className: "topology-header-bar" });
-    const viewRow = el("div", { className: "topology-view-row" });
-    // Fabric-health strip (uplift 4.5, re-homed): topology-specific health
-    // lives in the topology header, between the view chips and the actions.
+    // Fabric-health strip (uplift 4.5, re-homed): the header bar carries
+    // health (left) and lifecycle actions (right). The view-mode chips sit
+    // below, WITH the lens row — both re-weight what the canvas shows, so
+    // they read as one control family (operator request).
     const healthStrip = el("button", { type: "button", className: "fabric-strip" });
     mountFabricHealthStrip(healthStrip);
-    headerBar.append(viewRow, healthStrip, toolbar);
+    headerBar.append(healthStrip, toolbar);
     root.appendChild(headerBar);
+    const viewRow = el("div", { className: "topology-view-row" });
     const renderViewRow = (): void => {
       viewRow.textContent = "";
       const label = el("span", { className: "topology-view-label" }, "View:");
@@ -1572,7 +1574,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // place, then the graph re-renders with the lens effect applied.
     let lensState: LensState = { kind: null };
     const lensRow = el("div", { className: "topology-filter-row topology-lens-row" });
-    root.appendChild(lensRow);
+    const modeRow = el("div", { className: "topology-mode-row" });
+    modeRow.append(viewRow, lensRow);
+    root.appendChild(modeRow);
     const renderLensRow = (): void => {
       lensRow.textContent = "";
       lensRow.appendChild(el("span", { className: "topology-filter-label" }, "Lens:"));

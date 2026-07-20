@@ -338,6 +338,15 @@
 .topology-header-bar .topology-view-row { padding-bottom: 0; }
 .topology-header-bar .topology-toolbar { margin-bottom: 0; }
 .topology-view-row { display: flex; align-items: center; gap: var(--space-2xs); padding: var(--space-2xs) 0 var(--space-md); flex-wrap: wrap; }
+/* View-mode chips + lens chips share one row: both re-weight the canvas.
+   A hairline rule separates the two families. */
+.topology-mode-row { display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap; }
+.topology-mode-row .topology-view-row { padding: 0; }
+.topology-mode-row .topology-lens-row {
+  padding-left: var(--space-md);
+  border-left: 1px solid var(--color-border-subtle);
+  margin: 0;
+}
 .topology-view-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); font-weight: var(--weight-medium); margin-right: var(--space-xs); }
 
 /* Filter chip row — sits between toolbar and SVG split. Only mounted
@@ -1805,7 +1814,7 @@
 .fabric-strip {
   display: inline-flex; align-items: center; gap: var(--space-2xs);
   background: transparent; border: none; padding: 0; cursor: pointer;
-  margin: 0 auto; /* centers between the view chips and the action buttons */
+  margin-right: auto; /* health left, lifecycle actions right */
 }
 .fabric-strip:empty { display: none; }
 .fabric-strip-cell {
