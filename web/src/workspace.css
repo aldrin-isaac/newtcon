@@ -140,6 +140,20 @@
 .topo-link { stroke: var(--color-border-strong); stroke-width: 1.5; pointer-events: none; }
 .topo-link-hit { stroke: transparent; stroke-width: 12; cursor: pointer; }
 .topo-link-hit:hover + .topo-link { stroke: var(--color-accent); stroke-width: 2; }
+/* Zone regions (uplift 6.8): geography as barely-visible rounded tints
+   behind member devices — three rotating whisper hues from existing bg
+   tokens; labels in the caps voice. Never interactive. */
+.topo-zone-region { pointer-events: none; }
+.topo-zone-region rect { stroke: none; opacity: 0.5; }
+.topo-zone-region--0 rect { fill: var(--color-accent-bg); }
+.topo-zone-region--1 rect { fill: var(--color-drift-bg); }
+.topo-zone-region--2 rect { fill: var(--color-success-bg); }
+.topo-zone-label {
+  font-family: var(--font-system); font-size: 9px;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  fill: var(--color-text-muted); opacity: 0.8;
+}
+
 /* Canvas dot-grid texture (toggle in the zoom toolbar). Token-colored so
    both themes stay subtle; never interactive. */
 .topo-grid { pointer-events: none; }

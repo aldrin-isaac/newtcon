@@ -204,6 +204,9 @@ interface TopologyRenderOpts {
   dimmedNames?: Set<string>;
   /** Lens emphasis (slice 4.3): devices to draw with a halo ring. */
   haloNames?: Set<string>;
+  /** Zone tinting (uplift 6.8): device → zone name; zones render as
+   *  barely-visible rounded regions behind their members. */
+  zoneByDevice?: Map<string, string>;
 }
 
 interface TopologyRenderResult {
@@ -305,6 +308,45 @@ function renderTopologySVG(
   });
   if (localStorage.getItem("newtcon.topoGrid") === "off") gridRect.classList.add("topo-grid--off");
   svg.appendChild(gridRect);
+
+  // Zone tinting (uplift 6.8): each zone is a rounded region behind its
+  // member devices — geography, not state. Bounding box over member
+  // positions + padding; token-tinted at whisper alpha; label in the
+  // region's top-left. Never interactive; never affects fit (bounds come
+  // from node positions).
+  if (opts.zoneByDevice && opts.zoneByDevice.size > 0) {
+    const members = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+    for (const nd of nodes) {
+      const zone = opts.zoneByDevice.get(nd.name);
+      const pos = positions.get(nd.name);
+      if (zone === undefined || !pos) continue;
+      const b = members.get(zone) ?? { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      b.minX = Math.min(b.minX, pos.cx - NODE_W / 2);
+      b.minY = Math.min(b.minY, pos.cy - NODE_H / 2);
+      b.maxX = Math.max(b.maxX, pos.cx + NODE_W / 2);
+      b.maxY = Math.max(b.maxY, pos.cy + NODE_H / 2);
+      members.set(zone, b);
+    }
+    const PAD = 26;
+    let zi = 0;
+    for (const [zone, b] of [...members.entries()].sort(([a], [z]) => a.localeCompare(z))) {
+      const region = svgEl("g", { "class": `topo-zone-region topo-zone-region--${zi % 3}` });
+      region.appendChild(svgEl("rect", {
+        x: String(b.minX - PAD), y: String(b.minY - PAD),
+        width: String(b.maxX - b.minX + PAD * 2), height: String(b.maxY - b.minY + PAD * 2),
+        rx: "14",
+      }));
+      const label = svgEl("text", {
+        "class": "topo-zone-label",
+        x: String(b.minX - PAD + 10),
+        y: String(b.minY - PAD + 14),
+      });
+      label.textContent = zone;
+      region.appendChild(label);
+      svg.appendChild(region);
+      zi++;
+    }
+  }
 
   // Draw links first (under nodes). When onLinkClick is wired, each
   // visible line gets a wider invisible hit-target sibling so clicking
@@ -1852,6 +1894,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         onNodeClick: (deviceName) => { openNodeDrawer(deviceName, viewMode); },
         driftByDevice,
         statusByDevice,
+        zoneByDevice: new Map([...deviceMetadata.entries()].filter(([, m]) => m.zone !== null).map(([d, m]) => [d, m.zone as string])),
         lldpByDevice,
         speedsByDevice,
         underlayByDevice,
