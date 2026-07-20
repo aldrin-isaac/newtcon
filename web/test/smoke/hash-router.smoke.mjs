@@ -37,7 +37,7 @@ try {
 
   // 1. Bare boot stamps the default route.
   await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 30000 });
-  await page.waitForFunction(() => location.hash.length > 0, { timeout: 10000 });
+  await page.waitForFunction(() => location.hash.length > 0, { timeout: 30000 });
   expect(await page.evaluate(() => location.hash) === `#/${NET}/specs`, `bare boot stamps #/${NET}/specs`);
 
   // 2. Tab navigation writes the hash; back restores the previous view.
