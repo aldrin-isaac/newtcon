@@ -29,7 +29,7 @@ try {
   await new Promise((r) => setTimeout(r, 500));
 
   const ui = await page.evaluate(() => ({
-    chips: [...document.querySelectorAll("#newtron-pill .posture-chip")].map((c) => c.textContent),
+    chips: [...document.querySelectorAll("#newtron-pill .posture-flag")].map((c) => c.textContent),
     title: document.getElementById("newtron-pill")?.title ?? "",
   }));
   const expectedChips = (posture.auth_surface === "absent" ? 1 : 0) + (posture.audit_log === "disabled" ? 1 : 0);

@@ -28,6 +28,10 @@
 
 :root {
   --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Display voice (uplift 6.5): the identity face carries headings too —
+   * mono-as-identity, not just mono-as-values. Same family, heavier
+   * weight + tight tracking distinguish display from data. */
+  --font-display: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", "Roboto Mono", Consolas, "Courier New", monospace;
   --font-mono:   "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", "Roboto Mono", Consolas, "Courier New", monospace;
 
   --text-2xs:  0.6875rem;  /* 11px */
