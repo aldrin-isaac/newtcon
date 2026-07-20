@@ -74,6 +74,34 @@ describe("deploy verb", () => {
   });
 });
 
+describe("click-through pickers (6.3)", () => {
+  test("bare verb seeds carry advance text", () => {
+    const s = parseVerb("app", CTX);
+    assert.ok(s.every((x) => x.advance?.startsWith("apply ")));
+  });
+  test("'apply SVC on' fans out devices with advance", () => {
+    const s = parseVerb("apply TRANSIT on", CTX);
+    assert.deepEqual(s.map((x) => x.device).sort(), ["host1", "switch1", "switch2"]);
+    assert.ok(s.every((x) => !x.complete && x.advance === `apply TRANSIT on ${x.device}:`));
+  });
+  test("'apply SVC on DEV:' fans out ports as COMPLETE items", () => {
+    const s = parseVerb("apply TRANSIT on switch1:", CTX);
+    assert.deepEqual(s.map((x) => x.iface), ["Ethernet0", "Ethernet2"]);
+    assert.ok(s.every((x) => x.complete));
+  });
+  test("no known ports → typed-port hint with advance", () => {
+    const s = parseVerb("apply TRANSIT on host1:", CTX);
+    assert.equal(s.length, 1);
+    assert.equal(s[0].complete, false);
+    assert.equal(s[0].advance, "apply TRANSIT on host1:");
+  });
+  test("'create vlan 200 on' fans out devices complete", () => {
+    const s = parseVerb("create vlan 200 on", CTX);
+    assert.deepEqual(s.map((x) => x.device).sort(), ["host1", "switch1", "switch2"]);
+    assert.ok(s.every((x) => x.complete));
+  });
+});
+
 describe("non-verbs", () => {
   test("ordinary palette text yields nothing", () => {
     assert.deepEqual(parseVerb("switch1", CTX), []);

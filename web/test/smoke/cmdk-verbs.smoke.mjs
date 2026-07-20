@@ -98,6 +98,25 @@ try {
   expect(await page.evaluate(() => location.hash.endsWith("/topology")), "deploy verb navigates to Topology");
   expect(await pendingCount() === before + 2, "deploy verb did NOT stage anything");
 
+  // 4. MOUSE-ONLY staging (uplift 6.3): click through verb → service →
+  //    device → port with zero typing beyond opening the palette.
+  await openPalette();
+  await page.type("#palette-input", "a", { delay: 15 });
+  await page.waitForFunction(() => [...document.querySelectorAll(".palette-item")].some((i) => i.textContent.includes("apply ")), { timeout: 20000 });
+  await clickItem(`apply ${SVC} on …`);
+  await page.waitForFunction((d) => [...document.querySelectorAll(".palette-item")].some((i) => i.textContent.includes(`${d}:`)), { timeout: 20000 }, DEV);
+  await clickItem(`apply ${SVC} on ${DEV}:…`);
+  await page.waitForFunction((s2) => [...document.querySelectorAll(".palette-item")].some((i) => i.textContent.includes(s2) && !i.textContent.includes("…")), { timeout: 20000 }, `on ${DEV}:`);
+  const stagedVia = await page.evaluate((needle) => {
+    const all = [...document.querySelectorAll(".palette-item")].map((i) => i.textContent);
+    const item = [...document.querySelectorAll(".palette-item")].find((i) => i.textContent.includes(needle) && !i.textContent.includes("…") && !i.textContent.includes("<port>"));
+    const label = item?.textContent ?? null;
+    item?.click();
+    return label ?? "MISS among: " + all.slice(0, 6).join(" | ");
+  }, `on ${DEV}:`);
+  await sleep(400);
+  expect(await pendingCount() === before + 3, `mouse-only click-through staged (via ${JSON.stringify(stagedVia)})`);
+
   // Cleanup: discard everything this smoke staged.
   await page.evaluate(() => document.getElementById("pending-bar-discard")?.click());
   await sleep(400);

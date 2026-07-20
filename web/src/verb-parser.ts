@@ -25,6 +25,9 @@ export interface VerbSuggestion {
   complete: boolean;
   /** Display line, e.g. "apply EVPNIRB on switch1:Ethernet2". */
   label: string;
+  /** Incomplete suggestions: the input text that advances to the next
+   *  argument when clicked (the click-through picker path, uplift 6.3). */
+  advance?: string;
   service?: string;
   device?: string;
   iface?: string;
@@ -56,12 +59,16 @@ function applySuggestions(input: string, ctx: VerbContext): VerbSuggestion[] {
   if (!/^apply\b/i.test(input)) {
     return ctx.services.slice(0, MAX_SUGGESTIONS).map((service) => ({
       kind: "apply" as const, complete: false, label: `apply ${service} on …`, service,
+      advance: `apply ${service} on `,
     }));
   }
   // apply [<service> [on [<device>[:<iface>]]]]
-  const m = input.match(/^apply(?:\s+(\S+))?(?:\s+on(?:\s+(\S+))?)?$/i);
+  const m = input.match(/^apply(?:\s+(\S+))?(?:\s+on(?:\s+(\S*))?)?$/i);
   if (!m) return [];
-  const [, svcTok, targetTok] = m;
+  const [, svcTok, targetTokRaw] = m;
+  // "apply SVC on" / "apply SVC on " → device-picking stage (empty token).
+  const onPresent = /\bon\b/i.test(input.slice(5));
+  const targetTok = targetTokRaw !== undefined ? targetTokRaw : onPresent ? "" : undefined;
 
   const services = svcTok === undefined ? [...ctx.services]
     : ctx.services.includes(svcTok) ? [svcTok]
@@ -69,15 +76,25 @@ function applySuggestions(input: string, ctx: VerbContext): VerbSuggestion[] {
   const out: VerbSuggestion[] = [];
   for (const service of services.slice(0, MAX_SUGGESTIONS)) {
     if (targetTok === undefined) {
-      out.push({ kind: "apply", complete: false, label: `apply ${service} on …`, service });
+      out.push({ kind: "apply", complete: false, label: `apply ${service} on …`, service, advance: `apply ${service} on ` });
       continue;
     }
     const [devTok, ifaceTok] = targetTok.split(":", 2);
-    const devices = devTok !== undefined && ctx.devices.includes(devTok) ? [devTok] : prefixMatches(devTok ?? "", ctx.devices);
+    const devices = devTok !== undefined && devTok !== "" && ctx.devices.includes(devTok) ? [devTok] : prefixMatches(devTok ?? "", ctx.devices);
     for (const device of devices.slice(0, MAX_SUGGESTIONS)) {
       const pool = ctx.interfacesByDevice.get(device) ?? [];
-      if (ifaceTok === undefined || ifaceTok === "") {
-        out.push({ kind: "apply", complete: false, label: `apply ${service} on ${device}:…`, service, device });
+      if (ifaceTok === undefined) {
+        out.push({ kind: "apply", complete: false, label: `apply ${service} on ${device}:…`, service, device, advance: `apply ${service} on ${device}:` });
+        continue;
+      }
+      if (ifaceTok === "") {
+        // Port-picking stage: every known port completes directly.
+        for (const iface of pool.slice(0, MAX_SUGGESTIONS)) {
+          out.push({ kind: "apply", complete: true, label: `apply ${service} on ${device}:${iface}`, service, device, iface });
+        }
+        if (pool.length === 0) {
+          out.push({ kind: "apply", complete: false, label: `apply ${service} on ${device}:<port>`, service, device, advance: `apply ${service} on ${device}:` });
+        }
         continue;
       }
       const ifaces = pool.includes(ifaceTok) ? [ifaceTok] : prefixMatches(ifaceTok, pool);
@@ -94,16 +111,19 @@ function applySuggestions(input: string, ctx: VerbContext): VerbSuggestion[] {
 
 function vlanSuggestions(input: string, ctx: VerbContext): VerbSuggestion[] {
   if (!/^create\b/i.test(input)) {
-    return [{ kind: "create-vlan", complete: false, label: "create vlan <id> on <device>" }];
+    return [{ kind: "create-vlan", complete: false, label: "create vlan <id> on <device>", advance: "create vlan " }];
   }
-  const m = input.match(/^create(?:\s+vlan(?:\s+(\d+))?(?:\s+on(?:\s+(\S+))?)?)?$/i);
+  const m = input.match(/^create(?:\s+vlan(?:\s+(\d+))?(?:\s+on(?:\s+(\S*))?)?)?$/i);
   if (!m) return [];
   const [, idTok, devTok] = m;
-  if (idTok === undefined) return [{ kind: "create-vlan", complete: false, label: "create vlan <id> on <device>" }];
+  if (idTok === undefined) return [{ kind: "create-vlan", complete: false, label: "create vlan <id> on <device>", advance: "create vlan " }];
   const vlanId = Number(idTok);
   if (!Number.isInteger(vlanId) || vlanId < 1 || vlanId > 4094) return [];
-  if (devTok === undefined) {
-    return [{ kind: "create-vlan", complete: false, label: `create vlan ${vlanId} on …`, vlanId }];
+  if (devTok === undefined || devTok === "") {
+    // Device-picking stage after the id.
+    return ctx.devices.slice(0, MAX_SUGGESTIONS).map((device) => ({
+      kind: "create-vlan" as const, complete: true, label: `create vlan ${vlanId} on ${device}`, vlanId, device,
+    }));
   }
   const devices = ctx.devices.includes(devTok) ? [devTok] : prefixMatches(devTok, ctx.devices);
   return devices.slice(0, MAX_SUGGESTIONS).map((device) => ({
