@@ -326,15 +326,31 @@ function setupPalette(): void {
           ? (services.value as Array<string | { name?: string }>)
               .map((s) => (typeof s === "string" ? s : s.name ?? "")).filter(Boolean)
           : [];
-        const nodes = topo.status === "fulfilled" ? ((topo.value as { nodes?: Record<string, { steps?: unknown[] }> }).nodes ?? {}) : {};
-        const interfacesByDevice = new Map<string, readonly string[]>();
+        const topoVal = topo.status === "fulfilled" ? (topo.value as { nodes?: Record<string, { steps?: unknown[] }>; links?: Array<{ a?: string; z?: string }> }) : {};
+        const nodes = topoVal.nodes ?? {};
+        const interfacesByDevice = new Map<string, string[]>();
+        const bag = new Map<string, Set<string>>();
         for (const [name, entry] of Object.entries(nodes)) {
           const ifaces = new Set<string>();
           for (const step of parseDeviceSteps(entry?.steps)) {
             if (step.iface !== undefined) ifaces.add(step.iface);
           }
-          interfacesByDevice.set(name, [...ifaces]);
+          bag.set(name, ifaces);
         }
+        // Links name real ports even when a device's steps carry no
+        // interface verbs (spec-only or bgp-only fabrics) — harvest both.
+        for (const lnk of topoVal.links ?? []) {
+          for (const end of [lnk.a, lnk.z]) {
+            if (typeof end !== "string") continue;
+            const idx = end.indexOf(":");
+            if (idx <= 0) continue;
+            const dev = end.slice(0, idx);
+            const iface = end.slice(idx + 1);
+            if (!bag.has(dev)) bag.set(dev, new Set());
+            bag.get(dev)!.add(iface);
+          }
+        }
+        for (const [name, ifaces] of bag) interfacesByDevice.set(name, [...ifaces].sort());
         const rawNets = nets.status === "fulfilled" ? nets.value : [];
         const netList = Array.isArray(rawNets) ? rawNets : (rawNets as { networks?: unknown[] }).networks ?? [];
         const networks = (netList as Array<{ id?: string; name?: string }>).map((n) => n.id ?? n.name ?? "").filter(Boolean);
@@ -352,10 +368,20 @@ function setupPalette(): void {
     loadVerbContext();
     if (verbCtx === null) return [];
     return parseVerb(query, verbCtx).map((s) => ({
-      label: s.label + (s.complete ? "" : "  (keep typing)"),
+      label: s.label + (s.complete ? "" : "  →"),
       kind: "Action",
       action: () => {
-        if (!s.complete) return; // incomplete sentences are hints, not actions
+        if (!s.complete) {
+          // Click-through picker (uplift 6.3): advance the sentence to the
+          // next argument and re-render — the parser fans out its options.
+          if (s.advance !== undefined && input) {
+            input.value = s.advance;
+            input.focus();
+            paletteSelected = 0;
+            renderPaletteResults(input.value);
+          }
+          return;
+        }
         if (s.kind === "apply" && s.service && s.device && s.iface) {
           enqueueInterfaceAction(s.device, s.iface, "apply-service", `Bind ${s.service} on ${s.device}:${s.iface}`, { service: s.service });
           showToast({ kind: "success", title: "Staged", body: `${s.service} on ${s.device}:${s.iface} — review in the pending bar` });

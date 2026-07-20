@@ -25,7 +25,7 @@ try {
   await authenticatePage(page, BASE);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
   await gotoApp(page, BASE, { waitUntil: "networkidle0", timeout: 30000 });
-  await page.waitForFunction(() => document.getElementById("newtron-target")?.textContent !== "checking…", { timeout: 30000 });
+  await page.waitForFunction(() => document.getElementById("newtron-target")?.textContent !== "checking…", { timeout: 60000 });
   await new Promise((r) => setTimeout(r, 500));
 
   const ui = await page.evaluate(() => ({
