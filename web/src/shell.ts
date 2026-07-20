@@ -34,7 +34,6 @@ import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 import { confirmInline } from "./confirm-inline.js";
 import { showToast } from "./toast.js";
 import { initTheme, toggleTheme, currentTheme } from "./theme.js";
-import { setupFabricHealthStrip } from "./fabric-health-strip.js";
 import { setupDrawerResize } from "./drawer-resize.js";
 import { type VerbContext, parseVerb } from "./verb-parser.js";
 import { enqueueDeviceAction, enqueueInterfaceAction } from "./staging.js";
@@ -1074,7 +1073,6 @@ async function boot(): Promise<void> {
   setupPalette();
   setupPendingBar();
   setupNetworkSwitcher();
-  setupFabricHealthStrip();
   setupDrawerResize();
   startStatusPolling();
 }

@@ -1805,6 +1805,7 @@
 .fabric-strip {
   display: inline-flex; align-items: center; gap: var(--space-2xs);
   background: transparent; border: none; padding: 0; cursor: pointer;
+  margin: 0 auto; /* centers between the view chips and the action buttons */
 }
 .fabric-strip:empty { display: none; }
 .fabric-strip-cell {

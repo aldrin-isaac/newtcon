@@ -37,6 +37,7 @@ import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isA
 import { type LensState, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
+import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
 import { type PaletteState, resolveLabDevicePalette, resolveLabStatusText, resolveLinkPalette, resolvePhysicalDevicePalette, resolvePhysicalStatusText } from "../../topology-palette.js";
 import { type PinnedPosition, clearPositions, loadPositions, savePosition } from "../../topology-positions.js";
@@ -1486,7 +1487,11 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // on the right instead of everything stacked into the left gutter.
     const headerBar = el("div", { className: "topology-header-bar" });
     const viewRow = el("div", { className: "topology-view-row" });
-    headerBar.append(viewRow, toolbar);
+    // Fabric-health strip (uplift 4.5, re-homed): topology-specific health
+    // lives in the topology header, between the view chips and the actions.
+    const healthStrip = el("button", { type: "button", className: "fabric-strip" });
+    mountFabricHealthStrip(healthStrip);
+    headerBar.append(viewRow, healthStrip, toolbar);
     root.appendChild(headerBar);
     const renderViewRow = (): void => {
       viewRow.textContent = "";

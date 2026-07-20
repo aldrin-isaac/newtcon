@@ -127,7 +127,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-focus.ts         → pure focus-mode derivations (uplift 4.5): neighborsOf/focusDim + nearestInDirection arrow-nav
     fabric-health.ts          → pure header-strip aggregation (uplift 4.5): aggregateFabricHealth folds underlay/drift/lab maps into three toned cells
     drawer-resize.ts          → user-resizable drawer width: left-edge grab handle (drag; double-click resets), clampDrawerWidth bounds, per-browser persistence via --drawer-user-width (both docked + overlay modes; contents reflow — tables are width:100%)
-    fabric-health-strip.ts    → the header fabric-health strip: 60s visible-only sweep (bgp/check + drift per device + lab status), mounts #fabric-strip, click → Topology
+    fabric-health-strip.ts    → the topology-header fabric-health strip (re-homed from global chrome): 60s sweep gated on visibility of the topology panel, mounted by the topology view's header bar, click → refresh
     topology-palette.ts       → resolvePalette + resolveDevicePalette — pure resolver from per-element actuation observation to the unified five-state palette (spec-only / actuated-ok / actuated-down / drift / unknown); foundation for the layered Topology views (slice #210.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
