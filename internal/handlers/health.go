@@ -21,6 +21,7 @@ import (
 // lets tests inject a stub without an httptest.Server when the stub is cheaper.
 type newtronHealthProber interface {
 	Health(ctx context.Context) (reachable bool, version string)
+	Posture(ctx context.Context) (authSurface, auditLog string)
 }
 
 // HealthConfig carries the dependencies for [NewHealthHandler].
@@ -64,6 +65,11 @@ const defaultInFlightFloorSeconds = 7 * 24 * 60 * 60 // 604800
 func NewHealthHandler(cfg HealthConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reachable, version := cfg.NewtronClient.Health(r.Context())
+		// Posture probes are bounded: a hung engine must not stall /api/health
+		// (the shell polls it every 15s).
+		pctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		authSurface, auditLog := cfg.NewtronClient.Posture(pctx)
+		cancel()
 
 		resp := types.HealthResponse{
 			Status:  "ok",
@@ -72,6 +78,10 @@ func NewHealthHandler(cfg HealthConfig) http.Handler {
 				URL:       cfg.NewtronURL,
 				Reachable: reachable,
 				Version:   version,
+			},
+			EnginePosture: types.EnginePosture{
+				AuthSurface: authSurface,
+				AuditLog:    auditLog,
 			},
 			// pruner not yet implemented; v1 reports configured floor only.
 			// PrunerLastRunAt / PrunerNextRunAt are zero-valued ("0001-01-01T00:00:00Z").

@@ -392,3 +392,55 @@ func (c *Client) CreateNetwork(ctx context.Context, id, description string) (inf
 	}
 	return info, resp.StatusCode == http.StatusOK, nil
 }
+
+// Posture probes which optional engine layers are present (uplift 6.4):
+// the L2c auth surface (credential-less login POST: 401/400 ⇒ enabled,
+// 404 ⇒ absent) and the L6 audit log (first network's audit read: 200 ⇒
+// enabled, an error naming "disabled" ⇒ disabled). Probe failures are
+// "unknown" — the console never guesses posture.
+func (c *Client) Posture(ctx context.Context) (authSurface, auditLog string) {
+	authSurface, auditLog = "unknown", "unknown"
+
+	if req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.newtServerBase()+"/auth/login", nil); err == nil {
+		if resp, err := c.httpClient.Do(req); err == nil {
+			switch resp.StatusCode {
+			case http.StatusUnauthorized, http.StatusBadRequest:
+				authSurface = "enabled"
+			case http.StatusNotFound:
+				authSurface = "absent"
+			}
+			resp.Body.Close()
+		}
+	}
+
+	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.newtronBase()+"/networks", nil); err == nil {
+		if resp, err := c.httpClient.Do(req); err == nil {
+			// Engine envelope: {"data":[{id,...},...]} — same wrapper every
+			// engine read uses.
+			var envelope struct {
+				Data []networkEntry `json:"data"`
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			nets := envelope.Data
+			if resp.StatusCode == http.StatusOK && json.Unmarshal(body, &envelope) == nil {
+				nets = envelope.Data
+			}
+			if resp.StatusCode == http.StatusOK && len(nets) > 0 {
+				url := fmt.Sprintf("%s/networks/%s/audit/events?limit=1", c.newtronBase(), nets[0].ID)
+				if req2, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil); err == nil {
+					if resp2, err := c.httpClient.Do(req2); err == nil {
+						body2, _ := io.ReadAll(resp2.Body)
+						resp2.Body.Close()
+						if resp2.StatusCode == http.StatusOK {
+							auditLog = "enabled"
+						} else if bytes.Contains(body2, []byte("disabled")) {
+							auditLog = "disabled"
+						}
+					}
+				}
+			}
+		}
+	}
+	return authSurface, auditLog
+}

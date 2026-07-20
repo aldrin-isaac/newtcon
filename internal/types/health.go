@@ -17,6 +17,7 @@ type HealthResponse struct {
 	Status             string             `json:"status"`
 	Version            string             `json:"version"`
 	Newtron            NewtronProbe       `json:"newtron"`
+	EnginePosture      EnginePosture      `json:"engine_posture"`
 	OperationsRetention OperationsRetention `json:"operations_retention"`
 }
 
@@ -66,4 +67,18 @@ type OperationsRetention struct {
 	// PrunerNextRunAt is the scheduled next pruner run.
 	// Zero in v1 — pruner not yet implemented.
 	PrunerNextRunAt time.Time `json:"pruner_next_run_at"`
+}
+
+// EnginePosture reports which optional engine layers are actually present,
+// probed live (uplift 6.4, #447). Values are honest tri-states — "unknown"
+// when the probe itself failed, never a guess. This is how the console
+// surfaces "auth off / audit off" instead of letting operators discover it
+// by tripping over 404s.
+type EnginePosture struct {
+	// AuthSurface: "enabled" (L2c login endpoint answers), "absent"
+	// (endpoint 404s — engine runs without auth), or "unknown".
+	AuthSurface string `json:"auth_surface"`
+	// AuditLog: "enabled", "disabled" (engine reports the L6 audit log
+	// disabled), or "unknown" (no network to probe / probe failed).
+	AuditLog string `json:"audit_log"`
 }
