@@ -28,7 +28,9 @@ async function discoverNet(base) {
           (await fetch(`${base}/api/networks/${id}/topology`)).json(),
         ]);
         const svcCount = Array.isArray(svcs) ? svcs.length : (svcs.services ?? []).length;
-        if (svcCount > 0 && Object.keys(topo.nodes ?? {}).length > 0) return id;
+        // Links are required: the port-picker stage harvests its catalog
+        // from them — a linkless network can't complete a mouse-only apply.
+        if (svcCount > 0 && Object.keys(topo.nodes ?? {}).length > 0 && (topo.links ?? []).length > 0) return id;
       } catch { /* next */ }
     }
   } catch { /* fall through */ }
@@ -47,8 +49,10 @@ try {
   await authenticatePage(page, BASE);
   await page.evaluateOnNewDocument((n) => { try { localStorage.setItem("newtcon.activeNetwork", n); } catch { /* */ } }, NET);
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
-  await gotoApp(page, `${BASE}/#/${NET}/specs`, { waitUntil: "networkidle0", timeout: 30000 });
-  await page.waitForSelector(".specs-subnav", { timeout: 30000 });
+  // The palette works from any tab; History mounts instantly (no facet
+  // fetches), so the smoke doesn't inherit slow-network Specs stalls.
+  await gotoApp(page, `${BASE}/#/${NET}/history`, { waitUntil: "networkidle0", timeout: 30000 });
+  await page.waitForSelector(".view-heading", { timeout: 30000 });
 
   const pendingCount = () => page.evaluate(() => {
     const el = document.querySelector(".pending-bar-count");
