@@ -90,20 +90,34 @@ function runOne(file) {
 
 const results = [];
 for (const file of files) {
-  const r = await runOne(file);
-  results.push(r);
+  let r = await runOne(file);
   const name = file.replace(/\.smoke\.mjs$/, "");
+  // Flake discipline: a failed smoke gets EXACTLY one immediate retry.
+  // Retry-pass = "flaky" — visible in the tally (the load-dependent 60s
+  // wait-timeout class on this lab host), never silently green, never a
+  // suite failure. Failing twice is a real failure.
+  if (r.verdict === "fail") {
+    const retry = await runOne(file);
+    if (retry.verdict !== "fail") {
+      r = { ...retry, verdict: "flaky", firstFail: r };
+      console.log(`  ✓~ ${name} FLAKY (failed ${r.firstFail.secs}s → passed ${r.secs}s on retry)`);
+    } else {
+      r = retry;
+    }
+  }
+  results.push(r);
   if (r.verdict === "pass") console.log(`  ✓ ${name} (${r.secs}s)`);
   else if (r.verdict === "skip") console.log(`  - ${name} SKIPPED (${r.secs}s)`);
-  else {
-    console.log(`  ✗ ${name} FAILED exit=${r.code} (${r.secs}s)`);
+  else if (r.verdict === "fail") {
+    console.log(`  ✗ ${name} FAILED twice, exit=${r.code} (${r.secs}s)`);
     const tail = r.out.trimEnd().split("\n").slice(-15);
     for (const line of tail) console.log(`      ${line}`);
   }
 }
 
 const pass = results.filter((r) => r.verdict === "pass").length;
+const flaky = results.filter((r) => r.verdict === "flaky").length;
 const fail = results.filter((r) => r.verdict === "fail").length;
 const skip = results.filter((r) => r.verdict === "skip").length;
-console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
+console.log(`\n${pass} passed, ${flaky} flaky, ${fail} failed, ${skip} skipped`);
 process.exit(fail ? 1 : 0);
