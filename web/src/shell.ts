@@ -117,6 +117,26 @@ async function refreshConnectionStatus(): Promise<void> {
     const reachable = data?.newtron?.reachable !== false;
     dot.className = "status-dot " + (reachable ? "status-dot--ok" : "status-dot--warning");
     label.textContent = url;
+    // Engine posture (uplift 6.4): auth/audit layers surfaced honestly in
+    // the pill — chips appear only when a layer is off, so a full-stack
+    // engine keeps the pill quiet. Tooltip carries the sentence.
+    const posture = (data as { engine_posture?: { auth_surface?: string; audit_log?: string } }).engine_posture;
+    const pill = document.getElementById("newtron-pill");
+    pill?.querySelectorAll(".posture-chip").forEach((c) => c.remove());
+    const sentences: string[] = [];
+    if (posture?.auth_surface === "absent") {
+      label.insertAdjacentHTML("afterend", '<span class="posture-chip">no auth</span>');
+      sentences.push("The engine's L2c auth surface is absent — every request runs unauthenticated.");
+    }
+    if (posture?.audit_log === "disabled") {
+      label.insertAdjacentHTML("afterend", '<span class="posture-chip">no audit</span>');
+      sentences.push("The engine's L6 audit log is disabled — no tamper-evident record is being written.");
+    }
+    if (pill) {
+      pill.title = sentences.length
+        ? `newtron connection — ${sentences.join(" ")}`
+        : "newtron connection — auth and audit layers active";
+    }
   } catch {
     dot.className = "status-dot status-dot--error";
     label.textContent = "Newtron Console unreachable";
