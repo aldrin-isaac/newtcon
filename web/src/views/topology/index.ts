@@ -369,6 +369,43 @@ function renderTopologySVG(
     pairSeen.set(key, i + 1);
     return (i - (n - 1) / 2) * 16;
   };
+  // Occlusion-aware routing (operator request): a link whose straight
+  // segment would pass under a NON-endpoint card gets deflected around it.
+  // Positions never move (pins + layout cache stay valid) — the LINK bends,
+  // arcing away from the obstructing card(s) far enough to clear them.
+  const occlusionOffset = (link: TopoLink): number => {
+    const a = link.local_device ? positions.get(link.local_device) : undefined;
+    const z = link.remote_device ? positions.get(link.remote_device) : undefined;
+    if (!a || !z) return 0;
+    let blockedSum = 0;
+    let blockers = 0;
+    for (const nd of nodes) {
+      if (nd.name === link.local_device || nd.name === link.remote_device) continue;
+      const p = positions.get(nd.name);
+      if (!p) continue;
+      // Closest point on segment AZ to the card centre.
+      const dx = z.cx - a.cx, dy = z.cy - a.cy;
+      const len2 = dx * dx + dy * dy;
+      if (len2 === 0) continue;
+      let t = ((p.cx - a.cx) * dx + (p.cy - a.cy) * dy) / len2;
+      t = Math.max(0.08, Math.min(0.92, t)); // endpoints' own vicinity is fine
+      const qx = a.cx + t * dx, qy = a.cy + t * dy;
+      // Elliptical proximity: inside the card footprint (+clearance)?
+      const ex = (p.cx - qx) / (NODE_W / 2 + 16);
+      const ey = (p.cy - qy) / (NODE_H / 2 + 16);
+      if (ex * ex + ey * ey < 1) {
+        // Which side of the segment is the card on? Deflect the OTHER way.
+        const side = Math.sign((z.cx - a.cx) * (p.cy - a.cy) - (z.cy - a.cy) * (p.cx - a.cx)) || 1;
+        blockedSum += -side;
+        blockers++;
+      }
+    }
+    if (blockers === 0) return 0;
+    const dir = Math.sign(blockedSum) || 1;
+    // Clear half a card + margin; a touch more per extra blocker.
+    return dir * (NODE_H / 2 + 22 + (blockers - 1) * 10);
+  };
+
   const arcPath = (x1: number, y1: number, x2: number, y2: number, off: number): string => {
     const mx = (x1 + x2) / 2;
     const my = (y1 + y2) / 2;
@@ -393,7 +430,7 @@ function renderTopologySVG(
       const z = paletteByDevice.get(link.remote_device) ?? "unknown";
       linkPalette = resolveLinkPalette(a, z);
     }
-    const off = arcOffset(link);
+    const off = arcOffset(link) + occlusionOffset(link);
     if (opts.onLinkClick) {
       const hit = off === 0
         ? svgEl("line", { "class": "topo-link-hit", x1: String(from.cx), y1: String(from.cy), x2: String(to.cx), y2: String(to.cy) })
