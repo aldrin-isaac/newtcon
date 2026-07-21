@@ -124,6 +124,22 @@ export function lensEffect(lens: LensState, inputs: LensInputs): LensEffect {
   return { halo, dim, badge };
 }
 
+/** linkEndpointMembership — for the vni lens: which ENDS of a link land on
+ *  member ports. The operationally interesting case is a mismatch — one end
+ *  in the VLAN, the other not: the missing tagged join (RCA-051) made
+ *  visible at the exact port where it's missing. */
+export function linkEndpointMembership(
+  link: { local_device?: string; local_interface?: string; remote_device?: string; remote_interface?: string },
+  members: Map<string, string[]>,
+): { local: boolean; remote: boolean } {
+  const has = (dev?: string, iface?: string): boolean =>
+    dev !== undefined && iface !== undefined && (members.get(dev) ?? []).includes(iface);
+  return {
+    local: has(link.local_device, link.local_interface),
+    remote: has(link.remote_device, link.remote_interface),
+  };
+}
+
 /** availableLenses — which lenses can BITE right now (uplift follow-up:
  *  inert chips are suppressed, not disabled — a dead button teaches
  *  nothing). vni needs VLANs in the intent; underlay/drift need probe

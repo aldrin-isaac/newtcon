@@ -154,6 +154,14 @@
   fill: var(--color-text-muted); opacity: 0.8;
 }
 
+/* vni lens, port level: member-port pills under member cards + endpoint
+   dots on links where a member port terminates. A link dotted on ONE end
+   is the missing tagged join — the RCA-051 hole, visible. */
+.topo-vni-ports rect { fill: var(--color-accent-bg); stroke: var(--color-accent-border); }
+.topo-vni-port-label { font-family: var(--font-mono); font-size: 9px; fill: var(--color-accent); text-anchor: middle; dominant-baseline: central; }
+.topo-vni-port-more { font-family: var(--font-mono); font-size: 9px; fill: var(--color-text-muted); dominant-baseline: central; }
+.topo-vni-endpoint { fill: var(--color-accent); stroke: var(--color-surface); stroke-width: 2; }
+
 /* Canvas dot-grid texture (toggle in the zoom toolbar). Token-colored so
    both themes stay subtle; never interactive. */
 .topo-grid { pointer-events: none; }
@@ -332,22 +340,12 @@
 .topo-link.topo-link--verified      { stroke-dasharray: none; }
 .topo-link.topo-link--mismatch      { stroke: var(--color-danger); stroke-dasharray: none; stroke-width: 3; }
 .topo-link.topo-link--underlay-down { stroke: var(--color-danger); }
-/* Live utilization heat (slice 4.4) — color always; shimmer (a slow dash
-   march that reads as flow) only for operators who allow motion. */
+/* Live utilization heat (slice 4.4): color tiers carry the signal —
+   accent → warning → danger by load. The dash-march shimmer was removed
+   (operator: it added motion, not information); color is the data. */
 .topo-link.topo-link--heat-low  { stroke: var(--color-accent); }
 .topo-link.topo-link--heat-med  { stroke: var(--color-warning); }
 .topo-link.topo-link--heat-high { stroke: var(--color-danger); }
-@media (prefers-reduced-motion: no-preference) {
-  .topo-link--heat-low, .topo-link--heat-med, .topo-link--heat-high {
-    stroke-dasharray: 6 4;
-    animation: topo-heat-flow 1.2s linear infinite;
-  }
-  .topo-link--heat-high { animation-duration: 0.6s; }
-}
-@keyframes topo-heat-flow {
-  from { stroke-dashoffset: 20; }
-  to   { stroke-dashoffset: 0; }
-}
 
 /* Layered filter dimming (slice #174.E) — non-matching nodes stay in
  * place so the operator keeps context, but fade out so the filtered

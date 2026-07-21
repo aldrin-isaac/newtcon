@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { vlanMembership, availableVlans, lensEffect, availableLenses } from "../dist/topology-lenses.js";
+import { vlanMembership, availableVlans, lensEffect, availableLenses, linkEndpointMembership } from "../dist/topology-lenses.js";
 
 const DEVICES = {
   switch1: { steps: [
@@ -41,6 +41,25 @@ describe("availableVlans()", () => {
   });
   test("empty topology → empty", () => {
     assert.deepEqual(availableVlans({}), []);
+  });
+});
+
+describe("linkEndpointMembership()", () => {
+  const members = new Map([["switch1", ["Ethernet2"]], ["switch2", ["Ethernet2", "Ethernet4"]]]);
+  test("both ends members", () => {
+    assert.deepEqual(linkEndpointMembership(
+      { local_device: "switch1", local_interface: "Ethernet2", remote_device: "switch2", remote_interface: "Ethernet2" }, members),
+      { local: true, remote: true });
+  });
+  test("the RCA-051 hole: one end only", () => {
+    assert.deepEqual(linkEndpointMembership(
+      { local_device: "switch2", local_interface: "Ethernet4", remote_device: "switch3", remote_interface: "Ethernet4" }, members),
+      { local: true, remote: false });
+  });
+  test("neither end / unknown devices", () => {
+    assert.deepEqual(linkEndpointMembership(
+      { local_device: "hostX", local_interface: "eth0", remote_device: "switch1", remote_interface: "Ethernet9" }, members),
+      { local: false, remote: false });
   });
 });
 
