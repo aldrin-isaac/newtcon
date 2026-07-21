@@ -27,12 +27,12 @@ async function mount(): Promise<void> {
   const root = document.getElementById("panel-specs");
   if (!root) return;
 
-  // Net-from-hash must win BEFORE any view fetches (deep-link authority),
-  // then the first mount, then the router applies the rest of the route
-  // (tab, facet/detail, device drawer) and starts tracking history.
+  // Hash net wins first; router starts IMMEDIATELY, Specs mounts
+  // concurrently — serializing on its facet fetches blocked deep links.
   bootNetSync();
-  await mountSpecsView(root);
+  const specsMounting = mountSpecsView(root);
   startRouter();
+  await specsMounting;
 
   document.getElementById("drawer-close")?.addEventListener("click", closeDetail);
   document.addEventListener("keydown", (e) => {

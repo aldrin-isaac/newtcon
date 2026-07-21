@@ -41,6 +41,10 @@ try {
   // Preset the active network so the topology view targets one that actually
   // exists in this dev environment.
   await page.evaluate((n) => { localStorage.setItem("newtcon.activeNetwork", n); localStorage.setItem("newtcon:topology-view:" + n, "spec"); }, NETWORK);
+  // Hash authority (2.4): a bare reload keeps the stamped #/default/...
+  // hash and adopts default back over the seed. Point the hash at the
+  // target network, then hard-reload so boot fetches ITS data.
+  await page.goto(`${BASE}/#/${NETWORK}/topology`, { waitUntil: "domcontentloaded" });
   await page.reload({ waitUntil: "domcontentloaded" });
 
 

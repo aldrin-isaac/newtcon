@@ -80,6 +80,10 @@ try {
   console.log(`→ open ${BASE} (service=${SVC})`);
   await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
+  // Hash authority (2.4): a bare reload keeps the stamped #/default/...
+  // hash and adopts default back over the seed. Point the hash at the
+  // target network, then hard-reload so boot fetches ITS data.
+  await page.goto(`${BASE}/#/${NETWORK}/specs`, { waitUntil: "domcontentloaded" });
   await page.reload({ waitUntil: "domcontentloaded" });
 
   // If auth is on, sign in. Anonymous mode skips this.

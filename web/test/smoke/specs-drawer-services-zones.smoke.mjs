@@ -89,6 +89,10 @@ try {
   console.log(`→ open ${BASE}`);
   await gotoApp(page, BASE, { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.evaluate((n) => localStorage.setItem("newtcon.activeNetwork", n), NETWORK);
+  // Hash authority (2.4): a bare reload keeps the previously-stamped
+  // #/default/specs and adopts default back over the seed. Point the hash
+  // at the target network, then hard-reload so boot fetches ITS data.
+  await page.goto(`${BASE}/#/${NETWORK}/specs`, { waitUntil: "domcontentloaded" });
   await page.reload({ waitUntil: "domcontentloaded" });
 
   await signIn();

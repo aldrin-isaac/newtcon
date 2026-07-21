@@ -2327,6 +2327,9 @@ let lastRoot: HTMLElement | null = null;
 /** applySpecsRoute — drive the Specs view to a hash route's facet/detail
  *  (router-only entry point; user clicks go through the subnav handlers). */
 export async function applySpecsRoute(facet?: string, detail?: string): Promise<void> {
+  // Boot may apply a facet deep link while the panel catalog is still
+  // loading — resolve against the real catalog, not an empty PANELS.
+  await loadPanels().catch(() => undefined);
   if (!lastRoot) return;
   if (facet === "general") {
     const key: "ssh" | "permissions" = detail === "permissions" ? "permissions" : "ssh";
