@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { vlanMembership, availableVlans, lensEffect } from "../dist/topology-lenses.js";
+import { vlanMembership, availableVlans, lensEffect, availableLenses } from "../dist/topology-lenses.js";
 
 const DEVICES = {
   switch1: { steps: [
@@ -41,6 +41,19 @@ describe("availableVlans()", () => {
   });
   test("empty topology → empty", () => {
     assert.deepEqual(availableVlans({}), []);
+  });
+});
+
+describe("availableLenses()", () => {
+  test("spec-only offline fabric with VLANs → vni only", () => {
+    assert.deepEqual(availableLenses({ vlanCount: 2, underlayProbes: 0, driftProbes: 0, onlineDevices: 0 }), ["vni"]);
+  });
+  test("live fabric with everything → all four", () => {
+    assert.deepEqual(availableLenses({ vlanCount: 1, underlayProbes: 3, driftProbes: 3, onlineDevices: 3 }),
+      ["vni", "underlay", "drift", "live"]);
+  });
+  test("nothing to bite → empty (the whole group hides)", () => {
+    assert.deepEqual(availableLenses({ vlanCount: 0, underlayProbes: 0, driftProbes: 0, onlineDevices: 0 }), []);
   });
 });
 

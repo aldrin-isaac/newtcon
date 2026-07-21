@@ -123,3 +123,21 @@ export function lensEffect(lens: LensState, inputs: LensInputs): LensEffect {
   }
   return { halo, dim, badge };
 }
+
+/** availableLenses — which lenses can BITE right now (uplift follow-up:
+ *  inert chips are suppressed, not disabled — a dead button teaches
+ *  nothing). vni needs VLANs in the intent; underlay/drift need probe
+ *  results; live needs an online device to poll. */
+export function availableLenses(inputs: {
+  vlanCount: number;
+  underlayProbes: number;
+  driftProbes: number;
+  onlineDevices: number;
+}): LensKind[] {
+  const out: LensKind[] = [];
+  if (inputs.vlanCount > 0) out.push("vni");
+  if (inputs.underlayProbes > 0) out.push("underlay");
+  if (inputs.driftProbes > 0) out.push("drift");
+  if (inputs.onlineDevices > 0) out.push("live");
+  return out;
+}

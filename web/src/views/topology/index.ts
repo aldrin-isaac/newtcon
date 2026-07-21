@@ -34,7 +34,7 @@ import { showToast } from "../../toast.js";
 import { showContextMenu } from "../../topology-actions-ui.js";
 import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
-import { type LensState, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
+import { type LensState, availableLenses, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
@@ -1685,6 +1685,20 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     root.appendChild(headerBar);
     const renderLensRow = (): void => {
       lensRow.textContent = "";
+      // Inert-chip suppression (operator feedback): only lenses that can
+      // BITE render — vni needs VLANs, underlay/drift need probe results,
+      // live needs online devices. No lenses → the whole group hides.
+      const lensesUp = availableLenses({
+        vlanCount: availableVlans(rawDevices).length,
+        underlayProbes: underlayByDevice.size,
+        driftProbes: driftByDevice.size,
+        onlineDevices: [...onlineByDevice.values()].filter(Boolean).length,
+      });
+      if (lensState.kind !== null && !lensesUp.includes(lensState.kind)) {
+        lensState = { kind: null }; // active lens lost its footing — reset
+      }
+      lensRow.hidden = lensesUp.length === 0;
+      if (lensesUp.length === 0) return;
       lensRow.appendChild(el("span", { className: "topology-filter-label" }, "Lens:"));
       const lensChip = (label: string, kind: "vni" | "underlay" | "drift" | "live"): void => {
         const active = lensState.kind === kind;
@@ -1702,10 +1716,10 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         });
         lensRow.appendChild(chip);
       };
-      lensChip("VNI", "vni");
-      lensChip("Underlay", "underlay");
-      lensChip("Drift", "drift");
-      lensChip("Live", "live");
+      if (lensesUp.includes("vni")) lensChip("VNI", "vni");
+      if (lensesUp.includes("underlay")) lensChip("Underlay", "underlay");
+      if (lensesUp.includes("drift")) lensChip("Drift", "drift");
+      if (lensesUp.includes("live")) lensChip("Live", "live");
       if (lensState.kind === "vni") {
         for (const vlan of availableVlans(rawDevices)) {
           const active = lensState.vlanId === vlan;
@@ -1722,7 +1736,6 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         }
       }
     };
-    renderLensRow();
 
     // Pan/zoom viewport state — persists across renderGraph() calls so
     // the operator's view doesn't snap back to natural after every
@@ -1807,6 +1820,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const interfacesByDevice: Map<string, string[]> = new Map();
     const rawData = (data ?? {}) as { nodes?: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> };
     const rawDevices: Record<string, { ports?: Record<string, unknown>; steps?: Array<{ params?: { fields?: { type?: string } } }> }> = { ...(rawData.nodes ?? {}) };
+    // Initial lens-row render deferred to here: availability consults
+    // rawDevices (VLAN catalog) — rendering earlier is a TDZ trap.
+    renderLensRow();
     // Merge pending-link adds into topoData.links so the graph draws them.
     for (const ln of pendingTopologyLinkAdds()) {
       topoData.links = topoData.links ?? [];
