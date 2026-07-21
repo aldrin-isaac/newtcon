@@ -34,7 +34,7 @@ import { showToast } from "../../toast.js";
 import { showContextMenu } from "../../topology-actions-ui.js";
 import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
-import { type LensState, availableLenses, availableVlans, lensEffect, vlanMembership } from "../../topology-lenses.js";
+import { type LensState, availableLenses, availableVlans, lensEffect, linkEndpointMembership, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
@@ -207,6 +207,10 @@ interface TopologyRenderOpts {
   /** Zone tinting (uplift 6.8): device → zone name; zones render as
    *  barely-visible rounded regions behind their members. */
   zoneByDevice?: Map<string, string>;
+  /** vni lens, port level: device → member ports. Member cards grow port
+   *  pills; links get endpoint dots where a member port terminates —
+   *  a one-ended link is the missing tagged join, visible. */
+  vniMemberPorts?: Map<string, string[]>;
 }
 
 interface TopologyRenderResult {
@@ -475,6 +479,32 @@ function renderTopologySVG(
     if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
     if (link.remote_interface) line.setAttribute("data-remote-iface", link.remote_interface);
     svg.appendChild(line);
+
+    // vni lens endpoint dots: mark the exact link ends that are VLAN
+    // members. Positioned a fixed distance from each endpoint along the
+    // chord — near the ends, arcs hug the chord, so this holds for both.
+    if (opts.vniMemberPorts) {
+      const mem = linkEndpointMembership(link, opts.vniMemberPorts);
+      const dx = to.cx - from.cx, dy = to.cy - from.cy;
+      const len = Math.hypot(dx, dy) || 1;
+      const inset = Math.min(NODE_W / 2 + 18, len / 3);
+      if (mem.local) {
+        svg.appendChild(svgEl("circle", {
+          "class": "topo-vni-endpoint",
+          cx: String(from.cx + (dx / len) * inset),
+          cy: String(from.cy + (dy / len) * inset),
+          r: "5",
+        }));
+      }
+      if (mem.remote) {
+        svg.appendChild(svgEl("circle", {
+          "class": "topo-vni-endpoint",
+          cx: String(to.cx - (dx / len) * inset),
+          cy: String(to.cy - (dy / len) * inset),
+          r: "5",
+        }));
+      }
+    }
   }
 
   // Draw nodes.
@@ -562,6 +592,30 @@ function renderTopologySVG(
     });
     glyph.appendChild(svgEl("path", { d: glyphPath }));
     g.appendChild(glyph);
+
+    // vni lens port pills: the member ports themselves, named, in a row
+    // under the card. The port is the unit that breaks; draw it.
+    const vniPorts = opts.vniMemberPorts?.get(node.name) ?? [];
+    if (vniPorts.length > 0) {
+      const pillRow = svgEl("g", { "class": "topo-vni-ports" });
+      let px = pos.cx - NODE_W / 2;
+      const py = pos.cy + NODE_H / 2 + 8;
+      for (const port of vniPorts.slice(0, 4)) {
+        const short = port.replace(/^Ethernet/, "e").replace(/^Vlan/, "vl").replace(/^PortChannel/, "po");
+        const w = 14 + short.length * 6.2;
+        pillRow.appendChild(svgEl("rect", { x: String(px), y: String(py), width: String(w), height: "15", rx: "7" }));
+        const label = svgEl("text", { x: String(px + w / 2), y: String(py + 8), "class": "topo-vni-port-label" });
+        label.textContent = short;
+        pillRow.appendChild(label);
+        px += w + 5;
+      }
+      if (vniPorts.length > 4) {
+        const more = svgEl("text", { x: String(px + 2), y: String(py + 8), "class": "topo-vni-port-more" });
+        more.textContent = `+${vniPorts.length - 4}`;
+        pillRow.appendChild(more);
+      }
+      g.appendChild(pillRow);
+    }
 
     const label = svgEl("text", {
       x: String(pos.cx),
@@ -1916,7 +1970,14 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       });
       for (const d of lens.dim) dimmed.add(d);
       const lensStatusText = new Map(statusTextByDevice);
-      for (const [d, text] of lens.badge) lensStatusText.set(d, text);
+      // vni carries its detail as PORT PILLS now — only non-vni lenses
+      // (drift's count) still annotate via the footer text.
+      if (lensState.kind !== "vni") {
+        for (const [d, text] of lens.badge) lensStatusText.set(d, text);
+      }
+      const vniMemberPorts = lensState.kind === "vni" && lensState.vlanId !== undefined
+        ? vlanMembership(rawDevices, lensState.vlanId)
+        : undefined;
       // Spec view = authoring (select + side panel + right-click
       // context menu + node delete). Observation views (Lab / Physical)
       // = left-click opens the drawer directly for inspection; right-
@@ -1948,6 +2009,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         driftByDevice,
         statusByDevice,
         zoneByDevice: new Map([...deviceMetadata.entries()].filter(([, m]) => m.zone !== null).map(([d, m]) => [d, m.zone as string])),
+        ...(vniMemberPorts !== undefined ? { vniMemberPorts } : {}),
         lldpByDevice,
         speedsByDevice,
         underlayByDevice,
