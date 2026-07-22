@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   parseLldpTable, parsePortSpeeds, classifyLink,
   linkStrokeWidth, linkSpeedForLink, parseBgpCheckOk, linkUnderlayState,
-  parsePortStates, portDotState, portDotTooltip,
+  parsePortStates, portDotState, portDotTooltip, perimeterSeat,
 } from "../dist/topology-links.js";
 
 const LINK = { local_device: "switch1", local_interface: "Ethernet0", remote_device: "switch2", remote_interface: "Ethernet0" };
@@ -147,5 +147,31 @@ describe("interface-state endpoint dots", () => {
     assert.equal(portDotTooltip("Ethernet0", { admin: "up", oper: "down", speedMbps: 100000, mtu: "9100" }),
       "Ethernet0 · admin: up · oper: down · 100000 Mbps · MTU 9100");
     assert.equal(portDotTooltip("Vlan100", undefined), "Vlan100 · admin: — · oper: —");
+  });
+});
+
+describe("perimeterSeat()", () => {
+  const c = { x: 100, y: 100 };   // card centre; hw=60, hh=26
+  test("neighbour to the right → seats on the right edge, mid-height", () => {
+    const p = perimeterSeat(c, { x: 400, y: 100 }, 60, 26);
+    assert.equal(Math.round(p.x), 160);
+    assert.equal(Math.round(p.y), 100);
+  });
+  test("neighbour below → seats on the bottom edge", () => {
+    const p = perimeterSeat(c, { x: 100, y: 400 }, 60, 26);
+    assert.equal(Math.round(p.x), 100);
+    assert.equal(Math.round(p.y), 126);
+  });
+  test("standoff pushes the seat outward along the ray", () => {
+    const p = perimeterSeat(c, { x: 400, y: 100 }, 60, 26, 5);
+    assert.equal(Math.round(p.x), 165);
+  });
+  test("diagonal neighbour seats on whichever edge the ray hits first", () => {
+    const p = perimeterSeat(c, { x: 200, y: 110 }, 60, 26);   // shallow → right edge
+    assert.equal(Math.round(p.x), 160);
+    assert.ok(p.y > 100 && p.y < 116);
+  });
+  test("same centre is degenerate → returns the centre", () => {
+    assert.deepEqual(perimeterSeat(c, c, 60, 26), { x: 100, y: 100 });
   });
 });
