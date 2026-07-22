@@ -416,48 +416,38 @@ function renderTopologySVG(
   // neighbours never collide and parallel links fan out. Recomputed every
   // render, so dragging a node re-seats it AND its neighbours. Keyed by link
   // index; a link's two ends live under its from-device and to-device maps.
+  // Links live in their own <g> layer so a drag can redraw JUST the links
+  // (following the moved card live) without touching the node groups. pos()
+  // consults a transient drag override, so redrawLinks() re-seats everything
+  // against the dragged node's live position.
+  const linkLayer = svgEl("g", { "class": "topo-link-layer" });
+  svg.appendChild(linkLayer);
+  let dragOverride: { name: string; cx: number; cy: number } | null = null;
+  const pos = (d: string): { cx: number; cy: number } | undefined =>
+    (dragOverride && dragOverride.name === d) ? { cx: dragOverride.cx, cy: dragOverride.cy } : positions.get(d);
+
   const HW = NODE_W / 2, HH = NODE_H / 2;
-  const incident = new Map<string, { id: string; tx: number; ty: number }[]>();
-  links.forEach((lnk, i) => {
-    const fp = lnk.local_device ? positions.get(lnk.local_device) : undefined;
-    const tp = lnk.remote_device ? positions.get(lnk.remote_device) : undefined;
-    if (!fp || !tp || !lnk.local_device || !lnk.remote_device) return;
-    (incident.get(lnk.local_device) ?? incident.set(lnk.local_device, []).get(lnk.local_device)!).push({ id: String(i), tx: tp.cx, ty: tp.cy });
-    (incident.get(lnk.remote_device) ?? incident.set(lnk.remote_device, []).get(lnk.remote_device)!).push({ id: String(i), tx: fp.cx, ty: fp.cy });
-  });
-  const seatsByDevice = new Map<string, Map<string, { x: number; y: number }>>();
-  for (const [dev, list] of incident) {
-    const p = positions.get(dev);
-    if (p) seatsByDevice.set(dev, distributeSeats({ x: p.cx, y: p.cy }, HW, HH, list));
-  }
-  const seatFor = (dev: string | undefined, i: number, fallback: { cx: number; cy: number }): { x: number; y: number } =>
-    (dev ? seatsByDevice.get(dev)?.get(String(i)) : undefined) ?? { x: fallback.cx, y: fallback.cy };
-  // Occlusion-aware routing (operator request): a link whose straight
-  // segment would pass under a NON-endpoint card gets deflected around it.
-  // Positions never move (pins + layout cache stay valid) — the LINK bends,
-  // arcing away from the obstructing card(s) far enough to clear them.
+  // Occlusion-aware routing: a link whose straight segment would pass under a
+  // NON-endpoint card deflects around it. Reads pos() so it tracks a drag.
   const occlusionOffset = (link: TopoLink): number => {
-    const a = link.local_device ? positions.get(link.local_device) : undefined;
-    const z = link.remote_device ? positions.get(link.remote_device) : undefined;
+    const a = link.local_device ? pos(link.local_device) : undefined;
+    const z = link.remote_device ? pos(link.remote_device) : undefined;
     if (!a || !z) return 0;
     let blockedSum = 0;
     let blockers = 0;
     for (const nd of nodes) {
       if (nd.name === link.local_device || nd.name === link.remote_device) continue;
-      const p = positions.get(nd.name);
+      const p = pos(nd.name);
       if (!p) continue;
-      // Closest point on segment AZ to the card centre.
       const dx = z.cx - a.cx, dy = z.cy - a.cy;
       const len2 = dx * dx + dy * dy;
       if (len2 === 0) continue;
       let t = ((p.cx - a.cx) * dx + (p.cy - a.cy) * dy) / len2;
-      t = Math.max(0.08, Math.min(0.92, t)); // endpoints' own vicinity is fine
+      t = Math.max(0.08, Math.min(0.92, t));
       const qx = a.cx + t * dx, qy = a.cy + t * dy;
-      // Elliptical proximity: inside the card footprint (+clearance)?
       const ex = (p.cx - qx) / (NODE_W / 2 + 16);
       const ey = (p.cy - qy) / (NODE_H / 2 + 16);
       if (ex * ex + ey * ey < 1) {
-        // Which side of the segment is the card on? Deflect the OTHER way.
         const side = Math.sign((z.cx - a.cx) * (p.cy - a.cy) - (z.cy - a.cy) * (p.cx - a.cx)) || 1;
         blockedSum += -side;
         blockers++;
@@ -465,110 +455,98 @@ function renderTopologySVG(
     }
     if (blockers === 0) return 0;
     const dir = Math.sign(blockedSum) || 1;
-    // Clear half a card + margin; a touch more per extra blocker.
     return dir * (NODE_H / 2 + 22 + (blockers - 1) * 10);
   };
-
   const arcPath = (x1: number, y1: number, x2: number, y2: number, off: number): string => {
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
     const len = Math.hypot(x2 - x1, y2 - y1) || 1;
-    const px = -(y2 - y1) / len;
-    const py = (x2 - x1) / len;
+    const px = -(y2 - y1) / len, py = (x2 - x1) / len;
     return `M ${x1} ${y1} Q ${mx + px * off * 2} ${my + py * off * 2} ${x2} ${y2}`;
   };
-  for (const link of links) {
-    const from = link.local_device ? positions.get(link.local_device) : undefined;
-    const to = link.remote_device ? positions.get(link.remote_device) : undefined;
-    if (!from || !to) continue;
-    const linkDimmed = (link.local_device !== undefined && dimmed.has(link.local_device))
-      || (link.remote_device !== undefined && dimmed.has(link.remote_device));
-    // Link palette inherits the worst endpoint state (slice #210.E
-    // subset): a link to a down or drifted device reads as down /
-    // drifted; spec-only on either end colors the line spec-only;
-    // otherwise it sits clean (actuated-ok) or unknown.
-    let linkPalette: PaletteState = "unknown";
-    if (paletteByDevice && link.local_device && link.remote_device) {
-      const a = paletteByDevice.get(link.local_device) ?? "unknown";
-      const z = paletteByDevice.get(link.remote_device) ?? "unknown";
-      linkPalette = resolveLinkPalette(a, z);
-    }
-    // Neighbour-aware perimeter seats (distributed above); occlusion still
-    // bends the line to clear a third card.
-    const linkIdx = links.indexOf(link);
-    const arc = occlusionOffset(link);
-    const fromP = seatFor(link.local_device, linkIdx, from);
-    const toP = seatFor(link.remote_device, linkIdx, to);
-    if (opts.onLinkClick) {
-      const hit = arc === 0
-        ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })
-        : svgEl("path", { "class": "topo-link-hit", d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc), fill: "none" });
-      const onLinkClick = opts.onLinkClick;
-      hit.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onLinkClick(link);
-      });
-      svg.appendChild(hit);
-    }
-    // Link truth (slice 4.2): LLDP verdict → solid/dashed/mismatch class;
-    // configured speed → stroke-width ATTRIBUTE (CSS palette rules for
-    // down/drift still win over attributes, keeping their emphasis).
-    let truthClass = "";
-    let widthAttr: string | undefined;
-    if (opts.lldpByDevice) {
-      const verdict = classifyLink(link, opts.lldpByDevice);
-      truthClass += ` topo-link--${verdict}`;
-    }
-    if (opts.underlayByDevice && linkUnderlayState(link, opts.underlayByDevice) === "down") {
-      truthClass += " topo-link--underlay-down";
-    }
-    if (opts.speedsByDevice) {
-      widthAttr = String(linkStrokeWidth(linkSpeedForLink(link, opts.speedsByDevice)));
-    }
-    const linkClass = "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass;
-    const line = arc === 0
-      ? svgEl("line", {
-          "class": linkClass,
-          x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y),
-          ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
-        })
-      : svgEl("path", {
-          "class": linkClass,
-          d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc),
-          fill: "none",
-          ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
-        });
-    if (link.local_device) line.setAttribute("data-local-device", link.local_device);
-    if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
-    if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
-    if (link.remote_interface) line.setAttribute("data-remote-iface", link.remote_interface);
-    svg.appendChild(line);
 
-    // vni lens endpoint dots: mark the exact link ends that are VLAN
-    // members. Positioned a fixed distance from each endpoint along the
-    // chord — near the ends, arcs hug the chord, so this holds for both.
-    if (opts.vniMemberPorts) {
-      const mem = linkEndpointMembership(link, opts.vniMemberPorts);
-      if (mem.local) svg.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(fromP.x), cy: String(fromP.y), r: "7" }));
-      if (mem.remote) svg.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(toP.x), cy: String(toP.y), r: "7" }));
+  // redrawLinks — (re)build the link layer against the current pos(): seat
+  // distribution + lines + endpoint dots. Called once per render and on every
+  // drag tick (with the moved node overridden), so links follow the card.
+  const redrawLinks = (): void => {
+    linkLayer.replaceChildren();
+    // Neighbour-aware seating: distribute each node's incident link ends
+    // around its perimeter so links to different neighbours never collide.
+    const incident = new Map<string, { id: string; tx: number; ty: number }[]>();
+    links.forEach((lnk, i) => {
+      const fp = lnk.local_device ? pos(lnk.local_device) : undefined;
+      const tp = lnk.remote_device ? pos(lnk.remote_device) : undefined;
+      if (!fp || !tp || !lnk.local_device || !lnk.remote_device) return;
+      (incident.get(lnk.local_device) ?? incident.set(lnk.local_device, []).get(lnk.local_device)!).push({ id: String(i), tx: tp.cx, ty: tp.cy });
+      (incident.get(lnk.remote_device) ?? incident.set(lnk.remote_device, []).get(lnk.remote_device)!).push({ id: String(i), tx: fp.cx, ty: fp.cy });
+    });
+    const seatsByDevice = new Map<string, Map<string, { x: number; y: number }>>();
+    for (const [dev, list] of incident) {
+      const p = pos(dev);
+      if (p) seatsByDevice.set(dev, distributeSeats({ x: p.cx, y: p.cy }, HW, HH, list));
     }
+    const seatFor = (dev: string | undefined, i: number, fallback: { cx: number; cy: number }): { x: number; y: number } =>
+      (dev ? seatsByDevice.get(dev)?.get(String(i)) : undefined) ?? { x: fallback.cx, y: fallback.cy };
 
-    // Interface-state dots (always on): a dot at each link END colored by
-    // that port's admin/oper state, with a hover tooltip. Placed just
-    // outside the card edge along the chord so it reads as "this port".
-    if (opts.portStatesByDevice) {
-      const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): void => {
-        if (!dev || !iface) return;
-        const st = opts.portStatesByDevice?.get(dev)?.get(iface);
-        const state = portDotState(st);
-        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(at.x), cy: String(at.y), r: "4", "aria-label": portDotTooltip(iface, st) });
-        attachFastTip(dot, () => buildPortTip(iface, st, state));
-        svg.appendChild(dot);
-      };
-      ifaceDot(link.local_device, link.local_interface, fromP);
-      ifaceDot(link.remote_device, link.remote_interface, toP);
-    }
-  }
+    links.forEach((link, linkIdx) => {
+      const from = link.local_device ? pos(link.local_device) : undefined;
+      const to = link.remote_device ? pos(link.remote_device) : undefined;
+      if (!from || !to) return;
+      const linkDimmed = (link.local_device !== undefined && dimmed.has(link.local_device))
+        || (link.remote_device !== undefined && dimmed.has(link.remote_device));
+      let linkPalette: PaletteState = "unknown";
+      if (paletteByDevice && link.local_device && link.remote_device) {
+        const a = paletteByDevice.get(link.local_device) ?? "unknown";
+        const z = paletteByDevice.get(link.remote_device) ?? "unknown";
+        linkPalette = resolveLinkPalette(a, z);
+      }
+      const arc = occlusionOffset(link);
+      const fromP = seatFor(link.local_device, linkIdx, from);
+      const toP = seatFor(link.remote_device, linkIdx, to);
+      if (opts.onLinkClick) {
+        const hit = arc === 0
+          ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })
+          : svgEl("path", { "class": "topo-link-hit", d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc), fill: "none" });
+        const onLinkClick = opts.onLinkClick;
+        hit.addEventListener("click", (e) => { e.stopPropagation(); onLinkClick(link); });
+        linkLayer.appendChild(hit);
+      }
+      let truthClass = "";
+      let widthAttr: string | undefined;
+      if (opts.lldpByDevice) truthClass += ` topo-link--${classifyLink(link, opts.lldpByDevice)}`;
+      if (opts.underlayByDevice && linkUnderlayState(link, opts.underlayByDevice) === "down") truthClass += " topo-link--underlay-down";
+      if (opts.speedsByDevice) widthAttr = String(linkStrokeWidth(linkSpeedForLink(link, opts.speedsByDevice)));
+      const linkClass = "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass;
+      const line = arc === 0
+        ? svgEl("line", { "class": linkClass, x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y), ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}) })
+        : svgEl("path", { "class": linkClass, d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc), fill: "none", ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}) });
+      if (link.local_device) line.setAttribute("data-local-device", link.local_device);
+      if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
+      if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
+      if (link.remote_interface) line.setAttribute("data-remote-iface", link.remote_interface);
+      linkLayer.appendChild(line);
+
+      if (opts.vniMemberPorts) {
+        const mem = linkEndpointMembership(link, opts.vniMemberPorts);
+        if (mem.local) linkLayer.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(fromP.x), cy: String(fromP.y), r: "7" }));
+        if (mem.remote) linkLayer.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(toP.x), cy: String(toP.y), r: "7" }));
+      }
+      if (opts.portStatesByDevice) {
+        const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): void => {
+          if (!dev || !iface) return;
+          const st = opts.portStatesByDevice?.get(dev)?.get(iface);
+          const state = portDotState(st);
+          const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(at.x), cy: String(at.y), r: "4", "aria-label": portDotTooltip(iface, st) });
+          attachFastTip(dot, () => buildPortTip(iface, st, state));
+          linkLayer.appendChild(dot);
+        };
+        ifaceDot(link.local_device, link.local_interface, fromP);
+        ifaceDot(link.remote_device, link.remote_interface, toP);
+      }
+    });
+  };
+  redrawLinks();
+  // Exposed so the drag handler can follow the moved card live.
+  const setDragOverride = (o: { name: string; cx: number; cy: number } | null): void => { dragOverride = o; redrawLinks(); };
 
   // Draw nodes.
   for (const node of nodes) {
@@ -761,6 +739,9 @@ function renderTopologySVG(
           }
           const { sx, sy } = pixelToSVG(dx, dy);
           g.setAttribute("transform", `translate(${sx}, ${sy})`);
+          // Follow the moved card live: re-seat + redraw the link layer with
+          // this node at its dragged position (neighbours re-seat too).
+          setDragOverride({ name: node.name, cx: startCx + sx, cy: startCy + sy });
         };
         const onUp = (em: MouseEvent): void => {
           window.removeEventListener("mousemove", onMove);
@@ -768,6 +749,7 @@ function renderTopologySVG(
           g.classList.remove("topo-node--dragging");
           if (dragging) {
             const { sx, sy } = pixelToSVG(em.clientX - startClientX, em.clientY - startClientY);
+            setDragOverride(null);
             onNodeMoved(node.name, { cx: startCx + sx, cy: startCy + sy });
             // The caller's onNodeMoved will mutate the pinned-positions
             // map + trigger renderGraph; the new SVG group will be at
