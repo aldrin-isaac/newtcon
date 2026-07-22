@@ -110,18 +110,36 @@ func TestClient_Health_Reachable(t *testing.T) {
 // TestClient_Health_Unreachable verifies that Health returns (false, "") when
 // newt-server's health endpoint is unavailable.
 func TestClient_Health_Unreachable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	c := newtronc.New(srv.URL)
+	// Truly unreachable = no HTTP response at all. Port 1 has nothing
+	// listening → connection refused, deterministically. A 5xx or 401 is
+	// the daemon ANSWERING and IS reachable — see TestClient_Health_AuthGuarded.
+	c := newtronc.New("http://127.0.0.1:1")
 	reachable, version := c.Health(context.Background())
 	if reachable {
-		t.Error("expected reachable=false")
+		t.Error("expected reachable=false when nothing answers")
 	}
 	if version != "" {
 		t.Errorf("expected version=\"\", got %q", version)
+	}
+}
+
+// TestClient_Health_AuthGuarded: under auth, newt-server answers /health with
+// 401 (and could 5xx). It IS reachable — the daemon is up and guarding — so
+// the pill must not read red. Version is unknown without a credential.
+func TestClient_Health_AuthGuarded(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusServiceUnavailable} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "guarded", code)
+		}))
+		c := newtronc.New(srv.URL)
+		reachable, version := c.Health(context.Background())
+		if !reachable {
+			t.Errorf("status %d: expected reachable=true (the daemon answered)", code)
+		}
+		if version != "" {
+			t.Errorf("status %d: expected version=%q, got %q", code, "", version)
+		}
+		srv.Close()
 	}
 }
 

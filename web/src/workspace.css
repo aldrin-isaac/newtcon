@@ -472,6 +472,7 @@
 .drawer-header { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-border-subtle); min-height: var(--header-height); }
 .drawer-breadcrumb { flex: 1; display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-sm); color: var(--color-text-secondary); }
 .drawer-breadcrumb .crumb-main { font-family: var(--font-mono); color: var(--color-text-primary); font-weight: var(--weight-medium); }
+.drawer-breadcrumb .crumb-kind { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); margin-right: var(--space-xs); }
 /* Pinned mini-header (uplift 6.2): device + substrate chip in the fixed
    drawer header — survives tab switches and any scroll depth. */
 .drawer-mini-status { display: inline-flex; align-items: center; gap: var(--space-2xs); margin-left: var(--space-sm); }

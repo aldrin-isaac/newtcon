@@ -2022,6 +2022,16 @@ export async function openDetail(kind: SpecKind, kindTitle: string, name: string
 
   drawer.setAttribute("aria-hidden", "false");
   drawer.classList.add("open");
+  // The fixed breadcrumb row hosts the DEVICE mini-header (name + substrate
+  // chip) when opened from Topology (uplift 6.2). A spec has no substrate —
+  // own the breadcrumb here so a prior device's "switch info" line can't
+  // linger above a spec detail. Show the spec identity, no status chip.
+  const crumb = document.getElementById("drawer-breadcrumb");
+  if (crumb) {
+    crumb.textContent = "";
+    crumb.appendChild(el("span", { className: "crumb-kind" }, kindTitle));
+    crumb.appendChild(el("span", { className: "crumb-main" }, name));
+  }
   content.textContent = "";
   content.appendChild(el("p", { className: "drawer-kind" }, kindTitle));
   content.appendChild(el("h2", { className: "drawer-name" }, name));
