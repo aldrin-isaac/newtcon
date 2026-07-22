@@ -36,7 +36,7 @@ import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableLenses, availableVlans, lensEffect, linkEndpointMembership, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
-import { type PortState, parsePortStates, portDotState, portDotTooltip } from "../../topology-links.js";
+import { type PortState, parsePortStates, perimeterSeat, portDotState, portDotTooltip } from "../../topology-links.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
@@ -439,10 +439,18 @@ function renderTopologySVG(
       linkPalette = resolveLinkPalette(a, z);
     }
     const off = arcOffset(link) + occlusionOffset(link);
+    // Seat the link on each card's PERIMETER, on the side facing the
+    // neighbour (uplift: ports as terminals). The line + status dots run
+    // seat→seat, so a dot literally represents "this port, this side,
+    // this state" and the cable connects port to port. HW/HH match the
+    // rendered card; +2 standoff sets the dot just off the edge.
+    const HW = NODE_W / 2, HH = NODE_H / 2;
+    const fromP = perimeterSeat({ x: from.cx, y: from.cy }, { x: to.cx, y: to.cy }, HW, HH, 2);
+    const toP = perimeterSeat({ x: to.cx, y: to.cy }, { x: from.cx, y: from.cy }, HW, HH, 2);
     if (opts.onLinkClick) {
       const hit = off === 0
-        ? svgEl("line", { "class": "topo-link-hit", x1: String(from.cx), y1: String(from.cy), x2: String(to.cx), y2: String(to.cy) })
-        : svgEl("path", { "class": "topo-link-hit", d: arcPath(from.cx, from.cy, to.cx, to.cy, off), fill: "none" });
+        ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })
+        : svgEl("path", { "class": "topo-link-hit", d: arcPath(fromP.x, fromP.y, toP.x, toP.y, off), fill: "none" });
       const onLinkClick = opts.onLinkClick;
       hit.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -469,12 +477,12 @@ function renderTopologySVG(
     const line = off === 0
       ? svgEl("line", {
           "class": linkClass,
-          x1: String(from.cx), y1: String(from.cy), x2: String(to.cx), y2: String(to.cy),
+          x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y),
           ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
         })
       : svgEl("path", {
           "class": linkClass,
-          d: arcPath(from.cx, from.cy, to.cx, to.cy, off),
+          d: arcPath(fromP.x, fromP.y, toP.x, toP.y, off),
           fill: "none",
           ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
         });
@@ -489,48 +497,25 @@ function renderTopologySVG(
     // chord — near the ends, arcs hug the chord, so this holds for both.
     if (opts.vniMemberPorts) {
       const mem = linkEndpointMembership(link, opts.vniMemberPorts);
-      const dx = to.cx - from.cx, dy = to.cy - from.cy;
-      const len = Math.hypot(dx, dy) || 1;
-      const inset = Math.min(NODE_W / 2 + 18, len / 3);
-      if (mem.local) {
-        svg.appendChild(svgEl("circle", {
-          "class": "topo-vni-endpoint",
-          cx: String(from.cx + (dx / len) * inset),
-          cy: String(from.cy + (dy / len) * inset),
-          r: "5",
-        }));
-      }
-      if (mem.remote) {
-        svg.appendChild(svgEl("circle", {
-          "class": "topo-vni-endpoint",
-          cx: String(to.cx - (dx / len) * inset),
-          cy: String(to.cy - (dy / len) * inset),
-          r: "5",
-        }));
-      }
+      if (mem.local) svg.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(fromP.x), cy: String(fromP.y), r: "7" }));
+      if (mem.remote) svg.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(toP.x), cy: String(toP.y), r: "7" }));
     }
 
     // Interface-state dots (always on): a dot at each link END colored by
     // that port's admin/oper state, with a hover tooltip. Placed just
     // outside the card edge along the chord so it reads as "this port".
     if (opts.portStatesByDevice) {
-      const dx2 = to.cx - from.cx, dy2 = to.cy - from.cy;
-      const len2 = Math.hypot(dx2, dy2) || 1;
-      const ux = dx2 / len2, uy = dy2 / len2;
-      const seat = NODE_W / 2 + 7; // just off the card corner
-      const ifaceDot = (dev?: string, iface?: string, cx?: number, cy?: number): void => {
-        if (!dev || !iface || cx === undefined || cy === undefined) return;
+      const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): void => {
+        if (!dev || !iface) return;
         const st = opts.portStatesByDevice?.get(dev)?.get(iface);
-        const state = portDotState(st);
-        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(cx), cy: String(cy), r: "4" });
+        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${portDotState(st)}`, cx: String(at.x), cy: String(at.y), r: "4" });
         const title = svgEl("title", {});
         title.textContent = portDotTooltip(iface, st);
         dot.appendChild(title);
         svg.appendChild(dot);
       };
-      const seatFrom = Math.min(seat, len2 / 2 - 2);
-      ifaceDot(link.local_device, link.local_interface, from.cx + ux * seatFrom, from.cy + uy * seatFrom);
-      ifaceDot(link.remote_device, link.remote_interface, to.cx - ux * seatFrom, to.cy - uy * seatFrom);
+      ifaceDot(link.local_device, link.local_interface, fromP);
+      ifaceDot(link.remote_device, link.remote_interface, toP);
     }
   }
 

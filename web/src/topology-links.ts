@@ -64,6 +64,22 @@ export function parsePortSpeeds(raw: unknown): Map<string, number> {
   return out;
 }
 
+export interface Pt { x: number; y: number }
+
+/** perimeterSeat — the point on a card's rectangle edge (half-width hw,
+ *  half-height hh, centre c) along the ray toward `toward`, pushed out by
+ *  `standoff`. This is where a link terminates and its status dot seats —
+ *  the dot becomes the port. Degenerate (same centre) returns c. */
+export function perimeterSeat(c: Pt, toward: Pt, hw: number, hh: number, standoff = 0): Pt {
+  const dx = toward.x - c.x, dy = toward.y - c.y;
+  if (dx === 0 && dy === 0) return { x: c.x, y: c.y };
+  // Scale the ray to the nearest edge: t = 1 / max(|dx|/hw, |dy|/hh).
+  const t = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
+  const ex = c.x + dx * t, ey = c.y + dy * t;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: ex + (dx / len) * standoff, y: ey + (dy / len) * standoff };
+}
+
 export interface PortState {
   admin?: string;
   oper?: string;
