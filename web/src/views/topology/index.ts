@@ -36,7 +36,7 @@ import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableLenses, availableVlans, lensEffect, linkEndpointMembership, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
-import { type PortState, parsePortStates, distributeSeats, portDotState, portDotTooltip } from "../../topology-links.js";
+import { type PortState, parsePortStates, parseLagMembers, distributeSeats, portDotState, portDotTooltip } from "../../topology-links.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
@@ -215,6 +215,7 @@ interface TopologyRenderOpts {
   /** Per-device port state (admin/oper), for the always-on interface-state
    *  dots at each link endpoint (hover → name / admin / oper / speed / mtu). */
   portStatesByDevice?: Map<string, Map<string, PortState>>;
+  lagMembersByDevice?: Map<string, Map<string, string[]>>;
 }
 
 interface TopologyRenderResult {
@@ -260,7 +261,7 @@ function fmtSpeed(mbps?: number): string | undefined {
 // buildPortTip — the elegant interface tooltip: a status-dotted header with
 // the port name, then quiet label/value rows. State drives the header dot +
 // the admin/oper value color.
-function buildPortTip(iface: string, st: PortState | undefined, state: string): HTMLElement {
+function buildPortTip(iface: string, st: PortState | undefined, state: string, members?: string[]): HTMLElement {
   const wrap = el("div", { className: "topo-tip-card" });
   const head = el("div", { className: "topo-tip-head" });
   head.append(el("span", { className: `topo-tip-dot topo-tip-dot--${state}` }), el("span", { className: "topo-tip-name" }, iface));
@@ -275,6 +276,11 @@ function buildPortTip(iface: string, st: PortState | undefined, state: string): 
   row("oper", st?.oper, upCls(st?.oper));
   row("speed", fmtSpeed(st?.speedMbps));
   row("mtu", st?.mtu);
+  // A PortChannel bundles physical ports — name them so the operator sees what
+  // the aggregate actually carries. Physical ports never have members.
+  if (members && members.length > 0) {
+    row(members.length === 1 ? "member" : `members (${members.length})`, members.join(", "), "topo-tip-members");
+  }
   wrap.appendChild(kv);
   return wrap;
 }
@@ -535,8 +541,9 @@ function renderTopologySVG(
           if (!dev || !iface) return;
           const st = opts.portStatesByDevice?.get(dev)?.get(iface);
           const state = portDotState(st);
+          const members = opts.lagMembersByDevice?.get(dev)?.get(iface);
           const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(at.x), cy: String(at.y), r: "4", "aria-label": portDotTooltip(iface, st) });
-          attachFastTip(dot, () => buildPortTip(iface, st, state));
+          attachFastTip(dot, () => buildPortTip(iface, st, state, members));
           linkLayer.appendChild(dot);
         };
         ifaceDot(link.local_device, link.local_interface, fromP);
@@ -1419,6 +1426,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Per-port interface state (admin/oper) for the per-link-end dots —
     // parsed from the SAME PORT_TABLE read that feeds speeds. No new fetch.
     const portStatesByDevice = new Map<string, Map<string, PortState>>();
+    // Per-device PortChannel → member ports, so a LAG endpoint's hover tip can
+    // name what the aggregate bundles. Same online-only read as port state.
+    const lagMembersByDevice = new Map<string, Map<string, string[]>>();
     const underlayByDevice = new Map<string, UnderlayState>();
     const probeResults = await Promise.allSettled(
       deviceNames.map(async (name) => {
@@ -1444,9 +1454,10 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
           if (Array.isArray(drift)) driftByDevice.set(name, drift.length);
         } catch { /* drift unavailable; leave count undefined */ }
         // Link truth, same online-only rule.
-        const [lldp, ports, bgp] = await Promise.allSettled([
+        const [lldp, ports, lags, bgp] = await Promise.allSettled([
           fetchNodeDBTable(name, "APPL_DB", "LLDP_ENTRY_TABLE"),
           fetchNodeDBTable(name, "APPL_DB", "PORT_TABLE"),
+          fetchNodeDBTable(name, "APPL_DB", "LAG_MEMBER_TABLE"),
           fetchNodeBGPCheck(name),
         ]);
         if (lldp.status === "fulfilled") lldpByDevice.set(name, parseLldpTable(lldp.value));
@@ -1454,6 +1465,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
           speedsByDevice.set(name, parsePortSpeeds(ports.value));
           portStatesByDevice.set(name, parsePortStates(ports.value));
         }
+        if (lags.status === "fulfilled") lagMembersByDevice.set(name, parseLagMembers(lags.value));
         if (bgp.status === "fulfilled") underlayByDevice.set(name, parseBgpCheckOk(bgp.value));
       })
     );
@@ -2064,6 +2076,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         lldpByDevice,
         speedsByDevice,
         portStatesByDevice,
+        lagMembersByDevice,
         underlayByDevice,
         selected: new Set<string>(),
         viewState,

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   parseLldpTable, parsePortSpeeds, classifyLink,
   linkStrokeWidth, linkSpeedForLink, parseBgpCheckOk, linkUnderlayState,
-  parsePortStates, portDotState, portDotTooltip, distributeSeats,
+  parsePortStates, portDotState, portDotTooltip, distributeSeats, parseLagMembers,
 } from "../dist/topology-links.js";
 
 const LINK = { local_device: "switch1", local_interface: "Ethernet0", remote_device: "switch2", remote_interface: "Ethernet0" };
@@ -26,6 +26,39 @@ describe("parseLldpTable()", () => {
     assert.deepEqual(parseLldpTable(null), []);
     assert.deepEqual(parseLldpTable([1, 2]), []);
     assert.deepEqual(parseLldpTable("x"), []);
+  });
+});
+
+describe("parseLagMembers()", () => {
+  test("groups member ports under their PortChannel, numeric-ordered", () => {
+    const m = parseLagMembers({
+      "PortChannel1:Ethernet4": {},
+      "PortChannel1:Ethernet0": {},
+      "PortChannel1:Ethernet12": {},
+      "PortChannel2:Ethernet8": { status: "enabled" },
+    });
+    assert.deepEqual(m.get("PortChannel1"), ["Ethernet0", "Ethernet4", "Ethernet12"]);
+    assert.deepEqual(m.get("PortChannel2"), ["Ethernet8"]);
+  });
+
+  test("tolerates the table-prefixed / colon-less / junk keys", () => {
+    const m = parseLagMembers({
+      "PortChannel3:Ethernet0": {},
+      "Ethernet0": {},      // no lag:member split → skipped
+      ":Ethernet4": {},     // empty lag → skipped
+      "PortChannel4:": {},  // empty member → skipped
+    });
+    assert.deepEqual([...m.keys()], ["PortChannel3"]);
+    assert.deepEqual(m.get("PortChannel3"), ["Ethernet0"]);
+  });
+
+  test("dedupes a repeated member and returns empty on junk", () => {
+    const m = parseLagMembers({ "PortChannel1:Ethernet0": {}, "PortChannel1:Ethernet0 ": {} });
+    // trailing-space key is a distinct member string; the exact dup is what we fold
+    assert.ok(m.get("PortChannel1").includes("Ethernet0"));
+    assert.deepEqual(parseLagMembers(null), new Map());
+    assert.deepEqual(parseLagMembers([1, 2]), new Map());
+    assert.deepEqual(parseLagMembers("x"), new Map());
   });
 });
 

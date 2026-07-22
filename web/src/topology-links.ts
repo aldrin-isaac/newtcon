@@ -155,6 +155,38 @@ export function parsePortStates(raw: unknown): Map<string, PortState> {
   return out;
 }
 
+/** parseLagMembers — LAG_MEMBER_TABLE → per-PortChannel member ports.
+ *  SONiC keys the table `PortChannel{n}:Ethernet{m}` (one row per member);
+ *  fetchNodeDBTable strips the table prefix, so keys arrive as
+ *  `PortChannel1:Ethernet0`. Split on the FIRST colon: left = the LAG, right
+ *  = the member port. Members are returned in interface-name order so the
+ *  tooltip reads stably. Empty/garbled keys are skipped. Backs the "members"
+ *  row on a PortChannel endpoint's hover tip. */
+export function parseLagMembers(raw: unknown): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (!rec(raw)) return out;
+  for (const key of Object.keys(raw)) {
+    const sep = key.indexOf(":");
+    if (sep <= 0) continue; // no lag or no member
+    const lag = key.slice(0, sep);
+    const member = key.slice(sep + 1);
+    if (!lag || !member) continue;
+    const list = out.get(lag) ?? [];
+    if (!list.includes(member)) list.push(member);
+    out.set(lag, list);
+  }
+  for (const list of out.values()) list.sort(comparePortName);
+  return out;
+}
+
+/** comparePortName — numeric-aware interface ordering (Ethernet2 < Ethernet10). */
+function comparePortName(a: string, b: string): number {
+  const na = a.match(/\d+/), nb = b.match(/\d+/);
+  const pa = a.replace(/\d+/, ""), pb = b.replace(/\d+/, "");
+  if (pa === pb && na && nb) return Number(na[0]) - Number(nb[0]);
+  return a.localeCompare(b);
+}
+
 export type PortDotState = "ok" | "down" | "admin-down" | "unknown";
 
 const upRe = /^(up|oper_up|1|true)$/i;

@@ -187,6 +187,7 @@
 .topo-tip-kv dd { margin: 0; font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary); text-align: right; }
 .topo-tip-kv dd.topo-tip-up { color: var(--color-success); }
 .topo-tip-kv dd.topo-tip-down { color: var(--color-danger); }
+.topo-tip-kv dd.topo-tip-members { max-width: 14rem; white-space: normal; word-break: break-word; }
 .topo-iface-dot--ok         { fill: var(--color-success); }
 .topo-iface-dot--down       { fill: var(--color-danger); }
 .topo-iface-dot--admin-down { fill: var(--color-text-muted); }
