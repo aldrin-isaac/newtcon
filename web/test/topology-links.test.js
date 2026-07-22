@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   parseLldpTable, parsePortSpeeds, classifyLink,
   linkStrokeWidth, linkSpeedForLink, parseBgpCheckOk, linkUnderlayState,
+  parsePortStates, portDotState, portDotTooltip,
 } from "../dist/topology-links.js";
 
 const LINK = { local_device: "switch1", local_interface: "Ethernet0", remote_device: "switch2", remote_interface: "Ethernet0" };
@@ -115,5 +116,36 @@ describe("underlay state", () => {
     assert.equal(linkUnderlayState(LINK, by), "down");
     assert.equal(linkUnderlayState(LINK, new Map([["switch1", "ok"], ["switch2", "ok"]])), "ok");
     assert.equal(linkUnderlayState(LINK, new Map([["switch1", "ok"]])), "unknown");
+  });
+});
+
+describe("interface-state endpoint dots", () => {
+  test("parsePortStates reads admin/oper/speed/mtu, normalizes keys, skips empty", () => {
+    const m = parsePortStates({
+      "Ethernet0": { admin_status: "up", oper_status: "up", speed: "100000", mtu: "9100" },
+      "PORT_TABLE:Ethernet4": { admin_status: "up", oper_status: "down" },
+      "Ethernet8": { fec: "rs" },        // no admin/oper/speed/mtu → skipped
+      "Ethernet12": { speed: "4294967295" }, // sentinel speed dropped, but mtu absent → skipped
+    });
+    assert.deepEqual(m.get("Ethernet0"), { admin: "up", oper: "up", speedMbps: 100000, mtu: "9100" });
+    assert.deepEqual(m.get("Ethernet4"), { admin: "up", oper: "down" });
+    assert.equal(m.has("Ethernet8"), false);
+    assert.equal(m.has("Ethernet12"), false);
+  });
+
+  test("portDotState tiers", () => {
+    assert.equal(portDotState({ admin: "up", oper: "up" }), "ok");
+    assert.equal(portDotState({ admin: "up", oper: "down" }), "down");
+    assert.equal(portDotState({ admin: "down", oper: "down" }), "admin-down");
+    assert.equal(portDotState({ admin: "down", oper: "up" }), "admin-down", "admin wins — it's out of service");
+    assert.equal(portDotState({ oper: "up" }), "ok", "oper alone suffices");
+    assert.equal(portDotState({}), "unknown");
+    assert.equal(portDotState(undefined), "unknown");
+  });
+
+  test("portDotTooltip lists what's known, dashes what isn't", () => {
+    assert.equal(portDotTooltip("Ethernet0", { admin: "up", oper: "down", speedMbps: 100000, mtu: "9100" }),
+      "Ethernet0 · admin: up · oper: down · 100000 Mbps · MTU 9100");
+    assert.equal(portDotTooltip("Vlan100", undefined), "Vlan100 · admin: — · oper: —");
   });
 });

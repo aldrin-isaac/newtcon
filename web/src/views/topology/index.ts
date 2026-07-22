@@ -36,6 +36,7 @@ import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableLenses, availableVlans, lensEffect, linkEndpointMembership, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
+import { type PortState, parsePortStates, portDotState, portDotTooltip } from "../../topology-links.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
@@ -211,6 +212,9 @@ interface TopologyRenderOpts {
    *  pills; links get endpoint dots where a member port terminates —
    *  a one-ended link is the missing tagged join, visible. */
   vniMemberPorts?: Map<string, string[]>;
+  /** Per-device port state (admin/oper), for the always-on interface-state
+   *  dots at each link endpoint (hover → name / admin / oper / speed / mtu). */
+  portStatesByDevice?: Map<string, Map<string, PortState>>;
 }
 
 interface TopologyRenderResult {
@@ -504,6 +508,29 @@ function renderTopologySVG(
           r: "5",
         }));
       }
+    }
+
+    // Interface-state dots (always on): a dot at each link END colored by
+    // that port's admin/oper state, with a hover tooltip. Placed just
+    // outside the card edge along the chord so it reads as "this port".
+    if (opts.portStatesByDevice) {
+      const dx2 = to.cx - from.cx, dy2 = to.cy - from.cy;
+      const len2 = Math.hypot(dx2, dy2) || 1;
+      const ux = dx2 / len2, uy = dy2 / len2;
+      const seat = NODE_W / 2 + 7; // just off the card corner
+      const ifaceDot = (dev?: string, iface?: string, cx?: number, cy?: number): void => {
+        if (!dev || !iface || cx === undefined || cy === undefined) return;
+        const st = opts.portStatesByDevice?.get(dev)?.get(iface);
+        const state = portDotState(st);
+        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(cx), cy: String(cy), r: "4" });
+        const title = svgEl("title", {});
+        title.textContent = portDotTooltip(iface, st);
+        dot.appendChild(title);
+        svg.appendChild(dot);
+      };
+      const seatFrom = Math.min(seat, len2 / 2 - 2);
+      ifaceDot(link.local_device, link.local_interface, from.cx + ux * seatFrom, from.cy + uy * seatFrom);
+      ifaceDot(link.remote_device, link.remote_interface, to.cx - ux * seatFrom, to.cy - uy * seatFrom);
     }
   }
 
@@ -1371,6 +1398,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // best-effort: a failed read just leaves that device silent.
     const lldpByDevice = new Map<string, LldpNeighbor[]>();
     const speedsByDevice = new Map<string, Map<string, number>>();
+    // Per-port interface state (admin/oper) for the per-link-end dots —
+    // parsed from the SAME PORT_TABLE read that feeds speeds. No new fetch.
+    const portStatesByDevice = new Map<string, Map<string, PortState>>();
     const underlayByDevice = new Map<string, UnderlayState>();
     const probeResults = await Promise.allSettled(
       deviceNames.map(async (name) => {
@@ -1402,7 +1432,10 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
           fetchNodeBGPCheck(name),
         ]);
         if (lldp.status === "fulfilled") lldpByDevice.set(name, parseLldpTable(lldp.value));
-        if (ports.status === "fulfilled") speedsByDevice.set(name, parsePortSpeeds(ports.value));
+        if (ports.status === "fulfilled") {
+          speedsByDevice.set(name, parsePortSpeeds(ports.value));
+          portStatesByDevice.set(name, parsePortStates(ports.value));
+        }
         if (bgp.status === "fulfilled") underlayByDevice.set(name, parseBgpCheckOk(bgp.value));
       })
     );
@@ -2012,6 +2045,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         ...(vniMemberPorts !== undefined ? { vniMemberPorts } : {}),
         lldpByDevice,
         speedsByDevice,
+        portStatesByDevice,
         underlayByDevice,
         selected: new Set<string>(),
         viewState,

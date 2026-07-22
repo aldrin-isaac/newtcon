@@ -64,6 +64,66 @@ export function parsePortSpeeds(raw: unknown): Map<string, number> {
   return out;
 }
 
+export interface PortState {
+  admin?: string;
+  oper?: string;
+  speedMbps?: number;
+  mtu?: string;
+}
+
+/** parsePortStates — PORT_TABLE → per-port admin/oper/speed/mtu. Same
+ *  key-normalization as parsePortSpeeds; ports with no useful field are
+ *  omitted. Backs the per-link-end interface-state dots. */
+export function parsePortStates(raw: unknown): Map<string, PortState> {
+  const out = new Map<string, PortState>();
+  if (!rec(raw)) return out;
+  for (const [key, val] of Object.entries(raw)) {
+    if (!rec(val)) continue;
+    const port = key.includes(":") ? key.slice(key.lastIndexOf(":") + 1) : key;
+    const admin = str(val.admin_status);
+    const oper = str(val.oper_status);
+    const speedRaw = str(val.speed);
+    const mtu = str(val.mtu);
+    if (admin === undefined && oper === undefined && speedRaw === undefined && mtu === undefined) continue;
+    const st: PortState = {};
+    if (admin !== undefined) st.admin = admin;
+    if (oper !== undefined) st.oper = oper;
+    if (mtu !== undefined) st.mtu = mtu;
+    if (speedRaw !== undefined && speedRaw !== SPEED_SENTINEL) {
+      const mbps = Number(speedRaw);
+      if (Number.isFinite(mbps) && mbps > 0) st.speedMbps = mbps;
+    }
+    if (Object.keys(st).length > 0) out.set(port, st); // all-sentinel → nothing useful
+  }
+  return out;
+}
+
+export type PortDotState = "ok" | "down" | "admin-down" | "unknown";
+
+const upRe = /^(up|oper_up|1|true)$/i;
+
+/** portDotState — an interface's visual state for its endpoint dot:
+ *  ok       oper up (green — the link is live)
+ *  down     admin up but oper NOT up (red — should be up, isn't)
+ *  admin-down  admin down (grey — intentionally out of service)
+ *  unknown  no admin/oper data (hollow — undeployed / unread). */
+export function portDotState(st: PortState | undefined): PortDotState {
+  if (!st || (st.admin === undefined && st.oper === undefined)) return "unknown";
+  if (st.admin !== undefined && !upRe.test(st.admin)) return "admin-down";
+  if (st.oper !== undefined) return upRe.test(st.oper) ? "ok" : "down";
+  return "unknown";
+}
+
+/** portDotTooltip — the hover line for an endpoint dot. */
+export function portDotTooltip(iface: string, st: PortState | undefined): string {
+  const parts = [iface];
+  parts.push(`admin: ${st?.admin ?? "—"}`);
+  parts.push(`oper: ${st?.oper ?? "—"}`);
+  if (st?.speedMbps !== undefined) parts.push(`${st.speedMbps} Mbps`);
+  if (st?.mtu !== undefined) parts.push(`MTU ${st.mtu}`);
+  return parts.join(" · ");
+}
+
 export type LinkVerdict = "verified" | "intent-only" | "mismatch";
 
 /** classifyLink — compare the topology's intended far end against what LLDP
