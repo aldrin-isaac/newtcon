@@ -82,12 +82,13 @@ func TestHealth_Reachable(t *testing.T) {
 // API_CONTRACT.md line 1337: "If newtron-server is unreachable, reachable is
 // false and the endpoint still returns 200."
 func TestHealth_Unreachable(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-	}))
-	defer upstream.Close()
+	// Genuinely unreachable = nothing listening. (A 5xx/401 is the daemon
+	// answering and is reachable — see newtronc.TestClient_Health_AuthGuarded.)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := upstream.URL
+	upstream.Close()
 
-	nc := newtronc.New(upstream.URL)
+	nc := newtronc.New(deadURL)
 	cfg := handlers.HealthConfig{
 		NewtronClient: nc,
 		NewtronURL:    upstream.URL,

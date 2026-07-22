@@ -305,11 +305,16 @@ func (c *Client) Health(ctx context.Context) (reachable bool, version string) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false, ""
+		// The daemon ANSWERED (e.g. 401 when newt-server runs auth-guarded,
+		// or a 5xx) — it is reachable; only a transport failure above means
+		// unreachable. The pill's dot is a reachability signal, so a
+		// credential-less health probe under auth must not read as "down".
+		// Version stays "" (the body needs a credential we don't carry here).
+		return true, ""
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, ""
+		return true, ""
 	}
 	var env newtronAPIResponse
 	if err := json.Unmarshal(body, &env); err != nil {
