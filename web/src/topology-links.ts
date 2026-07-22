@@ -66,18 +66,59 @@ export function parsePortSpeeds(raw: unknown): Map<string, number> {
 
 export interface Pt { x: number; y: number }
 
-/** perimeterSeat — the point on a card's rectangle edge (half-width hw,
- *  half-height hh, centre c) along the ray toward `toward`, pushed out by
- *  `standoff`. This is where a link terminates and its status dot seats —
- *  the dot becomes the port. Degenerate (same centre) returns c. */
-export function perimeterSeat(c: Pt, toward: Pt, hw: number, hh: number, standoff = 0): Pt {
-  const dx = toward.x - c.x, dy = toward.y - c.y;
-  if (dx === 0 && dy === 0) return { x: c.x, y: c.y };
-  // Scale the ray to the nearest edge: t = 1 / max(|dx|/hw, |dy|/hh).
-  const t = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
-  const ex = c.x + dx * t, ey = c.y + dy * t;
-  const len = Math.hypot(dx, dy) || 1;
-  return { x: ex + (dx / len) * standoff, y: ey + (dy / len) * standoff };
+export interface SeatLink { id: string; tx: number; ty: number }
+
+/** distributeSeats — place each of a node's incident link seats on its card
+ *  PERIMETER, on the edge facing that neighbour, WITHOUT overlap. Links whose
+ *  rays exit the same edge are grouped and spread with a minimum gap, centred
+ *  on where they point — so links to different neighbours never collide and
+ *  parallel links to the same neighbour fan out. Recomputed on every render,
+ *  so dragging a node re-distributes both its own and its neighbours' seats.
+ *
+ *  c = card centre; hw/hh = half extents; standoff = px off the edge;
+ *  gap = min px between seats on an edge; pad = px kept clear of each corner. */
+export function distributeSeats(
+  c: Pt, hw: number, hh: number, links: readonly SeatLink[],
+  standoff = 2, gap = 16, pad = 12,
+): Map<string, Pt> {
+  type Slotted = { id: string; edge: "T" | "R" | "B" | "L"; along: number };
+  const slotted: Slotted[] = links.map((l) => {
+    const dx = l.tx - c.x, dy = l.ty - c.y;
+    if (dx === 0 && dy === 0) return { id: l.id, edge: "R", along: c.y };
+    // Which edge does the ray hit first? Compare normalized reach.
+    if (Math.abs(dx) / hw >= Math.abs(dy) / hh) {
+      const y = c.y + dy * (hw / Math.abs(dx));       // exit height on the L/R edge
+      return { id: l.id, edge: dx > 0 ? "R" : "L", along: y };
+    }
+    const x = c.x + dx * (hh / Math.abs(dy));          // exit x on the T/B edge
+    return { id: l.id, edge: dy > 0 ? "B" : "T", along: x };
+  });
+
+  const out = new Map<string, Pt>();
+  for (const edge of ["T", "R", "B", "L"] as const) {
+    const grp = slotted.filter((s) => s.edge === edge).sort((a, b) => a.along - b.along);
+    if (grp.length === 0) continue;
+    const vertical = edge === "L" || edge === "R";
+    const half = vertical ? hh : hw;
+    const lo = (vertical ? c.y : c.x) - half + pad;
+    const hi = (vertical ? c.y : c.x) + half - pad;
+    // Centre the group's total extent on the mean of where they point,
+    // clamped inside [lo, hi]; place at even gaps preserving sort order.
+    const total = (grp.length - 1) * gap;
+    const mean = grp.reduce((a, s) => a + s.along, 0) / grp.length;
+    let start = Math.min(Math.max(mean - total / 2, lo), Math.max(lo, hi - total));
+    if (hi - lo < total) { start = lo; } // more links than fit: pack from lo (rare)
+    const step = grp.length > 1 && hi - lo < total ? (hi - lo) / (grp.length - 1) : gap;
+    grp.forEach((s, i) => {
+      const alongPos = start + i * step;
+      const seat: Pt = edge === "R" ? { x: c.x + hw + standoff, y: alongPos }
+        : edge === "L" ? { x: c.x - hw - standoff, y: alongPos }
+        : edge === "T" ? { x: alongPos, y: c.y - hh - standoff }
+        : { x: alongPos, y: c.y + hh + standoff };
+      out.set(s.id, seat);
+    });
+  }
+  return out;
 }
 
 export interface PortState {
