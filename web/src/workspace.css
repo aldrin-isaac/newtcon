@@ -162,6 +162,15 @@
 .topo-vni-port-more { font-family: var(--font-mono); font-size: 9px; fill: var(--color-text-muted); dominant-baseline: central; }
 .topo-vni-endpoint { fill: var(--color-accent); stroke: var(--color-surface); stroke-width: 2; }
 
+/* Interface-state dots (always on): one per link END, colored by port
+   admin/oper. Hover (native <title>) shows name / admin / oper / speed /
+   mtu. Ringed in the surface color so they read against links + cards. */
+.topo-iface-dot { stroke: var(--color-surface); stroke-width: 1.5; pointer-events: auto; cursor: help; }
+.topo-iface-dot--ok         { fill: var(--color-success); }
+.topo-iface-dot--down       { fill: var(--color-danger); }
+.topo-iface-dot--admin-down { fill: var(--color-text-muted); }
+.topo-iface-dot--unknown    { fill: var(--color-surface); stroke: var(--color-border-strong); }
+
 /* Canvas dot-grid texture (toggle in the zoom toolbar). Token-colored so
    both themes stay subtle; never interactive. */
 .topo-grid { pointer-events: none; }
