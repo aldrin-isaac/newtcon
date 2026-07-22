@@ -36,7 +36,7 @@ import { NODE_ACTIONS } from "../../topology-actions.js";
 import { type DeviceMetadata, type TopologyFilter, applyFilter, emptyFilter, isActive as filterIsActive, uniqueZones } from "../../topology-filters.js";
 import { type LensState, availableLenses, availableVlans, lensEffect, linkEndpointMembership, vlanMembership } from "../../topology-lenses.js";
 import { linkHeat, parsePortNameMap, parseRates, portUtilization, shouldPollLive } from "../../topology-live.js";
-import { type PortState, parsePortStates, perimeterSeat, portDotState, portDotTooltip } from "../../topology-links.js";
+import { type PortState, parsePortStates, distributeSeats, portDotState, portDotTooltip } from "../../topology-links.js";
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { mountFabricHealthStrip } from "../../fabric-health-strip.js";
 import { computeTopologyLayout } from "../../topology-layout.js";
@@ -411,21 +411,27 @@ function renderTopologySVG(
   // impossible to hit.
   const dimmed = opts.dimmedNames ?? new Set<string>();
   const paletteByDevice = opts.paletteByDevice;
-  // Parallel-link arcs (uplift 6.6): links sharing a device pair fan out
-  // as quadratic arcs with symmetric perpendicular offsets instead of
-  // overdrawing one straight line. Singleton links stay straight.
-  const pairCounts = new Map<string, number>();
-  const pairSeen = new Map<string, number>();
-  const pairKey = (l: TopoLink): string => [l.local_device ?? "", l.remote_device ?? ""].sort().join("\u0000");
-  for (const l of links) pairCounts.set(pairKey(l), (pairCounts.get(pairKey(l)) ?? 0) + 1);
-  const arcOffset = (l: TopoLink): number => {
-    const key = pairKey(l);
-    const n = pairCounts.get(key) ?? 1;
-    if (n <= 1) return 0;
-    const i = pairSeen.get(key) ?? 0;
-    pairSeen.set(key, i + 1);
-    return (i - (n - 1) / 2) * 16;
-  };
+  // Neighbour-aware seating: distribute each node's incident link ends around
+  // its perimeter (topology-links.distributeSeats) so links to different
+  // neighbours never collide and parallel links fan out. Recomputed every
+  // render, so dragging a node re-seats it AND its neighbours. Keyed by link
+  // index; a link's two ends live under its from-device and to-device maps.
+  const HW = NODE_W / 2, HH = NODE_H / 2;
+  const incident = new Map<string, { id: string; tx: number; ty: number }[]>();
+  links.forEach((lnk, i) => {
+    const fp = lnk.local_device ? positions.get(lnk.local_device) : undefined;
+    const tp = lnk.remote_device ? positions.get(lnk.remote_device) : undefined;
+    if (!fp || !tp || !lnk.local_device || !lnk.remote_device) return;
+    (incident.get(lnk.local_device) ?? incident.set(lnk.local_device, []).get(lnk.local_device)!).push({ id: String(i), tx: tp.cx, ty: tp.cy });
+    (incident.get(lnk.remote_device) ?? incident.set(lnk.remote_device, []).get(lnk.remote_device)!).push({ id: String(i), tx: fp.cx, ty: fp.cy });
+  });
+  const seatsByDevice = new Map<string, Map<string, { x: number; y: number }>>();
+  for (const [dev, list] of incident) {
+    const p = positions.get(dev);
+    if (p) seatsByDevice.set(dev, distributeSeats({ x: p.cx, y: p.cy }, HW, HH, list));
+  }
+  const seatFor = (dev: string | undefined, i: number, fallback: { cx: number; cy: number }): { x: number; y: number } =>
+    (dev ? seatsByDevice.get(dev)?.get(String(i)) : undefined) ?? { x: fallback.cx, y: fallback.cy };
   // Occlusion-aware routing (operator request): a link whose straight
   // segment would pass under a NON-endpoint card gets deflected around it.
   // Positions never move (pins + layout cache stay valid) — the LINK bends,
@@ -487,29 +493,12 @@ function renderTopologySVG(
       const z = paletteByDevice.get(link.remote_device) ?? "unknown";
       linkPalette = resolveLinkPalette(a, z);
     }
-    // arcOffset returns a per-parallel-link perpendicular offset (0 for a
-    // singleton). Parallel independent links each get a DISTINCT port — so
-    // that offset SPREADS THE SEATS along the card edge (each ball is its
-    // own port), not just the line's midpoint. Occlusion still bends the
-    // line to clear a third card.
-    const spread = arcOffset(link);
+    // Neighbour-aware perimeter seats (distributed above); occlusion still
+    // bends the line to clear a third card.
+    const linkIdx = links.indexOf(link);
     const arc = occlusionOffset(link);
-    // Seat each end on its card's PERIMETER, aimed toward the neighbour
-    // centre shifted perpendicular by `spread` — so parallel ports fan out
-    // as distinct balls with their own cables. HW/HH match the card; +2
-    // standoff sets the dot just off the edge.
-    const HW = NODE_W / 2, HH = NODE_H / 2;
-    const chLen = Math.hypot(to.cx - from.cx, to.cy - from.cy) || 1;
-    // perpendicular-to-chord ≈ the edge tangent for horizontal/vertical
-    // links; offsetting the seat directly along it spreads parallel ports
-    // a real N px apart (aiming a distant shifted target barely moves the
-    // edge exit). Clamped inside the edge so balls don't slide past a corner.
-    const perpX = -(to.cy - from.cy) / chLen, perpY = (to.cx - from.cx) / chLen;
-    const clampSpread = Math.max(-(Math.min(HW, HH) - 6), Math.min(Math.min(HW, HH) - 6, spread));
-    const baseFrom = perimeterSeat({ x: from.cx, y: from.cy }, { x: to.cx, y: to.cy }, HW, HH, 2);
-    const baseTo = perimeterSeat({ x: to.cx, y: to.cy }, { x: from.cx, y: from.cy }, HW, HH, 2);
-    const fromP = { x: baseFrom.x + perpX * clampSpread, y: baseFrom.y + perpY * clampSpread };
-    const toP = { x: baseTo.x + perpX * clampSpread, y: baseTo.y + perpY * clampSpread };
+    const fromP = seatFor(link.local_device, linkIdx, from);
+    const toP = seatFor(link.remote_device, linkIdx, to);
     if (opts.onLinkClick) {
       const hit = arc === 0
         ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   parseLldpTable, parsePortSpeeds, classifyLink,
   linkStrokeWidth, linkSpeedForLink, parseBgpCheckOk, linkUnderlayState,
-  parsePortStates, portDotState, portDotTooltip, perimeterSeat,
+  parsePortStates, portDotState, portDotTooltip, distributeSeats,
 } from "../dist/topology-links.js";
 
 const LINK = { local_device: "switch1", local_interface: "Ethernet0", remote_device: "switch2", remote_interface: "Ethernet0" };
@@ -150,28 +150,56 @@ describe("interface-state endpoint dots", () => {
   });
 });
 
-describe("perimeterSeat()", () => {
-  const c = { x: 100, y: 100 };   // card centre; hw=60, hh=26
-  test("neighbour to the right → seats on the right edge, mid-height", () => {
-    const p = perimeterSeat(c, { x: 400, y: 100 }, 60, 26);
-    assert.equal(Math.round(p.x), 160);
-    assert.equal(Math.round(p.y), 100);
+
+describe("distributeSeats()", () => {
+  const c = { x: 100, y: 100 }, hw = 60, hh = 26;
+  const seat = (m, id) => m.get(id);
+
+  test("links to different sides land on different edges", () => {
+    const m = distributeSeats(c, hw, hh, [
+      { id: "up", tx: 100, ty: -400 },
+      { id: "down", tx: 100, ty: 400 },
+      { id: "right", tx: 500, ty: 100 },
+    ]);
+    assert.ok(seat(m, "up").y < c.y - hh, "up seat on top edge");
+    assert.ok(seat(m, "down").y > c.y + hh, "down seat on bottom edge");
+    assert.ok(seat(m, "right").x > c.x + hw, "right seat on right edge");
   });
-  test("neighbour below → seats on the bottom edge", () => {
-    const p = perimeterSeat(c, { x: 100, y: 400 }, 60, 26);
-    assert.equal(Math.round(p.x), 100);
-    assert.equal(Math.round(p.y), 126);
+
+  test("co-located links on one edge spread without overlap, same edge", () => {
+    // three neighbours all roughly to the right → all on the right (vertical) edge.
+    // A 52px-tall card packs them to fit; every gap must still exceed the ball
+    // diameter (8px) so nothing overlaps.
+    const m = distributeSeats(c, hw, hh, [
+      { id: "a", tx: 500, ty: 60 },
+      { id: "b", tx: 500, ty: 100 },
+      { id: "d", tx: 500, ty: 140 },
+    ], 2, 16);
+    const ys = ["a", "b", "d"].map((id) => seat(m, id).y).sort((p, q) => p - q);
+    assert.ok(ys[1] - ys[0] >= 8 && ys[2] - ys[1] >= 8, `no overlap (gaps > ball dia): ${ys}`);
+    const xs = new Set(["a", "b", "d"].map((id) => Math.round(seat(m, id).x)));
+    assert.equal(xs.size, 1, "all on the same (right) edge x");
   });
-  test("standoff pushes the seat outward along the ray", () => {
-    const p = perimeterSeat(c, { x: 400, y: 100 }, 60, 26, 5);
-    assert.equal(Math.round(p.x), 165);
+
+  test("a wide (bottom) edge fits the full min gap", () => {
+    // bottom edge is 120px wide → three links get the full 16px gap
+    const m = distributeSeats(c, hw, hh, [
+      { id: "a", tx: 60, ty: 500 },
+      { id: "b", tx: 100, ty: 500 },
+      { id: "d", tx: 140, ty: 500 },
+    ], 2, 16);
+    const xs = ["a", "b", "d"].map((id) => seat(m, id).x).sort((p, q) => p - q);
+    assert.ok(Math.abs(xs[1] - xs[0] - 16) < 0.01 && Math.abs(xs[2] - xs[1] - 16) < 0.01, `even 16px gaps: ${xs}`);
   });
-  test("diagonal neighbour seats on whichever edge the ray hits first", () => {
-    const p = perimeterSeat(c, { x: 200, y: 110 }, 60, 26);   // shallow → right edge
-    assert.equal(Math.round(p.x), 160);
-    assert.ok(p.y > 100 && p.y < 116);
+
+  test("all seats stay within the padded edge span", () => {
+    const m = distributeSeats(c, hw, hh, Array.from({ length: 6 }, (_, i) => ({ id: `l${i}`, tx: 500, ty: 100 })), 2, 16, 12);
+    for (const [, p] of m) assert.ok(p.y >= c.y - hh + 12 - 0.01 && p.y <= c.y + hh - 12 + 0.01, `within span: ${p.y}`);
   });
-  test("same centre is degenerate → returns the centre", () => {
-    assert.deepEqual(perimeterSeat(c, c, 60, 26), { x: 100, y: 100 });
+
+  test("a single link on an edge points at its neighbour (not forced to centre)", () => {
+    const m = distributeSeats(c, hw, hh, [{ id: "solo", tx: 500, ty: 130 }], 2, 16);
+    // one link → centred on its own exit height, so it should be BELOW centre
+    assert.ok(seat(m, "solo").y > c.y, "seat tracks the neighbour direction");
   });
 });
