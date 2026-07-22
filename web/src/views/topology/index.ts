@@ -230,6 +230,55 @@ interface TopologyRenderResult {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
+// Fast hover tip for canvas dots. Native SVG <title> has a ~1s
+// browser-controlled delay; this custom tip shows instantly. aria-label
+// on the element preserves the screen-reader path.
+let topoTipEl: HTMLDivElement | null = null;
+function topoTip(): HTMLDivElement {
+  if (topoTipEl) return topoTipEl;
+  topoTipEl = document.createElement("div");
+  topoTipEl.className = "topo-tip";
+  topoTipEl.hidden = true;
+  document.body.appendChild(topoTipEl);
+  return topoTipEl;
+}
+function attachFastTip(node: Element, build: () => HTMLElement): void {
+  node.addEventListener("mouseenter", () => { const t = topoTip(); t.replaceChildren(build()); t.hidden = false; });
+  node.addEventListener("mousemove", (e) => {
+    const t = topoTip(); const ev = e as MouseEvent;
+    t.style.left = `${ev.clientX + 14}px`;
+    t.style.top = `${ev.clientY + 16}px`;
+  });
+  node.addEventListener("mouseleave", () => { if (topoTipEl) topoTipEl.hidden = true; });
+}
+
+function fmtSpeed(mbps?: number): string | undefined {
+  if (mbps === undefined) return undefined;
+  return mbps >= 1000 && mbps % 1000 === 0 ? `${mbps / 1000} Gbps` : `${mbps} Mbps`;
+}
+
+// buildPortTip — the elegant interface tooltip: a status-dotted header with
+// the port name, then quiet label/value rows. State drives the header dot +
+// the admin/oper value color.
+function buildPortTip(iface: string, st: PortState | undefined, state: string): HTMLElement {
+  const wrap = el("div", { className: "topo-tip-card" });
+  const head = el("div", { className: "topo-tip-head" });
+  head.append(el("span", { className: `topo-tip-dot topo-tip-dot--${state}` }), el("span", { className: "topo-tip-name" }, iface));
+  wrap.appendChild(head);
+  const kv = el("dl", { className: "topo-tip-kv" });
+  const row = (k: string, v: string | undefined, cls?: string): void => {
+    if (v === undefined) return;
+    kv.append(el("dt", {}, k), el("dd", { className: cls ?? "" }, v));
+  };
+  const upCls = (v?: string): string => (v ? (/^(up|1|true)$/i.test(v) ? "topo-tip-up" : "topo-tip-down") : "");
+  row("admin", st?.admin, upCls(st?.admin));
+  row("oper", st?.oper, upCls(st?.oper));
+  row("speed", fmtSpeed(st?.speedMbps));
+  row("mtu", st?.mtu);
+  wrap.appendChild(kv);
+  return wrap;
+}
+
 function renderTopologySVG(
   data: TopologyData,
   opts: TopologyRenderOpts,
@@ -438,19 +487,33 @@ function renderTopologySVG(
       const z = paletteByDevice.get(link.remote_device) ?? "unknown";
       linkPalette = resolveLinkPalette(a, z);
     }
-    const off = arcOffset(link) + occlusionOffset(link);
-    // Seat the link on each card's PERIMETER, on the side facing the
-    // neighbour (uplift: ports as terminals). The line + status dots run
-    // seat→seat, so a dot literally represents "this port, this side,
-    // this state" and the cable connects port to port. HW/HH match the
-    // rendered card; +2 standoff sets the dot just off the edge.
+    // arcOffset returns a per-parallel-link perpendicular offset (0 for a
+    // singleton). Parallel independent links each get a DISTINCT port — so
+    // that offset SPREADS THE SEATS along the card edge (each ball is its
+    // own port), not just the line's midpoint. Occlusion still bends the
+    // line to clear a third card.
+    const spread = arcOffset(link);
+    const arc = occlusionOffset(link);
+    // Seat each end on its card's PERIMETER, aimed toward the neighbour
+    // centre shifted perpendicular by `spread` — so parallel ports fan out
+    // as distinct balls with their own cables. HW/HH match the card; +2
+    // standoff sets the dot just off the edge.
     const HW = NODE_W / 2, HH = NODE_H / 2;
-    const fromP = perimeterSeat({ x: from.cx, y: from.cy }, { x: to.cx, y: to.cy }, HW, HH, 2);
-    const toP = perimeterSeat({ x: to.cx, y: to.cy }, { x: from.cx, y: from.cy }, HW, HH, 2);
+    const chLen = Math.hypot(to.cx - from.cx, to.cy - from.cy) || 1;
+    // perpendicular-to-chord ≈ the edge tangent for horizontal/vertical
+    // links; offsetting the seat directly along it spreads parallel ports
+    // a real N px apart (aiming a distant shifted target barely moves the
+    // edge exit). Clamped inside the edge so balls don't slide past a corner.
+    const perpX = -(to.cy - from.cy) / chLen, perpY = (to.cx - from.cx) / chLen;
+    const clampSpread = Math.max(-(Math.min(HW, HH) - 6), Math.min(Math.min(HW, HH) - 6, spread));
+    const baseFrom = perimeterSeat({ x: from.cx, y: from.cy }, { x: to.cx, y: to.cy }, HW, HH, 2);
+    const baseTo = perimeterSeat({ x: to.cx, y: to.cy }, { x: from.cx, y: from.cy }, HW, HH, 2);
+    const fromP = { x: baseFrom.x + perpX * clampSpread, y: baseFrom.y + perpY * clampSpread };
+    const toP = { x: baseTo.x + perpX * clampSpread, y: baseTo.y + perpY * clampSpread };
     if (opts.onLinkClick) {
-      const hit = off === 0
+      const hit = arc === 0
         ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })
-        : svgEl("path", { "class": "topo-link-hit", d: arcPath(fromP.x, fromP.y, toP.x, toP.y, off), fill: "none" });
+        : svgEl("path", { "class": "topo-link-hit", d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc), fill: "none" });
       const onLinkClick = opts.onLinkClick;
       hit.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -474,7 +537,7 @@ function renderTopologySVG(
       widthAttr = String(linkStrokeWidth(linkSpeedForLink(link, opts.speedsByDevice)));
     }
     const linkClass = "topo-link topo-elem--" + linkPalette + (linkDimmed ? " topo-link--dimmed" : "") + truthClass;
-    const line = off === 0
+    const line = arc === 0
       ? svgEl("line", {
           "class": linkClass,
           x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y),
@@ -482,7 +545,7 @@ function renderTopologySVG(
         })
       : svgEl("path", {
           "class": linkClass,
-          d: arcPath(fromP.x, fromP.y, toP.x, toP.y, off),
+          d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc),
           fill: "none",
           ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}),
         });
@@ -508,10 +571,9 @@ function renderTopologySVG(
       const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): void => {
         if (!dev || !iface) return;
         const st = opts.portStatesByDevice?.get(dev)?.get(iface);
-        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${portDotState(st)}`, cx: String(at.x), cy: String(at.y), r: "4" });
-        const title = svgEl("title", {});
-        title.textContent = portDotTooltip(iface, st);
-        dot.appendChild(title);
+        const state = portDotState(st);
+        const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(at.x), cy: String(at.y), r: "4", "aria-label": portDotTooltip(iface, st) });
+        attachFastTip(dot, () => buildPortTip(iface, st, state));
         svg.appendChild(dot);
       };
       ifaceDot(link.local_device, link.local_interface, fromP);

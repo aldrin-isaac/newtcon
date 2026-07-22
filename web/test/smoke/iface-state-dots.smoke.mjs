@@ -1,7 +1,8 @@
 // Browser smoke: per-link-end interface-state dots (operator request).
 //   1. Every drawn link end carries an interface-state dot in one of the
 //      four states (ok / down / admin-down / unknown).
-//   2. Each dot has a hover tooltip (native <title>) naming the port +
+//   2. Each dot exposes its port + admin/oper via aria-label (the screen-reader
+//      path; the visual tip is a fast custom overlay, not native <title>) —
 //      admin/oper. (Colored states are unit-tested + injection-verified;
 //      an undeployed fixture reads "unknown", which is honest and stable.)
 // Network-agnostic.
@@ -32,9 +33,9 @@ try {
     return {
       linkCount: links.length,
       dotCount: dots.length,
-      allHaveTitle: dots.every((d) => (d.querySelector("title")?.textContent || "").length > 0),
+      allHaveLabel: dots.every((d) => (d.getAttribute("aria-label") || "").length > 0),
       allValidState: dots.every((d) => [...d.classList].some((c) => c.startsWith("topo-iface-dot--"))),
-      sampleTitle: dots[0]?.querySelector("title")?.textContent || null,
+      sampleLabel: dots[0]?.getAttribute("aria-label") || null,
     };
   });
 
@@ -43,9 +44,9 @@ try {
   // should be within [linkCount, 2*linkCount].
   expect(info.dotCount <= info.linkCount * 2, "at most one dot per link end");
   expect(info.allValidState, "every dot carries a valid state class");
-  expect(info.allHaveTitle, "every dot has a hover tooltip");
-  expect(/admin:/.test(info.sampleTitle || "") && /oper:/.test(info.sampleTitle || ""),
-    `tooltip names port + admin/oper (${JSON.stringify(info.sampleTitle)})`);
+  expect(info.allHaveLabel, "every dot has an accessible label");
+  expect(/admin:/.test(info.sampleLabel || "") && /oper:/.test(info.sampleLabel || ""),
+    `label names port + admin/oper (${JSON.stringify(info.sampleLabel)})`);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
