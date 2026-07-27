@@ -33,10 +33,22 @@ const (
 	KindPreconditionFailure ErrorKind = "precondition_failure"
 
 	// KindNewtronUnavailable is returned when newtcon-server cannot reach
-	// newtron-server. Per operator-philosophy invariant #9 this is surfaced
-	// honestly — never silently retried.
+	// newtron-server — a transport failure (connection refused, DNS, timeout)
+	// or a 5xx with no usable body. The engine did not (meaningfully) answer.
+	// Per operator-philosophy invariant #9 this is surfaced honestly — never
+	// silently retried.
 	// See API_CONTRACT.md §details for kind: "newtron_unavailable".
 	KindNewtronUnavailable ErrorKind = "newtron_unavailable"
+
+	// KindEngineError is returned when newtron-server WAS reached and answered
+	// with a 5xx (or otherwise unexpected status) whose body carries a domain
+	// error message. The engine is reachable; it reported that the operation
+	// failed. Distinct from KindNewtronUnavailable so the operator sees the
+	// engine's actual reason ("service requires peer_as parameter") rather than
+	// a false "engine unreachable" that would send them chasing connectivity.
+	// (newtron returning 5xx for what is really a bad request is an engine-side
+	// status-code issue; newtcon still surfaces the message honestly.)
+	KindEngineError ErrorKind = "engine_error"
 
 	// KindInternal is the residual category for failures newtcon-server cannot
 	// attribute to a recognized substrate cause. The only durable handle is the

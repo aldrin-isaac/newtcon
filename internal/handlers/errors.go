@@ -30,6 +30,9 @@
 //                                     permission / resource surfaced in
 //                                     details so the UI can render
 //                                     "X lacks Y on Z"; newtcon#143)
+//   *newtronc.EngineError        → 502 KindEngineError (engine reached but
+//                                    reported a failure; its message surfaced,
+//                                    no health hint — the daemon is up)
 //   *newtronc.UnavailableError   → 503 (or 502 for lab) KindNewtronUnavailable
 //                                    with a default next_action_hint
 //   default                      → 500 KindInternal
@@ -119,6 +122,14 @@ func writeUpstreamErrorWithStatus(w http.ResponseWriter, corrID string, err erro
 		setIfAbsent(details, "underlying_error_message", e.Error())
 		types.WriteError(w, http.StatusForbidden, types.KindAuthorizationFailure,
 			fmt.Sprintf("%s: %s", endpoint, e.Error()), details)
+	case *newtronc.EngineError:
+		// The engine WAS reached and reported a failure. Surface its reason as
+		// the operator-facing detail — NOT "engine unreachable", and no
+		// health-check hint (the daemon is up). 502: upstream returned an error
+		// response. See types.KindEngineError.
+		setIfAbsent(details, "underlying_error_message", e.Message())
+		types.WriteError(w, http.StatusBadGateway, types.KindEngineError,
+			fmt.Sprintf("%s: engine error", endpoint), details)
 	case *newtronc.UnavailableError:
 		setIfAbsent(details, "underlying_error", upstreamErrorKind(e))
 		setIfAbsent(details, "underlying_error_message", e.Cause)

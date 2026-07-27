@@ -125,7 +125,11 @@ export const INTERFACE_ACTIONS: ActionGroup[] = [
           { name: "service",    label: "Service",       type: "text",   required: true, hint: "Name of an existing service spec" },
           { name: "vlan",       label: "VLAN (opt)",    type: "number" },
           { name: "ip_address", label: "IP (CIDR, opt)", type: "text" },
-          { name: "peer_as",    label: "Peer ASN (opt)", type: "number" },
+          // Peer ASN is required for BGP-peering services (the service spec
+          // marks routing.peer_as "request"); the form promotes it to required
+          // on service select — see service-params.ts + openIfaceForm. No
+          // static "(opt)" suffix because its optionality is per-service.
+          { name: "peer_as",    label: "Peer ASN",      type: "number", hint: "AS number of the BGP peer" },
         ],
       },
       // remove-service / refresh-service take no body

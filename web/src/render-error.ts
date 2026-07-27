@@ -35,6 +35,7 @@ export function translateErrorKind(kind: string): string {
     case "authorization_failure":  return "not permitted";
     case "authentication_failure": return "not signed in";
     case "newtron_unavailable":    return "engine unreachable";
+    case "engine_error":           return "engine error";
     case "internal":               return "engine error";
     default:                       return kind.replace(/_/g, " ");
   }
