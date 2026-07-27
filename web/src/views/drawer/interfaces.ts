@@ -24,6 +24,7 @@ import { type InterfaceStatus, counterPairs, formatBps, formatPps, hasCounterAle
 import { type IrbRow, deriveIrbRows, macvpnVlanHints, pendingCreateVlanIds } from "../../irb-interfaces.js";
 import { comparePorts } from "../../port-config.js";
 import { formatErrorBrief } from "../../render-error.js";
+import { requestedParams } from "../../service-params.js";
 import { renderSchemaForm } from "../../schema-form.js";
 import { deviceQueue, enqueueDeviceAction, enqueueInterfaceAction, enqueuePortConfig, enqueueTopologyRemoveLink } from "../../staging.js";
 import { showToast } from "../../toast.js";
@@ -699,11 +700,34 @@ function openIfaceForm(formHost: HTMLElement, device: string, iface: string, act
   if (!action) return;
   const form = el("form", { className: "vform vform--tight vform--card iface-action-form" });
   form.appendChild(el("p", { className: "iface-action-form-title" }, `${action.label} · ${iface}`));
-  const reads: Array<{ field: ActionField; get: () => string | number }> = [];
+  const reads: Array<{ field: ActionField; get: () => string | number; setRequired: (req: boolean) => void }> = [];
+  // Fields a service requires at bind time (e.g. peer_as for a BGP service),
+  // resolved from the selected service's spec — see refreshServiceRequirements.
+  const dynamicRequired = new Set<string>();
+  // Re-read the selected service's spec and promote any "request" params
+  // (service-params.ts) to required, so the operator fills them before submit
+  // instead of the engine rejecting the apply. Only relevant for apply-service.
+  const refreshServiceRequirements = async (serviceName: string): Promise<void> => {
+    dynamicRequired.clear();
+    for (const r of reads) r.setRequired(r.field.required ?? false);
+    if (action.id !== "apply-service" || !serviceName) return;
+    try {
+      const resp = await fetch(apiPath("services/" + encodeURIComponent(serviceName)), { cache: "no-store" });
+      if (!resp.ok) return;
+      const detail = await resp.json();
+      for (const param of requestedParams(detail)) {
+        dynamicRequired.add(param);
+        reads.find((r) => r.field.name === param)?.setRequired(true);
+      }
+    } catch { /* couldn't load spec — leave fields optional, engine still guards */ }
+  };
   for (const field of action.fields ?? []) {
-    const r = renderActionField(field);
+    const onServiceChange = field.name === "service"
+      ? (name: string) => { void refreshServiceRequirements(name); }
+      : undefined;
+    const r = renderActionField(field, onServiceChange);
     form.appendChild(r.row);
-    reads.push({ field, get: r.get });
+    reads.push({ field, get: r.get, setRequired: r.setRequired });
   }
   const errOut = el("div", { className: "form-error-out" });
   form.appendChild(errOut);
@@ -720,7 +744,7 @@ function openIfaceForm(formHost: HTMLElement, device: string, iface: string, act
     const values: Record<string, unknown> = {};
     for (const { field, get } of reads) {
       const v = get();
-      if (field.required && (v === "" || v === undefined)) {
+      if ((field.required || dynamicRequired.has(field.name)) && (v === "" || v === undefined)) {
         errOut.appendChild(el("p", { className: "panel-error" }, `${field.label} is required.`));
         return;
       }
@@ -734,10 +758,19 @@ function openIfaceForm(formHost: HTMLElement, device: string, iface: string, act
 }
 
 // renderActionField renders one interface action field (text / number / select).
-// The "service" field is a dropdown populated from the network's services.
-function renderActionField(field: ActionField): { row: HTMLElement; get: () => string | number } {
+// The "service" field is a dropdown populated from the network's services;
+// onServiceChange fires when its selection changes (used to resolve per-service
+// required fields). setRequired toggles the field's trailing " *" marker at
+// runtime so a conditionally-required field (e.g. peer_as for a BGP service)
+// reads correctly after the service is picked.
+function renderActionField(
+  field: ActionField,
+  onServiceChange?: (name: string) => void,
+): { row: HTMLElement; get: () => string | number; setRequired: (req: boolean) => void } {
   const row = el("div", { className: "iface-field" });
-  row.appendChild(el("label", { className: "iface-field-label" }, field.label + (field.required ? " *" : "")));
+  const labelEl = el("label", { className: "iface-field-label" }, field.label + (field.required ? " *" : ""));
+  row.appendChild(labelEl);
+  const setRequired = (req: boolean): void => { labelEl.textContent = field.label + (req ? " *" : ""); };
   if (field.name === "service") {
     const sel = el("select", { className: "form-control" }) as HTMLSelectElement;
     sel.appendChild(new Option("Loading…", ""));
@@ -749,8 +782,9 @@ function renderActionField(field: ActionField): { row: HTMLElement; get: () => s
         for (const s of (d as { services?: { name: string }[] }).services ?? []) sel.appendChild(new Option(s.name, s.name));
       })
       .catch(() => { sel.textContent = ""; sel.appendChild(new Option("(couldn't load services)", "")); });
+    if (onServiceChange) sel.addEventListener("change", () => onServiceChange(sel.value));
     row.appendChild(sel);
-    return { row, get: () => sel.value };
+    return { row, get: () => sel.value, setRequired };
   }
   const input = el("input", { type: field.type === "number" ? "number" : "text", className: "form-control" }) as HTMLInputElement;
   if (field.hint) input.placeholder = field.hint;
@@ -760,6 +794,7 @@ function renderActionField(field: ActionField): { row: HTMLElement; get: () => s
     get: () => field.type === "number"
       ? (input.value.trim() === "" ? "" : Number(input.value))
       : input.value.trim(),
+    setRequired,
   };
 }
 

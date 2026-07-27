@@ -116,9 +116,21 @@ func TestClassifyResponse(t *testing.T) {
 			403, "Forbidden", []int{200}, "*newtronc.AuthorizationError"},
 		{"404 → NotFoundError", 404, "not found body", []int{200}, "*newtronc.NotFoundError"},
 		{"409 → ConflictError", 409, "conflict body", []int{200}, "*newtronc.ConflictError"},
-		{"500 → UnavailableError", 500, "server error", []int{200}, "*newtronc.UnavailableError"},
-		{"503 → UnavailableError", 503, "unavail", []int{200}, "*newtronc.UnavailableError"},
-		{"418 → UnavailableError (unexpected)", 418, "teapot", []int{200}, "*newtronc.UnavailableError"},
+		{"500 opaque body → UnavailableError", 500, "server error", []int{200}, "*newtronc.UnavailableError"},
+		{"503 opaque body → UnavailableError", 503, "unavail", []int{200}, "*newtronc.UnavailableError"},
+		{"418 opaque body → UnavailableError (unexpected)", 418, "teapot", []int{200}, "*newtronc.UnavailableError"},
+		// A 5xx whose body carries newtron's {"error":"…"} envelope means the
+		// engine ANSWERED with a domain failure — EngineError, not unreachable.
+		{"500 with error envelope → EngineError", 500,
+			`{"error":"BGP peering config for Ethernet0: service requires peer_as parameter"}`,
+			[]int{200}, "*newtronc.EngineError"},
+		{"503 with error envelope → EngineError", 503,
+			`{"error":"reload in progress"}`, []int{200}, "*newtronc.EngineError"},
+		{"500 empty body → UnavailableError", 500, "", []int{200}, "*newtronc.UnavailableError"},
+		{"500 with empty error string → UnavailableError", 500,
+			`{"error":""}`, []int{200}, "*newtronc.UnavailableError"},
+		{"418 with error envelope → EngineError (unexpected)", 418,
+			`{"error":"teapot is steeping"}`, []int{200}, "*newtronc.EngineError"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +148,28 @@ func TestClassifyResponse(t *testing.T) {
 			want := strings.TrimPrefix(strings.TrimPrefix(tc.wantType, "*"), "newtronc.")
 			if got != want {
 				t.Errorf("type: want *%s, got *%s", want, got)
+			}
+		})
+	}
+}
+
+func TestEngineError_Message(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"unwraps error envelope",
+			`{"error":"service requires peer_as parameter"}`,
+			"service requires peer_as parameter"},
+		{"falls back to raw non-envelope body", "boom (goroutine dump)", "boom (goroutine dump)"},
+		{"trims whitespace-only wrapper", "  \n  ", "engine returned status 500"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &EngineError{StatusCode: 500, Body: []byte(tc.body)}
+			if got := e.Message(); got != tc.want {
+				t.Errorf("Message():\n  want %q\n  got  %q", tc.want, got)
 			}
 		})
 	}

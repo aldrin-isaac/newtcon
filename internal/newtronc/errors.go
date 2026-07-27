@@ -8,17 +8,22 @@
 package newtronc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
 )
 
-// UnavailableError is returned when newtron-server is unreachable or returns a
-// 5xx status. It maps to types.KindNewtronUnavailable.
+// UnavailableError is returned when newtron-server is genuinely unreachable —
+// a transport-level failure (connection refused, DNS, timeout) or a 5xx with
+// no usable body. It maps to types.KindNewtronUnavailable.
+//
+// A 5xx WHOSE BODY carries a domain message ({"error": "…"}) is NOT this — the
+// engine answered, so it becomes an *EngineError instead (see classifyResponse).
 //
 // The Cause field carries the original transport error or the response body
-// for 5xx responses, verbatim, for upstream inspection by handlers.
+// for bodyless 5xx responses, verbatim, for upstream inspection by handlers.
 type UnavailableError struct {
 	// StatusCode is the HTTP status code from newtron-server, or 0 for
 	// transport-level failures (connection refused, DNS failure, timeout).
@@ -34,6 +39,39 @@ func (e *UnavailableError) Error() string {
 		return fmt.Sprintf("newtron-server returned %d: %s", e.StatusCode, e.Cause)
 	}
 	return fmt.Sprintf("newtron-server unreachable: %s", e.Cause)
+}
+
+// EngineError is returned when newtron-server WAS reached and answered with a
+// 5xx (or otherwise unexpected status) whose body carries a domain error
+// message. It maps to types.KindEngineError. The engine is reachable; it
+// reported that the operation failed — so the operator must see the reason, not
+// a false "engine unreachable".
+//
+// Body is newtron's verbatim response. Message unwraps the {"error": "…"}
+// envelope; handlers surface it as details.underlying_error_message.
+type EngineError struct {
+	StatusCode int
+	Body       []byte
+}
+
+func (e *EngineError) Error() string {
+	return fmt.Sprintf("newtron-server engine error (%d): %s", e.StatusCode, string(e.Body))
+}
+
+// Message unwraps newtron's {"error": "…"} envelope to the inner reason. Falls
+// back to the trimmed raw body when it isn't that shape, and to a status-only
+// string when the body is empty.
+func (e *EngineError) Message() string {
+	var env struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(e.Body, &env); err == nil && env.Error != "" {
+		return env.Error
+	}
+	if s := string(bytes.TrimSpace(e.Body)); s != "" {
+		return s
+	}
+	return fmt.Sprintf("engine returned status %d", e.StatusCode)
 }
 
 // ValidationError is returned when newtron-server returns a 400 with a
@@ -172,8 +210,10 @@ func decodeAuthorizationError(statusCode int, body []byte) *AuthorizationError {
 //	403 → *AuthorizationError (decoded from the envelope body)
 //	404 → *NotFoundError
 //	409 → *ConflictError
-//	5xx → *UnavailableError (StatusCode + body as Cause)
-//	other → *UnavailableError ("unexpected status N: <body>")
+//	5xx with {"error":"…"} body → *EngineError (engine answered; surface reason)
+//	5xx bodyless/opaque       → *UnavailableError (StatusCode + body as Cause)
+//	other with {"error"} body → *EngineError
+//	other bodyless            → *UnavailableError ("unexpected status N: <body>")
 //
 // Before this helper, every newtronc method had its own status switch — same
 // shape, 15 copies, diverging case sets (some had Conflict, some didn't, etc.).
@@ -197,10 +237,32 @@ func classifyResponse(statusCode int, body []byte, successCodes ...int) error {
 		return &ConflictError{StatusCode: statusCode, Body: body}
 	}
 	if statusCode >= 500 {
+		// A 5xx whose body carries a domain message ({"error": "…"}) means the
+		// engine ANSWERED — it's reachable and reported a failure. Surface that
+		// as an *EngineError so the operator sees the reason, not a false
+		// "engine unreachable". A bodyless / opaque 5xx is a true unavailable.
+		if engineErrorHasMessage(body) {
+			return &EngineError{StatusCode: statusCode, Body: body}
+		}
 		return &UnavailableError{StatusCode: statusCode, Cause: string(body)}
+	}
+	// Any other unexpected status: same rule — a domain message means the engine
+	// answered (EngineError); otherwise it's genuinely unclassifiable.
+	if engineErrorHasMessage(body) {
+		return &EngineError{StatusCode: statusCode, Body: body}
 	}
 	return &UnavailableError{
 		StatusCode: statusCode,
 		Cause:      fmt.Sprintf("unexpected status %d: %s", statusCode, string(body)),
 	}
+}
+
+// engineErrorHasMessage reports whether body is newtron's {"error": "…"}
+// envelope with a non-empty message — the signal that the engine answered with
+// a domain error rather than being unreachable.
+func engineErrorHasMessage(body []byte) bool {
+	var env struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(body, &env) == nil && env.Error != ""
 }
