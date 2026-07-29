@@ -83,7 +83,16 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     index.html                → root workspace HTML
     dom.ts                    → el() + renderValue — the shared DOM helpers (consolidated from four per-module copies; uplift 1.1). renderValue redacts ssh_pass at any depth
     views/                    → workspace view registry (registry.ts + index.ts): top-level views register {panelId, mount, remountOnActivate}; the tab dispatcher consults viewFor(). History + Audit are residents; drawer/Topology migrate in uplift 1.3–1.4
-    views/specs/              → the Specs view (uplift 1.2): PANELS discovery, facet subnav + General section (SSH Login/Permissions), facet panels, create/edit/override drawers, sub-rule tables, spec detail + openDetail/closeDetail
+    views/specs/              → the Specs view (uplift 1.2), decomposed one-concern-per-file; index.ts re-exports the public API (openDetail/closeDetail/displaySchemaFor/kindTitleFor/specsViewDegraded/applySpecsRoute/mountSpecsView) so the split stays internal
+      index.ts                → view entry: mount, facet subnav + General section, active-facet state, applySpecsRoute + the public re-export barrel
+      panels.ts               → the facet catalog: schema-driven PANELS discovery (cached, accessor-only), kindTitleFor, specsViewDegraded, SPEC_GROUPS + resolveGroupings
+      facet-panels.ts         → the per-facet list: loadFacetRows, scope-nested rows (base + zone/node overrides), + Add / + override / × affordances, empty states, sample-seed quickstart
+      detail.ts               → the spec detail drawer: openDetail/closeDetail + the cross-reference sections (a service's Bindings; "Used by services" for every other kind)
+      drawers.ts              → the authoring drawers: create, edit, and "add override" (schema-driven, with the legacy specForms fallback); all stage onto the pending queue
+      subrules.ts             → the sub-rule inline table (slice #173): the per-kind subRuleTables definitions AND their renderers (add/edit/delete/reorder), kept together as the single source of truth
+      fields.ts               → the legacy FieldDef vocabulary: PATTERNS, specForms, displaySchemaFor, isEditableKind, buildFormFields (fallback path + the shape sub-rule forms use)
+      ssh-login.ts            → the General → SSH Login facet: scoped ssh_user/ssh_pass authoring via the ${secret:} store
+      route-state.ts          → announceRoute — the view's "newtcon:route-state" announce to router.ts
     views/drawer/             → the device drawer (uplift 1.3): index.ts = drawer core (NODE_TABS + loadNodeTab dispatch, openNodeDrawer + header, Drift/Config-DB/History tabs, lifecycle section, link drawer, shared detail-render helpers); interfaces.ts = Interfaces tab + IRB section; state.ts = State tab + Debug tab (Config DB / Projection / Intent Tree). 
     views/topology/           → the Topology view (uplift 1.4): SVG canvas + layered palette, viewport pan/zoom, layout cache, view-mode/zone/toolbar chrome, Add-link drawer, lab lifecycle modals + SSE, newtlab status poll, mountTopologyTab
     app.ts                    → workspace entry only: mount() + drawer-chrome wiring (~60 lines; every view lives in views/, navigation in router.ts)
