@@ -94,7 +94,16 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
       ssh-login.ts            → the General → SSH Login facet: scoped ssh_user/ssh_pass authoring via the ${secret:} store
       route-state.ts          → announceRoute — the view's "newtcon:route-state" announce to router.ts
     views/drawer/             → the device drawer (uplift 1.3): index.ts = drawer core (NODE_TABS + loadNodeTab dispatch, openNodeDrawer + header, Drift/Config-DB/History tabs, lifecycle section, link drawer, shared detail-render helpers); interfaces.ts = Interfaces tab + IRB section; state.ts = State tab + Debug tab (Config DB / Projection / Intent Tree). 
-    views/topology/           → the Topology view (uplift 1.4): SVG canvas + layered palette, viewport pan/zoom, layout cache, view-mode/zone/toolbar chrome, Add-link drawer, lab lifecycle modals + SSE, newtlab status poll, mountTopologyTab
+    views/topology/           → the Topology view (uplift 1.4), decomposed one-concern-per-file; index.ts re-exports the public API (mountTopologyTab/stopTopologyPoll/isProvisioning/TopoLink) so the split stays internal
+      index.ts                → mount orchestration: owns the view's live state (view mode, lens, zone filter, viewport, pinned positions, palette/status-text maps, cached lab state) + the render fns that read it, and the public re-export barrel
+      canvas.ts               → the SVG renderer: topology shape adapter, layout cache (+ resetLayoutCache), zones, links (neighbour-aware seating + occlusion routing + live drag-follow), device cards, badges, pan/zoom wiring
+      chrome.ts               → static canvas furniture: zoom toolbar, nav hint, link-truth legend, empty state (pure builders; stateful chip rows stay in index.ts)
+      device-probe.ts         → probeDevices: the per-device fan-out (reachability, drift, LLDP, port state/speeds, LAG members, underlay health), all best-effort
+      status-poll.ts          → the 5s newtlab-status poll + patchDeviceStatuses (in-place DOM patch, never a re-render) + stopTopologyPoll
+      live-heat.ts            → the Live lens's per-link heat poll (createHeatPoll factory; owns its timer so stopTopologyPoll can kill it)
+      lab-ops.ts              → deploy / provision modals over a shared SSE-streaming shell + the provisioning marker (isProvisioning)
+      add-link.ts             → the Add-link drawer (platform-inventory endpoint pickers + inline "configure with defaults")
+      port-tip.ts             → the fast hover tip for canvas dots (singleton overlay; native <title> is ~1s slow)
     app.ts                    → workspace entry only: mount() + drawer-chrome wiring (~60 lines; every view lives in views/, navigation in router.ts)
     route.ts                  → pure hash-route codec (uplift 2.4): parseHash/formatHash for #/{net}/{view}[+params] + retargetHashToNetwork
     router.ts                 → navigation owner (uplift 2.4): tab switching (was app.ts setupTabs), hash ↔ state sync, deep-link apply on boot, back/forward via hashchange; views announce params via "newtcon:route-state" CustomEvents
