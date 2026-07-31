@@ -62,17 +62,35 @@ export async function applySpecsRoute(facet?: string, detail?: string): Promise<
   }
 }
 
+// mountGeneration — mounts are CONCURRENT by design. app.ts fires
+// mountSpecsView() and startRouter() together without awaiting the first
+// ("serializing on its facet fetches blocked deep links"), so the router's
+// applySpecsRoute can start a second mount while the first is still awaiting
+// loadPanels() / the count fetches.
+//
+// That made the view stack DUPLICATE layouts: the old code cleared `root`
+// BEFORE its awaits and appended AFTER them, so two in-flight mounts each
+// cleared, then each appended — measured in the live app as layouts:2,
+// mains:2, subnavs:2, with a stale facet's panel sitting beside the current
+// one. Each mount now claims a generation and bails the moment a newer one
+// starts, and the winner swaps its layout in atomically at the end (the same
+// build-detached-then-replace discipline renderSSHLoginInto uses). Last mount
+// wins; `root` is never left half-built.
+let mountGeneration = 0;
+
 export async function mountSpecsView(root: HTMLElement): Promise<void> {
   lastRoot = root;
-  root.textContent = "";
+  const generation = ++mountGeneration;
+  const superseded = (): boolean => generation !== mountGeneration;
+
   // Schema-driven panel discovery — fetch the kind list before
   // building the subnav. Cached for the session after the first call.
   await loadPanels();
+  if (superseded()) return;
 
   if (panels().length === 0) {
     // Schema unavailable — render an explicit, retryable error state instead
     // of a dead empty subnav (#390).
-    root.textContent = "";
     const box = el("div", { className: "panel-empty specs-degraded" });
     box.appendChild(el("h3", {}, "Couldn't load the spec catalog"));
     box.appendChild(el("p", {},
@@ -80,15 +98,16 @@ export async function mountSpecsView(root: HTMLElement): Promise<void> {
     const retry = el("button", { type: "button", className: "btn btn-primary btn-sm" }, "Retry");
     retry.addEventListener("click", () => { void mountSpecsView(root); });
     box.appendChild(retry);
-    root.appendChild(box);
+    root.replaceChildren(box);
     return;
   }
 
+  // Built DETACHED — nothing reaches `root` until the atomic swap below, so a
+  // superseded mount can never leave a partial layout behind.
   const layout = el("div", { className: "specs-layout" });
   const subnav = el("aside", { className: "specs-subnav" });
   const main = el("div", { className: "specs-main" });
   layout.append(subnav, main);
-  root.appendChild(layout);
 
   // Fetch counts in parallel for the subnav badges.
   const counts = new Map<SpecKind, number | "error">();
@@ -102,6 +121,7 @@ export async function mountSpecsView(root: HTMLElement): Promise<void> {
       }
     }),
   );
+  if (superseded()) return;
 
   function renderSubnav(): void {
     subnav.textContent = "";
@@ -209,7 +229,13 @@ export async function mountSpecsView(root: HTMLElement): Promise<void> {
   }
 
   renderSubnav();
+  // Swap the finished layout in BEFORE the facet's own fetch, so the operator
+  // sees the subnav immediately rather than staring at the previous view for
+  // another round-trip. One atomic replace — concurrent mounts can only ever
+  // leave exactly one layout in `root`.
+  root.replaceChildren(layout);
   await renderActiveFacet();
+  if (superseded()) return;
 
   // Subscribe to the staging queue so pending creates/deletes re-render the
   // active facet immediately (green/red overlays + after-Save refresh).

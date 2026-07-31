@@ -127,13 +127,14 @@ try {
 
   // ─── Cleanup: queue a delete then Save ──────────────────────────
   console.log(`→ queue delete zone "${zoneName}"`);
-  // NOTE: this step is intermittently ineffective, and the cause is a PRODUCT
-  // bug, not test timing — mountSpecsView can double-mount, leaving two full
-  // .specs-layout trees in the DOM (measured: layouts:2, mains:2, subnavs:2).
-  // The row this clicks may then belong to the abandoned mount, so the click
-  // no-ops (it optional-chains away) and the delete never queues. The teardown
-  // in `finally` makes that harmless — the zone is removed either way — but the
-  // assertions below can still fail until the double-mount is fixed.
+  // This step used to be intermittently ineffective (~40% of runs), and the
+  // cause was a PRODUCT bug rather than test timing: mountSpecsView
+  // double-mounted, leaving two full .specs-layout trees in the DOM (measured
+  // layouts:2, mains:2, subnavs:2), so the row clicked here could belong to the
+  // abandoned mount — the click optional-chains away and the delete never
+  // queues. Fixed by making mountSpecsView last-mount-wins (generation guard +
+  // atomic swap). The teardown in `finally` stays regardless: it's what keeps a
+  // failure ANYWHERE after the create-Save from stranding the zone.
   await page.evaluate((n) => {
     const rows = Array.from(document.querySelectorAll(".panel-list-row"));
     const row = rows.find((r) => r.querySelector(".panel-list-item")?.textContent.trim() === n);
