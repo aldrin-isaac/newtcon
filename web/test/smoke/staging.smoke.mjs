@@ -127,6 +127,13 @@ try {
 
   // ─── Cleanup: queue a delete then Save ──────────────────────────
   console.log(`→ queue delete zone "${zoneName}"`);
+  // NOTE: this step is intermittently ineffective, and the cause is a PRODUCT
+  // bug, not test timing — mountSpecsView can double-mount, leaving two full
+  // .specs-layout trees in the DOM (measured: layouts:2, mains:2, subnavs:2).
+  // The row this clicks may then belong to the abandoned mount, so the click
+  // no-ops (it optional-chains away) and the delete never queues. The teardown
+  // in `finally` makes that harmless — the zone is removed either way — but the
+  // assertions below can still fail until the double-mount is fixed.
   await page.evaluate((n) => {
     const rows = Array.from(document.querySelectorAll(".panel-list-row"));
     const row = rows.find((r) => r.querySelector(".panel-list-item")?.textContent.trim() === n);
@@ -154,5 +161,15 @@ try {
   console.error("test threw:", err.stack || err.message);
   process.exitCode = 1;
 } finally {
+  // Teardown must NOT depend on the UI delete above having run. The zone is
+  // written to newtron's spec dir the moment the create Save lands, so any
+  // failure after that point — a throw, a selector timeout, or the UI delete
+  // simply not finding its row — used to strand a zone_tNNNN file in the
+  // newtron working tree. Delete it through the API unconditionally and
+  // best-effort, matching the teardown-in-finally pattern node-scaffold /
+  // override-delete / specs-drawer-edit already use.
+  try {
+    await fetch(zoneUrl(zoneName), { method: "DELETE", headers: AUTH });
+  } catch { /* newtcon unreachable or already gone — nothing more to do */ }
   await browser.close();
 }
