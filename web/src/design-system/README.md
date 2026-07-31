@@ -1,16 +1,22 @@
 # newtcon design system
 
-Four CSS files that define the visual vocabulary for every newtcon surface.
+Five CSS files that define the visual vocabulary for every newtcon surface.
 All tokens are CSS custom properties (variables) on `:root`.
+
+> **This file is normative for token NAMES.** If a name here doesn't resolve,
+> that's a bug in this document — check the `.css` file and fix the doc in the
+> same PR. An undefined `var()` fails silently, so a stale name here costs a
+> contributor real debugging time.
 
 ## Files
 
 | File | What it defines |
 |------|-----------------|
-| `color.css` | Six named semantic colors |
-| `typography.css` | Three font stacks, five type sizes, three line heights |
-| `spacing.css` | Seven spacing steps plus two content-width measures |
-| `motion.css` | Two easing curves, three duration tokens |
+| `color.css` | Semantic color roles, light + dark |
+| `typography.css` | Three font stacks, nine type sizes, four line heights, the two measures |
+| `spacing.css` | Nine spacing steps (t-shirt scale) |
+| `motion.css` | Four easing curves, six duration tokens |
+| `components.css` | Shared primitives (chip, `.sr-only`, `.skip-link`, focus ring) |
 
 Each surface imports the four files it needs. A surface-specific stylesheet
 then writes rules in terms of those tokens — no raw hex values, no raw pixel
@@ -18,26 +24,33 @@ sizes outside the token scale.
 
 ## Colors
 
-Six semantic colors. Each has one meaning; no color is decorative.
+Color is organised as ROLE FAMILIES, not a fixed count. Each family has one
+meaning; within a family, suffixes are steps of the same idea. No color is
+decorative, and no rule outside `color.css` may write a raw hex value (the
+`raw_colors_workspace` ratchet enforces this at 0).
 
-| Token | Role |
-|-------|------|
-| `--color-surface` | Base page background |
-| `--color-surface-elevated` | Header, footer, cards — creates depth without noise |
-| `--color-text-primary` | All primary content: headings, table cells, labels |
-| `--color-text-secondary` | Supporting text: subtitles, column headers, status indicators |
-| `--color-accent` | Links, active nav indicator, type badges, inline code backgrounds |
-| `--color-danger` | Error containers only — intentionally muted, not alarm-red |
+| Family | Role |
+|--------|------|
+| `--color-bg-*` | Page + app-shell backgrounds |
+| `--color-surface-*` | Raised planes: cards, header, drawer, hover states |
+| `--color-text-*` | `primary` / `secondary` / `muted` / `inverse` |
+| `--color-border-*` | `subtle` / `default` / `strong` |
+| `--color-accent-*` | Interactive + active state |
+| `--color-success-*`, `--color-warning-*`, `--color-danger-*`, `--color-info-*` | Status |
+| `--color-drift-*` | Intent-vs-reality divergence — its own signal, not a warning |
+| `--color-terminal-*` | Log + console surfaces |
+| `--color-focus-ring` | The one focus indicator |
+| `--color-scrim` | Modal/overlay backdrop |
 
-The cap is six. Restraint is the discipline: every color the operator sees should
-have a name they can state. "Accent" means interactive or type-distinguishing.
-"Danger" means attention needed. No color should be "blue-ish for variety."
+The discipline is not a numeric cap — it's that every color the operator sees
+has a role they can state. "Accent" means interactive. "Drift" means intent and
+reality disagree. Nothing is "blue-ish for variety."
 
 ## Typography
 
 Three font stacks:
 
-- `--font-sans` — domain vocabulary, navigation, prose. System typeface.
+- `--font-system` — domain vocabulary, navigation, prose. System typeface.
 - `--font-mono` — substrate values: type badges, error codes, inline code.
   Leads with **JetBrains Mono** (vendored woff2 in `fonts/`, OFL-1.1 — license
   alongside), falling back to the system mono stack while it loads
@@ -45,35 +58,46 @@ Three font stacks:
   "live numbers never shift layout"; `font-variant-numeric: tabular-nums` on
   `body` extends that to proportional text on platforms whose fonts ship `tnum`.
   Signals "this is a value you can copy and use in a terminal."
-- `--font-ui` — currently `--font-sans`; split reserved for a future ADR.
+- `--font-display` — page-level headings only, where a distinct voice earns
+  its keep. Never for body copy.
 
-Five type sizes (`--text-xs` through `--text-xl`). Match each size to its
-semantic role, not to an arbitrary visual preference:
+Nine type sizes, `--text-2xs` (0.6875rem) through `--text-display` (2.25rem).
+Match each size to its semantic role, not to a visual preference:
 
+- `--text-2xs` — dense table cells, canvas labels
 - `--text-xs` — column headers (uppercase, letter-spaced)
 - `--text-sm` — badges, footnotes, secondary labels, error detail lines
 - `--text-base` — body text, table cells, primary prose
-- `--text-lg` — reserved for section headings
-- `--text-xl` — page-level `<h1>`
+- `--text-md` / `--text-lg` — section headings
+- `--text-xl` / `--text-2xl` — page-level headings
+- `--text-display` — the one hero size; sparing
+
+Four line heights: `--leading-tight` / `--leading-snug` / `--leading-normal` /
+`--leading-prose`.
 
 ## Spacing
 
-A 4px-base numeric scale (`--space-1` through `--space-8`). Use scale values
-only — no ad-hoc rem/px values in layout rules. If no scale value fits, file an
-Architecture-class PR to extend the scale.
+A 4px-derived t-shirt scale, `--space-3xs` (2px) through `--space-3xl` (64px):
+2 / 4 / 6 / 10 / 16 / 24 / 32 / 48 / 64. Use scale values only — no ad-hoc
+rem/px in layout rules. If nothing fits, extend the scale in a PR that says why.
 
-Two content-width measures:
-- `--measure-prose` — 60ch for readable prose lines (subtitles, error messages)
-- `--measure-page` — 72rem for the main column
+Two content-width measures (declared in `typography.css`, since they're
+reading-length constraints):
+- `--measure-prose` — 65ch for readable prose lines (subtitles, error messages)
+- `--measure-page` — 88rem for the main column
 
 ## Motion
 
-Two easing curves and three duration tokens. Motion carries information; it
-is never decorative. The rules:
+Four easing curves (`--ease-standard` / `--ease-decelerate` / `--ease-accelerate`
+/ `--ease-spring`) and six duration tokens. Motion carries information; it is
+never decorative:
 
-- `--duration-fast` (80ms): hover highlights, focus rings
-- `--duration-base` (160ms): content fade-in (loading to resolved)
-- `--duration-slow` (300ms): reserved for panel slides in future surfaces
+- `--duration-instant` (80ms): focus rings, immediate affordance feedback
+- `--duration-fast` (120ms): hover highlights
+- `--duration-base` (180ms): content fade-in (loading to resolved)
+- `--duration-slow` (240ms): larger content transitions
+- `--duration-drawer` (280ms): the drawer slide
+- `--duration-slower` (360ms): the longest deliberate move
 
 All durations collapse to 0ms under `prefers-reduced-motion: reduce`.
 

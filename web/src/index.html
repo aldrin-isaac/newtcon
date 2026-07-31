@@ -13,6 +13,11 @@
     <link rel="stylesheet" href="auth-gate.css" />
   </head>
   <body>
+    <!-- Skip link: first thing in the tab order, visible only when focused.
+         This is a keyboard-first tool and the sidebar sits ahead of the
+         content on every view — without this, reaching the workspace means
+         tabbing past the whole nav each time. -->
+    <a class="skip-link" href="#app-content">Skip to content</a>
     <div class="app-shell">
 
       <aside class="app-sidebar" aria-label="Primary">
@@ -20,23 +25,30 @@
           <span class="brand-mark">N</span>
           <span class="brand-name">Newtron Console</span>
         </div>
-        <nav class="nav" role="navigation" aria-label="Workspaces">
-          <button type="button" id="tab-specs" class="nav-item nav-item--active" role="tab" aria-selected="true">
-            <span class="nav-icon" data-icon="list"></span>
+        <!-- Workspace navigation. These are LINKS, not tabs: each workspace has
+             its own URL (#/{net}/{view}), so this is navigation between
+             addressable views, not a tab widget over one document. The href is
+             filled in by the router (it needs the active network) and keeps
+             middle-click / Cmd-click / "open in new tab" working; a plain click
+             is intercepted for in-page navigation. aria-current="page" marks
+             the active one. -->
+        <nav class="nav" aria-label="Workspaces">
+          <a id="tab-specs" class="nav-item nav-item--active" href="#" aria-current="page">
+            <span class="nav-icon" data-icon="list" aria-hidden="true"></span>
             <span class="nav-label">Specs</span>
-          </button>
-          <button type="button" id="tab-topology" class="nav-item" role="tab" aria-selected="false">
-            <span class="nav-icon" data-icon="network"></span>
+          </a>
+          <a id="tab-topology" class="nav-item" href="#">
+            <span class="nav-icon" data-icon="network" aria-hidden="true"></span>
             <span class="nav-label">Topology</span>
-          </button>
-          <button type="button" id="tab-history" class="nav-item" role="tab" aria-selected="false">
-            <span class="nav-icon" data-icon="activity"></span>
+          </a>
+          <a id="tab-history" class="nav-item" href="#">
+            <span class="nav-icon" data-icon="activity" aria-hidden="true"></span>
             <span class="nav-label">Changes</span>
-          </button>
-          <button type="button" id="tab-audit" class="nav-item" role="tab" aria-selected="false">
-            <span class="nav-icon" data-icon="server"></span>
+          </a>
+          <a id="tab-audit" class="nav-item" href="#">
+            <span class="nav-icon" data-icon="server" aria-hidden="true"></span>
             <span class="nav-label">Audit</span>
-          </button>
+          </a>
         </nav>
         <div class="sidebar-footer">
           <button type="button" class="theme-toggle" id="theme-toggle" title="Switch color theme">

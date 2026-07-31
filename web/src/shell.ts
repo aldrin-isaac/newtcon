@@ -32,6 +32,8 @@ import { postProjectionDiff } from "./api/newtcon/nodes.js";
 import { setupNetworkSwitcher } from "./network-switcher.js";
 import { ensureSignedIn, setupAuthGate, userFromGate } from "./auth-gate.js";
 import { confirmInline } from "./confirm-inline.js";
+import { announce } from "./announce.js";
+import { enterFocusScope } from "./focus-scope.js";
 import { showToast } from "./toast.js";
 import { initTheme, toggleTheme, currentTheme } from "./theme.js";
 import { setupDrawerResize } from "./drawer-resize.js";
@@ -71,6 +73,15 @@ function hydrateIcons(root: ParentNode = document): void {
     if (!name) return;
     el.innerHTML = iconSVG(name);
     el.removeAttribute("data-icon");
+    // Hydrated icons are decorative: the control around them carries the
+    // accessible name (a visible label, or aria-label on icon-only buttons
+    // like the drawer close). Without this the SVG's shapes leak into the
+    // accessibility tree as noise beside every chevron and glyph. An icon
+    // that IS the label opts out by carrying its own aria-label/role,
+    // matching iconEl()'s contract in icons.ts.
+    if (!el.hasAttribute("aria-label") && !el.hasAttribute("role")) {
+      el.setAttribute("aria-hidden", "true");
+    }
   });
 }
 
@@ -182,7 +193,9 @@ function setupSidebarActiveStates(): void {
         ids.forEach((other) => {
           const o = document.getElementById(other);
           o?.classList.toggle("nav-item--active", other === id);
-          o?.setAttribute("aria-selected", other === id ? "true" : "false");
+          // Links, not tabs — the active workspace is the current page.
+          if (other === id) o?.setAttribute("aria-current", "page");
+          else o?.removeAttribute("aria-current");
         });
       },
       true,
@@ -220,6 +233,9 @@ function setupPalette(): void {
     modLabel.textContent = isMac ? "⌘" : "Ctrl";
   }
 
+  // The palette is role="dialog" aria-modal="true": Tab must cycle inside it,
+  // and closing must hand focus back to whatever the operator was on.
+  let releasePaletteFocus: (() => void) | null = null;
   const open = (): void => {
     if (paletteOpen) return;
     paletteOpen = true;
@@ -228,12 +244,14 @@ function setupPalette(): void {
     paletteSelected = 0;
     rebuildPaletteItems();
     renderPaletteResults("");
-    setTimeout(() => input.focus(), 10);
+    releasePaletteFocus = enterFocusScope(overlay, { trap: true, initial: input });
   };
   const close = (): void => {
     if (!paletteOpen) return;
     paletteOpen = false;
     overlay.hidden = true;
+    releasePaletteFocus?.();
+    releasePaletteFocus = null;
   };
 
   trigger?.addEventListener("click", open);
@@ -443,6 +461,38 @@ function escapeHtml(s: string): string {
   );
 }
 
+// ---- Drawer focus handoff -------------------------------------------------
+
+// The drawer is opened from MANY places (device drawer, spec detail, link
+// drawer, the create/override/add-link forms) and closed from several more, so
+// wiring focus at each call site would be six places to keep in sync. Watch the
+// element itself instead: the one signal every opener sets is the `open` class.
+//
+// NO focus trap here on purpose — the drawer isn't modal. At >=1400px it docks
+// as a grid column beside the workspace, and tabbing back out to the canvas is
+// legitimate. What it needs is focus moved IN on open (so keyboard operators
+// land in the panel they just summoned) and RETURNED on close (so they don't
+// get dropped on <body>).
+function setupDrawerFocus(): void {
+  const drawer = document.getElementById("detail-drawer");
+  if (!drawer) return;
+  let release: (() => void) | null = null;
+  const sync = (): void => {
+    const open = drawer.classList.contains("open");
+    if (open && !release) {
+      // Prefer the close button: a stable first stop that exists for every
+      // drawer flavour, and one Tab from the content.
+      const closeBtn = document.getElementById("drawer-close");
+      release = enterFocusScope(drawer, { initial: closeBtn });
+    } else if (!open && release) {
+      release();
+      release = null;
+    }
+  };
+  new MutationObserver(sync).observe(drawer, { attributes: true, attributeFilter: ["class"] });
+  sync();
+}
+
 // ---- Boot ----------------------------------------------------------------
 
 // ---- Pending-bar (workspace-level staging) -------------------------------
@@ -488,6 +538,10 @@ function setupPendingBar(): void {
     const n = pendingCount();
     bar.hidden = n === 0;
     countEl.textContent = String(n);
+    // The pending count changes as a SIDE EFFECT of acting elsewhere (queueing
+    // from a drawer, a facet row, the topology canvas). A sighted operator
+    // catches it in the header; announce it so a screen-reader user does too.
+    announce(n === 0 ? "No pending changes" : `${n} pending change${n === 1 ? "" : "s"}`);
     if (n === 0) list.hidden = true;
     if (!list.hidden) renderList();
   };
@@ -580,7 +634,14 @@ function setupPendingBar(): void {
       });
     }
     // Re-mount whichever view is visible so the (now-applied) changes refresh.
-    document.querySelector(".nav-item--active")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // cancelable:true MATTERS: the nav items are <a href="#/{net}/{view}">, and
+    // the router's click handler preventDefault()s to keep navigation in-page.
+    // A non-cancelable synthetic click can't be prevented, so the browser would
+    // follow the bare href and drop the view's params — e.g. refreshing after a
+    // Save on Specs -> Zone would navigate to #/{net}/specs and remount onto
+    // the default facet, losing the operator's place.
+    document.querySelector(".nav-item--active")?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }));
   });
 
   subscribePending(render);
@@ -1120,6 +1181,7 @@ async function boot(): Promise<void> {
   setupPendingBar();
   setupNetworkSwitcher();
   setupDrawerResize();
+  setupDrawerFocus();
   startStatusPolling();
 }
 

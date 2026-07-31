@@ -76,7 +76,11 @@ export function startRouter(): void {
     for (const view of Object.keys(tabs) as ViewName[]) {
       const active = view === name;
       tabs[view]!.classList.toggle("workspace-tab--active", active);
-      tabs[view]!.setAttribute("aria-selected", active ? "true" : "false");
+      // Workspace nav items are links, not tabs — the active one is the
+      // current PAGE, so aria-current is the right signal (aria-selected
+      // only means anything inside a tablist, which this isn't).
+      if (active) tabs[view]!.setAttribute("aria-current", "page");
+      else tabs[view]!.removeAttribute("aria-current");
       panels[view]!.hidden = !active;
     }
 
@@ -101,11 +105,31 @@ export function startRouter(): void {
       // sets params right after activation).
       current = { net: current.net, view: name };
       writeHash();
+      syncTabHrefs();
     }
   };
 
+  // syncTabHrefs — keep each workspace link's href pointing at its real URL for
+  // the active network, so middle-click / ⌘-click / right-click → "open in new
+  // tab" land on the right workspace. Re-run on every navigation because the
+  // network can change under us.
+  const syncTabHrefs = (): void => {
+    for (const view of Object.keys(tabs) as ViewName[]) {
+      tabs[view]!.setAttribute("href", formatHash({ net: current.net, view }));
+    }
+  };
+  syncTabHrefs();
+
   for (const view of Object.keys(tabs) as ViewName[]) {
-    tabs[view]!.addEventListener("click", () => activateTab(view));
+    tabs[view]!.addEventListener("click", (e) => {
+      // Let the browser handle modified clicks natively — that's what makes
+      // "open this workspace in a new tab" work. Only plain left-clicks are
+      // intercepted for in-page navigation (no reload).
+      const me = e as MouseEvent;
+      if (me.button !== 0 || me.metaKey || me.ctrlKey || me.shiftKey || me.altKey) return;
+      e.preventDefault();
+      activateTab(view);
+    });
   }
 
   // Views announce param changes; merge into the current route + rewrite hash.
@@ -136,6 +160,7 @@ export function startRouter(): void {
       // active state) stay in sync with programmatic navigation.
       tabs[route.view]!.click();
       current = { ...route }; // activateTab/closeDetail reset params; restore
+      syncTabHrefs();         // hrefs follow the route's network
       if (route.view === "specs") {
         void applySpecsRoute(route.facet, route.detail);
       } else if (route.view === "topology") {
@@ -169,4 +194,9 @@ export function startRouter(): void {
     lastWritten = formatHash(current);
     history.replaceState(null, "", lastWritten);
   }
+  // Stamp hrefs LAST: `current.net` is only correct once the boot route has
+  // resolved (it starts as the "default" placeholder). Doing this earlier
+  // advertised the wrong network, so middle-clicking a workspace would have
+  // opened someone else's fabric.
+  syncTabHrefs();
 }
