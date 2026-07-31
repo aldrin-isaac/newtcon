@@ -93,7 +93,16 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
       fields.ts               → the legacy FieldDef vocabulary: PATTERNS, specForms, displaySchemaFor, isEditableKind, buildFormFields (fallback path + the shape sub-rule forms use)
       ssh-login.ts            → the General → SSH Login facet: scoped ssh_user/ssh_pass authoring via the ${secret:} store
       route-state.ts          → announceRoute — the view's "newtcon:route-state" announce to router.ts
-    views/drawer/             → the device drawer (uplift 1.3): index.ts = drawer core (NODE_TABS + loadNodeTab dispatch, openNodeDrawer + header, Drift/Config-DB/History tabs, lifecycle section, link drawer, shared detail-render helpers); interfaces.ts = Interfaces tab + IRB section; state.ts = State tab + Debug tab (Config DB / Projection / Intent Tree). 
+    views/drawer/             → the device drawer (uplift 1.3), one file per tab
+      index.ts                → drawer core: openNodeDrawer, the pinned mini-header, the async header (identity/stats/badges/actions), NODE_TABS + loadNodeTab dispatch
+      interfaces.ts           → Interfaces tab + IRB section
+      state.ts                → State tab + Debug tab (Projection / Intent Tree; embeds config-db.ts)
+      spec-tab.ts             → Spec tab: node spec + topology intent (provisioning steps + port config)
+      drift.ts                → Drift tab + the Reconcile preview/apply flow
+      history.ts              → History tab (per-device audit timeline)
+      config-db.ts            → the lazy 3-level CONFIG_DB browser the Debug tab embeds
+      lifecycle.ts            → the substrate section: state pill, lab-VM start/stop, SSH/console snippets
+      link-drawer.ts          → the LINK drawer (a different drawer, same #detail-drawer element)
     views/topology/           → the Topology view (uplift 1.4), decomposed one-concern-per-file; index.ts re-exports the public API (mountTopologyTab/stopTopologyPoll/isProvisioning/TopoLink) so the split stays internal
       index.ts                → mount orchestration: owns the view's live state (view mode, lens, zone filter, viewport, pinned positions, palette/status-text maps, cached lab state) + the render fns that read it, and the public re-export barrel
       canvas.ts               → the SVG renderer: topology shape adapter, layout cache (+ resetLayoutCache), zones, links (neighbour-aware seating + occlusion routing + live drag-follow), device cards, badges, pan/zoom wiring
@@ -149,6 +158,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     topology-palette.ts       → resolvePalette + resolveDevicePalette — pure resolver from per-element actuation observation to the unified five-state palette (spec-only / actuated-ok / actuated-down / drift / unknown); foundation for the layered Topology views (slice #210.A)
     auth-expiry.ts            → formatExpiryRelative + isNearExpiry + EXPIRY_WARN_THRESHOLD_MS (session lifetime presentation; slice 1 polish)
     spec-detail-shape.ts      → buildSpecDetailShape — pure helper that turns a FieldDef schema + spec data into the per-spec detail layout (labeled rows + "All fields" extras)
+    spec-render.ts            → THE shared spec/detail render helpers (renderLoadingInto / renderErrorInto / renderValueInto / toSpecField / renderSpecDetailInto + the ref-chip cross-link). Top-level because BOTH views/specs and views/drawer need them — they used to sit in views/drawer/index.ts, which made Specs reach into a sibling view for generic rendering
     port-config.ts            → mergePort + comparePorts — pure helpers for the schema-driven port-config flow: the device drawer's per-port "Properties" action (openPortPropsForm in app.ts) renders the PortConfig schema form; mergePort folds a chosen port's config into a whole-device write-back (PortConfig schema kind); comparePorts is the numeric interface-name ordering used wherever ports/interfaces are listed. (Port config used to have a second home in the Topology side panel's "Configure a port"; consolidated into the drawer.)
     device-steps.ts           → parseDeviceSteps — THE topology step-parser (uplift 1.5): normalizes a device entry's steps (guards + interface-verb URL split + spec_name); device-interfaces / device-resources / irb-interfaces are domain logic over its records
     device-model.ts           → loadDeviceModel — the one fetch bundle for a device's scattered facts (spec platform + topology entry/links + live ifaces + live VLANs, inventory-first with liveUnavailable flag); consumed by views/drawer/interfaces
