@@ -61,6 +61,40 @@ const back = await page.evaluate((NET)=>({
 }), NET);
 t(back.zoneCards===0 && back.switch1, "clicking the card unfolds it again");
 t(back.stored.length===0, "unfolding clears the stored preference");
+// ── Bulk fold controls in the command bar ────────────────────────────────
+// Deliberately NOT in the view-mode toolbar: folding must work in Lab and
+// Physical too, and that toolbar's contents are gated by view mode.
+const foldRow = () => page.evaluate(() => {
+  const row = document.querySelector(".topology-zone-fold-row");
+  return {
+    present: !!row && !row.hidden,
+    btns: [...(row?.querySelectorAll("button") ?? [])].map((b) => ({ label: b.textContent, disabled: b.disabled })),
+    count: row?.querySelector(".topology-zone-fold-count")?.textContent ?? null,
+    zoneCards: document.querySelectorAll(".topo-node--zone").length,
+  };
+});
+const clickFold = (label) => page.evaluate((l) =>
+  [...document.querySelectorAll(".topology-zone-fold-row button")].find((b) => b.textContent.includes(l))?.click(), label);
+
+const f0 = await foldRow();
+t(f0.present, "bulk fold controls mounted");
+t(f0.btns.some((b) => /Collapse all/.test(b.label) && !b.disabled), "Collapse all enabled when nothing folded");
+t(f0.btns.some((b) => /Expand all/.test(b.label) && b.disabled), "Expand all disabled when nothing folded");
+
+await clickFold("Collapse all");
+await new Promise((r) => setTimeout(r, 900));
+const f1 = await foldRow();
+t(f1.zoneCards >= 1, `Collapse all folds every zone (${f1.zoneCards} card(s))`);
+t(f1.btns.some((b) => /Collapse all/.test(b.label) && b.disabled), "Collapse all disables once all folded");
+t(/folded/.test(f1.count ?? ""), `running count shown (${JSON.stringify(f1.count)})`);
+
+await clickFold("Expand all");
+await new Promise((r) => setTimeout(r, 900));
+const f2 = await foldRow();
+t(f2.zoneCards === 0, "Expand all unfolds every zone");
+t(await page.evaluate((NET) => localStorage.getItem("newtcon.topology.collapsedZones." + NET) === null, NET),
+  "Expand all clears persistence");
+
 console.log(`\n${ok.length} ok, ${bad.length} failed`);
 if(bad.length) process.exitCode=1;
 await b.close();
