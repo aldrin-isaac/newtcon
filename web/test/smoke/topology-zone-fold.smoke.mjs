@@ -95,6 +95,35 @@ t(f2.zoneCards === 0, "Expand all unfolds every zone");
 t(await page.evaluate((NET) => localStorage.getItem("newtcon.topology.collapsedZones." + NET) === null, NET),
   "Expand all clears persistence");
 
+// ── A collapsed zone card is draggable ───────────────────────────────────
+// Position is a canvas-arrangement fact, not a device fact — it does NOT
+// belong with the status/pending/drift chrome zone cards skip. Folding exists
+// to make a large fabric readable, and arranging the resulting handful of
+// zone cards is the next thing an operator wants. The drag must not trip the
+// click that unfolds.
+await clickFold("Collapse all");
+await new Promise((r) => setTimeout(r, 900));
+const zc = await page.evaluate(() => {
+  const r = document.querySelector(".topo-node--zone")?.getBoundingClientRect();
+  return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+});
+if (zc) {
+  await page.mouse.move(zc.x, zc.y);
+  await page.mouse.down();
+  await page.mouse.move(zc.x - 170, zc.y - 120, { steps: 10 });
+  const dragging = await page.evaluate(() =>
+    document.querySelector(".topo-node--zone")?.classList.contains("topo-node--dragging") ?? false);
+  await page.mouse.up();
+  await new Promise((r) => setTimeout(r, 900));
+  const moved = await page.evaluate((NET) => {
+    const pins = JSON.parse(localStorage.getItem("newtcon.topology.positions." + NET) || "{}");
+    return { stillFolded: document.querySelectorAll(".topo-node--zone").length === 1, keys: Object.keys(pins) };
+  }, NET);
+  t(dragging, "zone card enters the dragging state");
+  t(moved.stillFolded, "dragging a zone card does not unfold it");
+  t(moved.keys.some((k) => k.startsWith("zone:")), `zone position persisted (${JSON.stringify(moved.keys)})`);
+}
+
 console.log(`\n${ok.length} ok, ${bad.length} failed`);
 if(bad.length) process.exitCode=1;
 await b.close();
