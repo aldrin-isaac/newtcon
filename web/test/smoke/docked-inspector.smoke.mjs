@@ -1,10 +1,13 @@
 // Browser smoke: docked inspector (uplift 2.5, #405).
-//   ≥1100px: the drawer docks — position:static grid pane beside the
+//   ≥1250px: the drawer docks — position:static grid pane beside the
 //     workspace; the topology canvas and the inspector DO NOT overlap.
-//   <1100px: the overlay is retained — position:fixed, slides over content.
+//   <1250px: the overlay is retained — position:fixed, slides over content.
 //
-// The threshold was 1400px, which left an ordinary laptop (1100–1400) with a
-// flat 640px overlay covering the canvas instead of a resizable column.
+// The threshold was 1400px, which left an ordinary laptop with a flat 640px
+// overlay covering the canvas instead of a resizable column. It was then 1100,
+// which docked so eagerly that a 1200px window kept only ~545px of canvas —
+// technically usable, too cramped to work in. 1250 is the operator's call, and
+// the exact boundary is asserted below so it cannot drift silently.
 // Also proves the body.drawer-open hack is gone (no class, no canvas padding).
 // Device discovered from the network's topology (spec-only is fine).
 
@@ -53,7 +56,7 @@ try {
   // ---- Docked mode (wide) ----
   await page.setViewport({ width: 1500, height: 950 });
   const wide = await openDrawerAndMeasure();
-  expect(wide.position === "static", `≥1100px: drawer is a docked grid pane (position ${wide.position})`);
+  expect(wide.position === "static", `≥1250px: drawer is a docked grid pane (position ${wide.position})`);
   expect(wide.drawerWidth > 300, `docked pane has real width (${Math.round(wide.drawerWidth)}px)`);
   expect(wide.overlapPx === 0, `canvas and inspector do not overlap (overlap ${Math.round(wide.overlapPx)}px)`);
   expect(!wide.bodyHack, "body.drawer-open hack is gone");
@@ -61,9 +64,21 @@ try {
   // ---- Overlay mode (narrow) ----
   await page.setViewport({ width: 1000, height: 900 });
   const narrow = await openDrawerAndMeasure();
-  expect(narrow.position === "fixed", `<1100px: drawer overlays (position ${narrow.position})`);
+  expect(narrow.position === "fixed", `<1250px: drawer overlays (position ${narrow.position})`);
   expect(narrow.drawerWidth > 300, `overlay has real width (${Math.round(narrow.drawerWidth)}px)`);
 
+
+  // ---- The threshold itself ----
+  // A media query is an off-by-one waiting to happen (min-width is inclusive),
+  // and "roughly docks around 1250" is not a testable claim. Pin both sides.
+  const modeAt = async (w) => {
+    await page.setViewport({ width: w, height: 900 });
+    await new Promise((r) => setTimeout(r, 400));
+    return page.evaluate(() =>
+      getComputedStyle(document.getElementById("detail-drawer")).position);
+  };
+  expect((await modeAt(1250)) === "static", "1250px (threshold): drawer docks");
+  expect((await modeAt(1249)) === "fixed", "1249px (one under): drawer overlays");
 
   // The band the threshold change was made for: a laptop-width window must dock
   // (resizable column) rather than overlay, and dragging the drawer as wide as
