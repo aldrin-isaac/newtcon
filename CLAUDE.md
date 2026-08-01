@@ -75,6 +75,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   network.go                  → network-level spec list + ShowSpec + writes
   nodes.go                    → topology + per-device + per-interface calls (incl. NodeProjectionDiff for slice #171.B)
   newtlab.go                  → newtlab-engine calls (labs list/status/deploy/destroy/provision/events/node-lifecycle)
+internal/hygiene/             → repo-wide quality gates that belong to no single package — the Go counterpart to web/scripts/ratchet.mjs. format_test.go fails when any Go source is not gofmt-formatted (there is no CI/Makefile; `go test ./...` is the one gate every change passes through)
 internal/session/             → operator session store + cookie helpers + middleware (cookie ↔ {bearer,user,expires_at})
   session.go                  → Store, SetCookie/ClearCookie, Middleware, UserFromContext
 internal/types/               → DTOs (request/response shapes) + error envelope kinds
