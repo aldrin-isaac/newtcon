@@ -1,14 +1,14 @@
 // handlers/auth.go — operator-identity endpoints.
 //
-//   POST /api/auth/login   — accept username + password JSON body, proxy as
-//                            Basic auth to newtron's /auth/login, mint a
-//                            newtcon session cookie keyed to the returned
-//                            L2c session key. Returns {user, expires_at}.
-//   POST /api/auth/logout  — extract the cookie's L2c key from the store,
-//                            call newtron's /auth/logout (best effort),
-//                            evict locally, clear the cookie. Always 204.
-//   GET  /api/auth/whoami  — return {user, expires_at} for the current
-//                            session, or 401 if there is none.
+//	POST /api/auth/login   — accept username + password JSON body, proxy as
+//	                         Basic auth to newtron's /auth/login, mint a
+//	                         newtcon session cookie keyed to the returned
+//	                         L2c session key. Returns {user, expires_at}.
+//	POST /api/auth/logout  — extract the cookie's L2c key from the store,
+//	                         call newtron's /auth/logout (best effort),
+//	                         evict locally, clear the cookie. Always 204.
+//	GET  /api/auth/whoami  — return {user, expires_at} for the current
+//	                         session, or 401 if there is none.
 //
 // CLAUDE.md §1: only internal/newtronc/ can speak to newtron; this file
 // goes through deps.Client.Login / Logout for upstream calls. The cookie

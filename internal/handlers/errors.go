@@ -7,35 +7,35 @@
 //
 // Two helpers:
 //
-//   writeUpstreamError(w, corrID, err, endpoint, extras)
-//       Generic mapping for newtron-engine failures (most handlers). 503 for
-//       UnavailableError. Use this for newtron/* routes.
+//	writeUpstreamError(w, corrID, err, endpoint, extras)
+//	    Generic mapping for newtron-engine failures (most handlers). 503 for
+//	    UnavailableError. Use this for newtron/* routes.
 //
-//   writeLabEngineError(w, corrID, err, endpoint, extras)
-//       Identical mapping except UnavailableError emits 502 BadGateway (the
-//       lab engine is one substrate behind newtron-server). Use this for
-//       newtlab/* routes.
+//	writeLabEngineError(w, corrID, err, endpoint, extras)
+//	    Identical mapping except UnavailableError emits 502 BadGateway (the
+//	    lab engine is one substrate behind newtron-server). Use this for
+//	    newtlab/* routes.
 //
 // Status / kind mapping (both helpers):
 //
-//   *newtronc.NotFoundError       → 404 KindPreconditionFailure (the named
-//                                     network / device / spec doesn't exist —
-//                                     precondition for the operation)
-//   *newtronc.ConflictError       → 409 KindDriftRefusal
-//   *newtronc.ValidationError     → 400 KindValidationFailure
-//   *newtronc.UnauthenticatedError→ 401 KindAuthenticationFailure (session
-//                                     expired / missing — middleware will
-//                                     clear the cookie as the 401 unwinds)
-//   *newtronc.AuthorizationError  → 403 KindAuthorizationFailure (caller /
-//                                     permission / resource surfaced in
-//                                     details so the UI can render
-//                                     "X lacks Y on Z"; newtcon#143)
-//   *newtronc.EngineError        → 502 KindEngineError (engine reached but
-//                                    reported a failure; its message surfaced,
-//                                    no health hint — the daemon is up)
-//   *newtronc.UnavailableError   → 503 (or 502 for lab) KindNewtronUnavailable
-//                                    with a default next_action_hint
-//   default                      → 500 KindInternal
+//	*newtronc.NotFoundError       → 404 KindPreconditionFailure (the named
+//	                                  network / device / spec doesn't exist —
+//	                                  precondition for the operation)
+//	*newtronc.ConflictError       → 409 KindDriftRefusal
+//	*newtronc.ValidationError     → 400 KindValidationFailure
+//	*newtronc.UnauthenticatedError→ 401 KindAuthenticationFailure (session
+//	                                  expired / missing — middleware will
+//	                                  clear the cookie as the 401 unwinds)
+//	*newtronc.AuthorizationError  → 403 KindAuthorizationFailure (caller /
+//	                                  permission / resource surfaced in
+//	                                  details so the UI can render
+//	                                  "X lacks Y on Z"; newtcon#143)
+//	*newtronc.EngineError        → 502 KindEngineError (engine reached but
+//	                                 reported a failure; its message surfaced,
+//	                                 no health hint — the daemon is up)
+//	*newtronc.UnavailableError   → 503 (or 502 for lab) KindNewtronUnavailable
+//	                                 with a default next_action_hint
+//	default                      → 500 KindInternal
 //
 // extras is merged into the details map; pass nil if no per-call-site fields.
 // Standard fields the helper always sets (correlation_id, underlying_error,

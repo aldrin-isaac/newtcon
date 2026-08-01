@@ -14,10 +14,10 @@ import "time"
 // verdict (operator-philosophy invariant #9 "Confidence and limits are
 // explicit").
 type HealthResponse struct {
-	Status             string             `json:"status"`
-	Version            string             `json:"version"`
-	Newtron            NewtronProbe       `json:"newtron"`
-	EnginePosture      EnginePosture      `json:"engine_posture"`
+	Status              string              `json:"status"`
+	Version             string              `json:"version"`
+	Newtron             NewtronProbe        `json:"newtron"`
+	EnginePosture       EnginePosture       `json:"engine_posture"`
 	OperationsRetention OperationsRetention `json:"operations_retention"`
 }
 

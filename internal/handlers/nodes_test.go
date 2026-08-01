@@ -576,7 +576,6 @@ func TestProjectionDiff_MalformedJSON(t *testing.T) {
 	}
 }
 
-
 // TestConflictClassification_Precondition verifies that a 409 whose body
 // carries newtron's "precondition failed" prefix surfaces as
 // precondition_failure ("not ready / refused by a gate"), not drift_refusal

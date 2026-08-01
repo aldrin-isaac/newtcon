@@ -77,8 +77,8 @@ func (e *EngineError) Message() string {
 // ValidationError is returned when newtron-server returns a 400 with a
 // parseable error body. It maps to types.KindValidationFailure.
 type ValidationError struct {
-	StatusCode  int
-	Body        []byte // verbatim newtron response body
+	StatusCode int
+	Body       []byte // verbatim newtron response body
 }
 
 func (e *ValidationError) Error() string {
