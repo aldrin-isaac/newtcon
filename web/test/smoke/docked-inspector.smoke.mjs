@@ -1,7 +1,10 @@
 // Browser smoke: docked inspector (uplift 2.5, #405).
-//   ≥1400px: the drawer docks — position:static grid pane beside the
+//   ≥1100px: the drawer docks — position:static grid pane beside the
 //     workspace; the topology canvas and the inspector DO NOT overlap.
-//   <1400px: the overlay is retained — position:fixed, slides over content.
+//   <1100px: the overlay is retained — position:fixed, slides over content.
+//
+// The threshold was 1400px, which left an ordinary laptop (1100–1400) with a
+// flat 640px overlay covering the canvas instead of a resizable column.
 // Also proves the body.drawer-open hack is gone (no class, no canvas padding).
 // Device discovered from the network's topology (spec-only is fine).
 
@@ -50,16 +53,52 @@ try {
   // ---- Docked mode (wide) ----
   await page.setViewport({ width: 1500, height: 950 });
   const wide = await openDrawerAndMeasure();
-  expect(wide.position === "static", `≥1400px: drawer is a docked grid pane (position ${wide.position})`);
+  expect(wide.position === "static", `≥1100px: drawer is a docked grid pane (position ${wide.position})`);
   expect(wide.drawerWidth > 300, `docked pane has real width (${Math.round(wide.drawerWidth)}px)`);
   expect(wide.overlapPx === 0, `canvas and inspector do not overlap (overlap ${Math.round(wide.overlapPx)}px)`);
   expect(!wide.bodyHack, "body.drawer-open hack is gone");
 
   // ---- Overlay mode (narrow) ----
-  await page.setViewport({ width: 1200, height: 900 });
+  await page.setViewport({ width: 1000, height: 900 });
   const narrow = await openDrawerAndMeasure();
-  expect(narrow.position === "fixed", `<1400px: drawer overlays (position ${narrow.position})`);
+  expect(narrow.position === "fixed", `<1100px: drawer overlays (position ${narrow.position})`);
   expect(narrow.drawerWidth > 300, `overlay has real width (${Math.round(narrow.drawerWidth)}px)`);
+
+
+  // The band the threshold change was made for: a laptop-width window must dock
+  // (resizable column) rather than overlay, and dragging the drawer as wide as
+  // it will go must not push the row past the window — the workspace track has
+  // min-width:0 so it yields, and the clamp reserves MAIN_MIN_PX for it.
+  await page.setViewport({ width: 1300, height: 900 });
+  await new Promise((r) => setTimeout(r, 600));
+  const laptop = await page.evaluate(() => ({
+    position: getComputedStyle(document.getElementById("detail-drawer")).position,
+  }));
+  expect(laptop.position === "static", `1300px (laptop): drawer docks (position ${laptop.position})`);
+
+  const handle = await page.evaluate(() => {
+    const e = document.querySelector('[class*="drawer-resize"],.drawer-resize-handle');
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  if (handle) {
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(60, handle.y, { steps: 12 });
+    await page.mouse.up();
+    await new Promise((r) => setTimeout(r, 1200));
+    const dragged = await page.evaluate(() => {
+      const w = (sel) => Math.round(document.querySelector(sel).getBoundingClientRect().width);
+      const sum = w(".app-sidebar") + w(".app-main") + w("#detail-drawer");
+      return { sum, vw: window.innerWidth, main: w(".app-main"),
+               overflowsX: document.documentElement.scrollWidth > window.innerWidth + 1 };
+    });
+    expect(!dragged.overflowsX, "an extreme drawer drag does not overflow the page sideways");
+    expect(Math.abs(dragged.sum - dragged.vw) <= 2,
+      `columns still tile the window exactly (${dragged.sum} vs ${dragged.vw})`);
+    expect(dragged.main >= 400, `workspace keeps a usable floor (${dragged.main}px)`);
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
