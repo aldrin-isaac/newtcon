@@ -605,8 +605,10 @@ export function renderTopologySVG(
 
     const isDimmed = dimmed.has(node.name);
     // A collapsed zone renders as ONE wider card standing in for its members
-    // (topology-zones.ts). It is a group, not a device: no status dot, no drift
-    // badge, no drag-to-pin — clicking it unfolds the zone.
+    // (topology-zones.ts). It is a group, not a device, so it carries no status
+    // dot, pending count or drift badge — those are facts about ONE device.
+    // It is still draggable (position is about the canvas, not the device) and
+    // clicking it unfolds the zone.
     const isZone = String(node.type) === "zone";
     const g = svgEl("g", {
       "class": "topo-node"
@@ -748,9 +750,15 @@ export function renderTopologySVG(
     // Drag-to-reposition wiring. Only active when the caller wired
     // onNodeMoved. A drag of more than a few pixels suppresses the
     // upcoming click — otherwise tiny-jitter clicks would feel like
-    // they dropped events.
+    // they dropped events, and on a zone card a stray click would unfold it.
+    //
+    // Collapsed zone cards ARE draggable. Position is a canvas-arrangement
+    // fact, not a device fact, so it does not belong with the status/pending/
+    // drift chrome those cards skip — and folding exists precisely to make a
+    // large fabric readable, at which point arranging the handful of zone
+    // cards is the next thing an operator wants.
     let dragOccurred = false;
-    if (opts.onNodeMoved && !isZone) {
+    if (opts.onNodeMoved) {
       const onNodeMoved = opts.onNodeMoved;
       const startCx = pos.cx;
       const startCy = pos.cy;
