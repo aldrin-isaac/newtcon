@@ -15,6 +15,9 @@
   --space-page-y: 20px;
 
   --sidebar-width: 232px;
+  /* Icon-rail width below the collapse breakpoint (workspace.css @1100px).
+     Wide enough for a 16px icon plus symmetric padding and a focus ring. */
+  --sidebar-width-collapsed: 52px;
   --sidebar-collapsed: 56px;
   --header-height: 52px;
 
