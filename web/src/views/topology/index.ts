@@ -465,7 +465,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     headerBar.append(viewRow, lensRow);
     if (zones.length > 1) headerBar.appendChild(filterRow);
     if (zones.length > 0) { renderZoneFoldRow(); headerBar.appendChild(zoneFoldRow); }
-    headerBar.append(healthStrip, toolbar);
+    headerBar.append(toolbar);
     root.appendChild(headerBar);
     const renderLensRow = (): void => {
       lensRow.textContent = "";
@@ -539,6 +539,14 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const graphSlot = el("div", { className: "topology-graph-slot" });
     split.appendChild(graphSlot);
     root.appendChild(split);
+
+    // Status strip BELOW the canvas: the fabric's health is a footer on the
+    // picture it describes. The view is a flex column sized to the content
+    // area, so this row is always on screen however the window is resized —
+    // the canvas gives up height, the footer keeps its own.
+    const footer = el("div", { className: "topology-footer" });
+    footer.appendChild(healthStrip);
+    root.appendChild(footer);
 
     // Floating zoom toolbar — absolute-positioned over the SVG via
     // .topology-zoom-toolbar styling; outlives renderGraph() calls.
@@ -831,7 +839,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // Physical view. Re-renders alongside view-mode changes via
     // renderDriftSummary().
     const driftSummaryRow = el("div");
-    root.appendChild(driftSummaryRow);
+    footer.appendChild(driftSummaryRow);
     const renderDriftSummary = (): void => {
       driftSummaryRow.textContent = "";
       if (viewMode !== "spec-physical") return;

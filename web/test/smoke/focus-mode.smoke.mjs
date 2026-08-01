@@ -32,11 +32,24 @@ try {
   await page.click("#tab-topology");
   await page.waitForSelector(".topo-node", { timeout: 60000 });
   let stripCells = 0;
+  // The strip now lives in the topology FOOTER, below the canvas — it reads as
+  // a footer on the picture it describes, and being outside the scrolling
+  // canvas keeps it on screen at any window height. It used to sit in the
+  // header bar; this assertion followed it rather than being relaxed.
   try {
-    await page.waitForFunction(() => document.querySelectorAll(".topology-header-bar .fabric-strip-cell").length === 3, { timeout: 45000 });
+    await page.waitForFunction(() => document.querySelectorAll(".topology-footer .fabric-strip-cell").length === 3, { timeout: 45000 });
     stripCells = 3;
-  } catch { stripCells = await page.evaluate(() => document.querySelectorAll(".topology-header-bar .fabric-strip-cell").length); }
-  expect(stripCells === 3, `fabric-health strip shows all three cells in the topology header (${stripCells})`);
+  } catch { stripCells = await page.evaluate(() => document.querySelectorAll(".topology-footer .fabric-strip-cell").length); }
+  expect(stripCells === 3, `fabric-health strip shows all three cells in the topology footer (${stripCells})`);
+  const stripPlacement = await page.evaluate(() => {
+    const strip = document.querySelector(".fabric-strip");
+    const slot = document.querySelector(".topology-graph-slot");
+    if (!strip || !slot) return null;
+    return { belowCanvas: strip.getBoundingClientRect().top >= slot.getBoundingClientRect().bottom - 2,
+             inHeader: !!document.querySelector(".topology-header-bar .fabric-strip") };
+  });
+  expect(stripPlacement?.belowCanvas === true, "fabric-health strip sits BELOW the canvas");
+  expect(stripPlacement?.inHeader === false, "fabric-health strip no longer in the topology header bar");
   await sleep(500);
   const first = await page.evaluate(() => {
     const g = document.querySelector(".topo-node");
