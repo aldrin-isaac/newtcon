@@ -7,7 +7,7 @@
 // Needs a network with ≥1 service + ≥1 device: default 3node-vs-newtcon.
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, gotoApp } from "./_auth.mjs";
+import { authenticatePage, gotoApp, apiGET, apiGetPath } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -17,15 +17,15 @@ const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 async function discoverNet(base) {
   if (process.env.NET) return process.env.NET;
   try {
-    const raw = await (await fetch(`${base}/api/networks`)).json();
+    const raw = await apiGetPath(`/api/networks`, base);
     const list = Array.isArray(raw) ? raw : raw.networks ?? [];
     for (const n of list) {
       const id = n.id ?? n.name;
       if (!id) continue;
       try {
         const [svcs, topo] = await Promise.all([
-          (await fetch(`${base}/api/networks/${id}/services`)).json(),
-          (await fetch(`${base}/api/networks/${id}/topology`)).json(),
+          apiGET(id, "services", base),
+          apiGET(id, "topology", base),
         ]);
         const svcCount = Array.isArray(svcs) ? svcs.length : (svcs.services ?? []).length;
         // Links are required: the port-picker stage harvests its catalog
@@ -73,11 +73,19 @@ try {
   }, needle);
 
   // Discover a service + device on NET for the sentences.
-  const svcRaw = await (await fetch(`${BASE}/api/networks/${NET}/services`)).json();
+  const svcRaw = await apiGET(NET, "services", BASE);
   const svcList = Array.isArray(svcRaw) ? svcRaw : svcRaw.services ?? [];
   const SVC = typeof svcList[0] === "string" ? svcList[0] : svcList[0]?.name;
-  const topoRaw = await (await fetch(`${BASE}/api/networks/${NET}/topology`)).json();
+  const topoRaw = await apiGET(NET, "topology", BASE);
   const DEV = Object.keys(topoRaw.nodes ?? {}).find((n) => n.startsWith("switch")) || Object.keys(topoRaw.nodes ?? {})[0];
+
+  if (!SVC || !DEV) {
+    // Without this the smoke types "apply undefined on undefined:Ethernet5",
+    // waits 20s for a palette item that cannot exist, and reports a palette
+    // failure. Name the real problem instead.
+    console.error(`  FAIL: no verb target on ${NET} (service=${SVC}, device=${DEV})`);
+    process.exit(1);
+  }
 
   // 1. apply verb stages.
   const before = await pendingCount();

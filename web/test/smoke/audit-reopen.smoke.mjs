@@ -4,7 +4,7 @@
 // not just guard the fetch).
 
 import puppeteer from "puppeteer-core";
-import { authenticatePage, gotoApp } from "./_auth.mjs";
+import { authenticatePage, gotoApp, apiGET } from "./_auth.mjs";
 
 const BASE = process.env.NEWTCON_URL || "http://127.0.0.1:8095";
 const CHROME = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -17,7 +17,10 @@ const expect = (c, m) => { if (c) { pass++; console.log("  ok:", m); } else { fa
 // auth off) — no events exist to expand, so the re-open behavior is
 // untestable. Skip rather than fail on that posture.
 {
-  const probe = await fetch(`${BASE}/api/networks/${NET}/audit/events?limit=1`).then((r) => r.text()).catch(() => "");
+  // Authenticated: a bare fetch returns 401 under --auth-required, whose body
+  // never contains "disabled", so this skip silently stopped working.
+  const probe = await apiGET(NET, "audit/events?limit=1", BASE)
+    .then((j) => JSON.stringify(j)).catch((e) => String(e.message));
   if (probe.includes("disabled")) {
     console.log("SKIP: engine audit log is disabled — no events to expand");
     process.exit(0);
