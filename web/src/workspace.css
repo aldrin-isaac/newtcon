@@ -156,6 +156,40 @@
   text-transform: uppercase; letter-spacing: var(--tracking-caps);
   fill: var(--color-text-muted); opacity: 0.8;
 }
+/* The label is the fold handle. The region itself stays pointer-events:none so
+   the tint never eats a click meant for a device or link — only this word is
+   live, and it says so on hover. */
+.topo-zone-label--clickable {
+  pointer-events: auto; cursor: pointer;
+  transition: fill var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.topo-zone-label--clickable:hover { fill: var(--color-accent); opacity: 1; }
+
+/* ---- Collapsed zone card -------------------------------------------------
+   A folded zone stands in for N devices, so it reads as a GROUP rather than a
+   thing you can configure: dashed outline (it isn't one box on a rack), the
+   zone tint behind it, and no status/drift chrome. Click to unfold. */
+.topo-node--zone { cursor: pointer; }
+.topo-node--zone > rect {
+  fill: var(--color-accent-bg);
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  transition: fill var(--duration-fast) var(--ease-standard);
+}
+.topo-node--zone:hover > rect { fill: var(--color-surface-hover); }
+.topo-node--zone text { fill: var(--color-text-primary); }
+.topo-node--zone .topo-node-type {
+  fill: var(--color-text-secondary);
+  font-family: var(--font-mono); font-size: var(--text-2xs);
+  text-transform: none; letter-spacing: 0;
+}
+.topo-node--zone:focus-visible { outline: none; }
+.topo-node--zone:focus-visible > rect { stroke: var(--color-focus-ring); stroke-width: 2.5; }
+
+/* A merged edge stands for several underlying links — slightly heavier so the
+   eye reads it as a bundle. The exact count is on hover. */
+.topo-link--aggregate { stroke-width: 2.5; opacity: 0.9; }
 
 /* vni lens, port level: member-port pills under member cards + endpoint
    dots on links where a member port terminates. A link dotted on ONE end

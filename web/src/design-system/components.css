@@ -372,6 +372,19 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 .table--mono-all { font-family: var(--font-mono); }
 .table--headband thead { background: var(--color-surface-sunken); }
 .table--bare { width: auto; }
+/* Sticky header for tables that can run long (audit events, per-device state
+   resources, the interface list). Opt-in, because most tables here are a
+   handful of rows and a sticky head would just be chrome.
+   Two details matter: the th needs its OWN background (rows scroll underneath
+   it), and the bottom border has to come from a box-shadow — border-collapse
+   drops a sticky cell's own border in some engines. */
+.table--sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 -1px 0 var(--color-border-default);
+}
 .table--bare th, .table--bare td { border-bottom: none; }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
 

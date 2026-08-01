@@ -41,6 +41,7 @@ import { type LensState, availableLenses, availableVlans, lensEffect, vlanMember
 import { type NavDirection, focusDim, nearestInDirection } from "../../topology-focus.js";
 import { type PaletteState, resolveLabDevicePalette, resolveLabStatusText, resolvePhysicalDevicePalette, resolvePhysicalStatusText } from "../../topology-palette.js";
 import { clearPositions, loadPositions, savePosition } from "../../topology-positions.js";
+import { collapseZones, loadCollapsedZones, saveCollapsedZones } from "../../topology-zones.js";
 import { ALL_VIEW_MODES, type TopologyViewMode, defaultViewMode, loadViewMode, saveViewMode, viewModeLabel } from "../../topology-view-mode.js";
 import { type ViewState, ZOOM_STEP, fitToBounds, viewBoxStr, zoomAt } from "../../topology-viewport.js";
 import { openLinkDrawer, openNodeDrawer } from "../drawer/index.js";
@@ -468,6 +469,22 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const activeNet = activeNetName;
     const pinnedPositions = loadPositions(activeNet);
 
+    // Collapsed zones — the density affordance. A folded zone renders as ONE
+    // card standing in for its members (topology-zones.ts does the graph
+    // transform); the choice persists per network like pinned positions do.
+    let collapsedZones = loadCollapsedZones(activeNet);
+    const toggleZone = (zone: string): void => {
+      const next = new Set(collapsedZones);
+      if (next.has(zone)) next.delete(zone); else next.add(zone);
+      collapsedZones = next;
+      saveCollapsedZones(activeNet, collapsedZones);
+      // Folding changes the graph shape, so the cached auto-layout no longer
+      // describes it — drop it and refit.
+      resetLayoutCache();
+      viewState = undefined;
+      renderGraph();
+    };
+
     // Topology view: layout is a split — left = SVG diagram + toolbar,
     // right = docked action panel.
     const split = el("div", { className: "topology-split" });
@@ -522,7 +539,16 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       if (oldSvg) oldSvg.remove();
       // Compute dimmed set from the current filter; passed through to
       // renderTopologySVG which applies the dim class to nodes + links.
-      const allNames = (topoData.nodes ?? []).map((n) => n.name);
+      // Zone→device map drives BOTH the zone tinting and the fold.
+      const zoneByDevice = new Map(
+        [...deviceMetadata.entries()].filter(([, m]) => m.zone !== null).map(([d, m]) => [d, m.zone as string]),
+      );
+      // Fold collapsed zones into single cards BEFORE anything else looks at
+      // the graph, so layout, filtering and lenses all operate on what is
+      // actually drawn. A no-op when nothing is folded.
+      const folded = collapseZones(topoData.nodes ?? [], topoData.links ?? [], zoneByDevice, collapsedZones);
+      const drawData = { ...topoData, nodes: folded.nodes, links: folded.links };
+      const allNames = folded.nodes.map((n) => n.name);
       const dimmed = applyFilter(filterState, allNames, deviceMetadata).hidden;
       // Lens effect (slice 4.3): dim merges with the zone filter; halo and
       // badges pass through. Same positions either way — layout-stable.
@@ -562,7 +588,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
             },
           }
         : {};
-      const result = renderTopologySVG(topoData, {
+      const result = renderTopologySVG(drawData, {
         paletteByDevice,
         statusTextByDevice: lensStatusText,
         haloNames: lens.halo,
@@ -573,7 +599,9 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
         onNodeClick: (deviceName) => { openNodeDrawer(deviceName, viewMode); },
         driftByDevice,
         statusByDevice,
-        zoneByDevice: new Map([...deviceMetadata.entries()].filter(([, m]) => m.zone !== null).map(([d, m]) => [d, m.zone as string])),
+        // A folded zone IS its card — it must not also draw a tinted region.
+        zoneByDevice: new Map([...zoneByDevice].filter(([, z]) => !collapsedZones.has(z))),
+        onZoneToggle: toggleZone,
         ...(vniMemberPorts !== undefined ? { vniMemberPorts } : {}),
         lldpByDevice,
         speedsByDevice,
@@ -610,7 +638,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
       result.svg.addEventListener("focusin", (ev) => {
         const g = (ev.target as Element | null)?.closest?.(".topo-node");
         const name = g?.getAttribute("data-device");
-        if (name) applyFocusDim(focusDim(name, (topoData.nodes ?? []).map((n) => n.name), topoData.links ?? []));
+        if (name) applyFocusDim(focusDim(name, folded.nodes.map((n) => n.name), folded.links));
       });
       result.svg.addEventListener("focusout", (ev) => {
         // Leaving the SVG entirely clears the focus dim; moving between

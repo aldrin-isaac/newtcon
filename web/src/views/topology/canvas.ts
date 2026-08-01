@@ -19,6 +19,7 @@ import { linkEndpointMembership } from "../../topology-lenses.js";
 import { type PaletteState, resolveLinkPalette } from "../../topology-palette.js";
 import { type PinnedPosition } from "../../topology-positions.js";
 import { type ViewState, ZOOM_STEP, panBy, viewBoxStr, zoomAt } from "../../topology-viewport.js";
+import { zoneOfNodeId } from "../../topology-zones.js";
 import { attachFastTip, buildPortTip } from "./port-tip.js";
 
 // ---- Topology types ---------------------------------------------------------
@@ -187,6 +188,9 @@ export interface TopologyRenderOpts {
    *  dots at each link endpoint (hover → name / admin / oper / speed / mtu). */
   portStatesByDevice?: Map<string, Map<string, PortState>>;
   lagMembersByDevice?: Map<string, Map<string, string[]>>;
+  /** Fold/unfold a zone. When wired, expanded zone regions grow a clickable
+   *  label and collapsed zone cards become clickable to expand. */
+  onZoneToggle?: (zone: string) => void;
 }
 
 export interface TopologyRenderResult {
@@ -294,6 +298,7 @@ export function renderTopologySVG(
   // positions + padding; token-tinted at whisper alpha; label in the
   // region's top-left. Never interactive; never affects fit (bounds come
   // from node positions).
+  const onZoneToggle = opts.onZoneToggle;
   if (opts.zoneByDevice && opts.zoneByDevice.size > 0) {
     const members = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
     for (const nd of nodes) {
@@ -321,7 +326,17 @@ export function renderTopologySVG(
         x: String(b.minX - PAD + 10),
         y: String(b.minY - PAD + 14),
       });
-      label.textContent = zone;
+      // The label is the fold handle: click it to collapse the zone into one
+      // card. Only the label is interactive — the tint itself stays inert so
+      // it never steals a click meant for a device or a link.
+      label.textContent = onZoneToggle ? `▾ ${zone}` : zone;
+      if (onZoneToggle) {
+        label.classList.add("topo-zone-label--clickable");
+        const t = svgEl("title");
+        t.textContent = `Collapse zone "${zone}" into a single card`;
+        label.appendChild(t);
+        label.addEventListener("click", (e) => { e.stopPropagation(); onZoneToggle(zone); });
+      }
       region.appendChild(label);
       svg.appendChild(region);
       zi++;
@@ -353,6 +368,18 @@ export function renderTopologySVG(
   // Occlusion-aware routing: a link whose straight segment would pass under a
   // NON-endpoint card deflects around it. Reads pos() so it tracks a drag.
   const occlusionOffset = (link: TopoLink): number => {
+    // COST GATE. This scan is O(links x nodes) — it walks every node to decide
+    // whether one link is blocked — and redrawLinks() runs it for every link on
+    // EVERY mousemove of a drag. Measured on a realistic 8-spine fabric that put
+    // the drag frame at 49ms (~20fps) with 400 devices / 1218 links, against a
+    // 16ms budget; 200 devices already sat at 17.8ms.
+    //
+    // While a drag is in flight, links render straight. Routing is restored the
+    // moment the drag ends (dragOverride clears, redrawLinks runs once more), so
+    // the operator only ever sees straight lines during the gesture itself —
+    // where a link is being actively repositioned and a deflection around a
+    // third card is noise anyway.
+    if (dragOverride) return 0;
     const a = link.local_device ? pos(link.local_device) : undefined;
     const z = link.remote_device ? pos(link.remote_device) : undefined;
     if (!a || !z) return 0;
@@ -387,13 +414,22 @@ export function renderTopologySVG(
     return `M ${x1} ${y1} Q ${mx + px * off * 2} ${my + py * off * 2} ${x2} ${y2}`;
   };
 
-  // redrawLinks — (re)build the link layer against the current pos(): seat
-  // distribution + lines + endpoint dots. Called once per render and on every
-  // drag tick (with the moved node overridden), so links follow the card.
-  const redrawLinks = (): void => {
-    linkLayer.replaceChildren();
-    // Neighbour-aware seating: distribute each node's incident link ends
-    // around its perimeter so links to different neighbours never collide.
+  // Per-link element handles, recorded during the full build so a drag frame can
+  // MOVE the existing elements instead of recreating them (see retargetLinks).
+  interface LinkEls {
+    hit: SVGElement | null;
+    line: SVGElement;
+    vniLocal: SVGElement | null;
+    vniRemote: SVGElement | null;
+    dotLocal: SVGElement | null;
+    dotRemote: SVGElement | null;
+  }
+  const linkEls = new Map<number, LinkEls>();
+
+  // seatResolver — neighbour-aware seating: distribute each node's incident link
+  // ends around its perimeter so links to different neighbours never collide.
+  // Shared by the full build and the drag-frame retarget.
+  const seatResolver = (): ((dev: string | undefined, i: number, fb: { cx: number; cy: number }) => { x: number; y: number }) => {
     const incident = new Map<string, { id: string; tx: number; ty: number }[]>();
     links.forEach((lnk, i) => {
       const fp = lnk.local_device ? pos(lnk.local_device) : undefined;
@@ -407,8 +443,31 @@ export function renderTopologySVG(
       const p = pos(dev);
       if (p) seatsByDevice.set(dev, distributeSeats({ x: p.cx, y: p.cy }, HW, HH, list));
     }
-    const seatFor = (dev: string | undefined, i: number, fallback: { cx: number; cy: number }): { x: number; y: number } =>
+    return (dev, i, fallback) =>
       (dev ? seatsByDevice.get(dev)?.get(String(i)) : undefined) ?? { x: fallback.cx, y: fallback.cy };
+  };
+
+  // setEnds — move an already-created link element. <line> carries coordinates
+  // as attributes; an arc is a <path>, so it gets a rebuilt `d`.
+  const setEnds = (elm: SVGElement, x1: number, y1: number, x2: number, y2: number, arc: number): void => {
+    if (elm.tagName === "line") {
+      elm.setAttribute("x1", String(x1)); elm.setAttribute("y1", String(y1));
+      elm.setAttribute("x2", String(x2)); elm.setAttribute("y2", String(y2));
+    } else {
+      elm.setAttribute("d", arcPath(x1, y1, x2, y2, arc));
+    }
+  };
+  const moveDot = (elm: SVGElement | null, at: { x: number; y: number }): void => {
+    if (!elm) return;
+    elm.setAttribute("cx", String(at.x)); elm.setAttribute("cy", String(at.y));
+  };
+
+  // redrawLinks — FULL rebuild of the link layer: creates every element and
+  // records its handle. Used for real renders (mount, staging change, lens).
+  const redrawLinks = (): void => {
+    linkLayer.replaceChildren();
+    linkEls.clear();
+    const seatFor = seatResolver();
 
     links.forEach((link, linkIdx) => {
       const from = link.local_device ? pos(link.local_device) : undefined;
@@ -425,6 +484,7 @@ export function renderTopologySVG(
       const arc = occlusionOffset(link);
       const fromP = seatFor(link.local_device, linkIdx, from);
       const toP = seatFor(link.remote_device, linkIdx, to);
+      let hitEl: SVGElement | null = null;
       if (opts.onLinkClick) {
         const hit = arc === 0
           ? svgEl("line", { "class": "topo-link-hit", x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y) })
@@ -432,6 +492,7 @@ export function renderTopologySVG(
         const onLinkClick = opts.onLinkClick;
         hit.addEventListener("click", (e) => { e.stopPropagation(); onLinkClick(link); });
         linkLayer.appendChild(hit);
+        hitEl = hit;
       }
       let truthClass = "";
       let widthAttr: string | undefined;
@@ -442,35 +503,81 @@ export function renderTopologySVG(
       const line = arc === 0
         ? svgEl("line", { "class": linkClass, x1: String(fromP.x), y1: String(fromP.y), x2: String(toP.x), y2: String(toP.y), ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}) })
         : svgEl("path", { "class": linkClass, d: arcPath(fromP.x, fromP.y, toP.x, toP.y, arc), fill: "none", ...(widthAttr !== undefined ? { "stroke-width": widthAttr } : {}) });
+      // A zone fold merges parallel links into one edge; say so on hover rather
+      // than drawing a count that would clutter a dense canvas.
+      const aggregate = typeof link.aggregate === "number" ? link.aggregate : 0;
+      if (aggregate > 1) {
+        line.classList.add("topo-link--aggregate");
+        const at = svgEl("title");
+        at.textContent = `${aggregate} links`;
+        line.appendChild(at);
+      }
       if (link.local_device) line.setAttribute("data-local-device", link.local_device);
       if (link.remote_device) line.setAttribute("data-remote-device", link.remote_device);
       if (link.local_interface) line.setAttribute("data-local-iface", link.local_interface);
       if (link.remote_interface) line.setAttribute("data-remote-iface", link.remote_interface);
       linkLayer.appendChild(line);
 
+      let vniLocal: SVGElement | null = null, vniRemote: SVGElement | null = null;
       if (opts.vniMemberPorts) {
         const mem = linkEndpointMembership(link, opts.vniMemberPorts);
-        if (mem.local) linkLayer.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(fromP.x), cy: String(fromP.y), r: "7" }));
-        if (mem.remote) linkLayer.appendChild(svgEl("circle", { "class": "topo-vni-endpoint", cx: String(toP.x), cy: String(toP.y), r: "7" }));
+        if (mem.local) { vniLocal = svgEl("circle", { "class": "topo-vni-endpoint", cx: String(fromP.x), cy: String(fromP.y), r: "7" }); linkLayer.appendChild(vniLocal); }
+        if (mem.remote) { vniRemote = svgEl("circle", { "class": "topo-vni-endpoint", cx: String(toP.x), cy: String(toP.y), r: "7" }); linkLayer.appendChild(vniRemote); }
       }
+      let dotLocal: SVGElement | null = null, dotRemote: SVGElement | null = null;
       if (opts.portStatesByDevice) {
-        const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): void => {
-          if (!dev || !iface) return;
+        const ifaceDot = (dev: string | undefined, iface: string | undefined, at: { x: number; y: number }): SVGElement | null => {
+          if (!dev || !iface) return null;
           const st = opts.portStatesByDevice?.get(dev)?.get(iface);
           const state = portDotState(st);
           const members = opts.lagMembersByDevice?.get(dev)?.get(iface);
           const dot = svgEl("circle", { "class": `topo-iface-dot topo-iface-dot--${state}`, cx: String(at.x), cy: String(at.y), r: "4", "aria-label": portDotTooltip(iface, st) });
           attachFastTip(dot, () => buildPortTip(iface, st, state, members));
           linkLayer.appendChild(dot);
+          return dot;
         };
-        ifaceDot(link.local_device, link.local_interface, fromP);
-        ifaceDot(link.remote_device, link.remote_interface, toP);
+        dotLocal = ifaceDot(link.local_device, link.local_interface, fromP);
+        dotRemote = ifaceDot(link.remote_device, link.remote_interface, toP);
       }
+      linkEls.set(linkIdx, { hit: hitEl, line, vniLocal, vniRemote, dotLocal, dotRemote });
     });
+  };
+
+  // retargetLinks — a DRAG FRAME. Recomputes seats and MOVES the existing
+  // elements; creates nothing and registers no listeners.
+  //
+  // The full rebuild recreated ~4 elements per link plus three hover listeners
+  // per interface dot on every mousemove — at 400 devices / 1218 links that is
+  // ~4,800 elements and ~7,300 listener registrations per frame, and it was the
+  // dominant cost once the occlusion scan was gated out. Occlusion is already
+  // skipped mid-drag, so every link is straight here (arc 0).
+  const retargetLinks = (): void => {
+    const seatFor = seatResolver();
+    for (const [linkIdx, els] of linkEls) {
+      const link = links[linkIdx];
+      if (!link) continue;
+      const from = link.local_device ? pos(link.local_device) : undefined;
+      const to = link.remote_device ? pos(link.remote_device) : undefined;
+      if (!from || !to) continue;
+      const fromP = seatFor(link.local_device, linkIdx, from);
+      const toP = seatFor(link.remote_device, linkIdx, to);
+      if (els.hit) setEnds(els.hit, fromP.x, fromP.y, toP.x, toP.y, 0);
+      setEnds(els.line, fromP.x, fromP.y, toP.x, toP.y, 0);
+      moveDot(els.vniLocal, fromP);
+      moveDot(els.vniRemote, toP);
+      moveDot(els.dotLocal, fromP);
+      moveDot(els.dotRemote, toP);
+    }
   };
   redrawLinks();
   // Exposed so the drag handler can follow the moved card live.
-  const setDragOverride = (o: { name: string; cx: number; cy: number } | null): void => { dragOverride = o; redrawLinks(); };
+  // Mid-drag: move the existing elements (cheap). On drop: one full rebuild,
+  // which restores occlusion routing and any arc geometry.
+  const setDragOverride = (o: { name: string; cx: number; cy: number } | null): void => {
+    dragOverride = o;
+    if (o) retargetLinks();
+    else redrawLinks();
+  };
 
   // Draw nodes.
   for (const node of nodes) {
@@ -497,9 +604,13 @@ export function renderTopologySVG(
     }
 
     const isDimmed = dimmed.has(node.name);
+    // A collapsed zone renders as ONE wider card standing in for its members
+    // (topology-zones.ts). It is a group, not a device: no status dot, no drift
+    // badge, no drag-to-pin — clicking it unfolds the zone.
+    const isZone = String(node.type) === "zone";
     const g = svgEl("g", {
       "class": "topo-node"
-        + (String(node.type) === "host" ? " topo-node--host" : " topo-node--switch")
+        + (isZone ? " topo-node--zone" : String(node.type) === "host" ? " topo-node--host" : " topo-node--switch")
         + (isSelected ? " topo-node--selected" : "")
         + (pendingCount > 0 ? " topo-node--pending" : "")
         + (isDimmed ? " topo-node--dimmed" : "")
@@ -536,24 +647,29 @@ export function renderTopologySVG(
       }));
     }
 
+    const cardW = isZone ? NODE_W + 36 : NODE_W;
     const rect = svgEl("rect", {
-      x: String(pos.cx - NODE_W / 2),
+      x: String(pos.cx - cardW / 2),
       y: String(pos.cy - NODE_H / 2),
-      width: String(NODE_W),
+      width: String(cardW),
       height: String(NODE_H),
-      rx: "6",
+      rx: isZone ? "10" : "6",
     });
     g.appendChild(rect);
 
     // Role glyph (uplift 4.1): a small silhouette anchoring the card's
     // top-left — switch = fabric glyph, host = server glyph. Outline paths
     // (Lucide, MIT) scaled 24→11px; stroke inherits the palette accent via CSS.
-    const glyphPath = String(node.type) === "host"
-      ? "M2 2h20v8H2zM2 14h20v8H2zM6 6h.01M6 18h.01"
-      : "M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9zM6 9v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9";
+    const glyphPath = isZone
+      // Stacked cards — a group of devices, not a device. A zone wearing the
+      // fabric glyph read as "one big switch", which is exactly the wrong idea.
+      ? "M3 7h11v11H3zM7 3h11v11"
+      : String(node.type) === "host"
+        ? "M2 2h20v8H2zM2 14h20v8H2zM6 6h.01M6 18h.01"
+        : "M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9zM6 9v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9";
     const glyph = svgEl("g", {
       "class": "topo-node-glyph",
-      transform: `translate(${pos.cx - NODE_W / 2 + 7}, ${pos.cy - NODE_H / 2 + 7}) scale(${11 / 24})`,
+      transform: `translate(${pos.cx - (isZone ? NODE_W + 36 : NODE_W) / 2 + 7}, ${pos.cy - NODE_H / 2 + 7}) scale(${11 / 24})`,
     });
     glyph.appendChild(svgEl("path", { d: glyphPath }));
     g.appendChild(glyph);
@@ -586,16 +702,19 @@ export function renderTopologySVG(
       x: String(pos.cx),
       y: String(pos.cy - 8),
     });
-    label.textContent = node.name;
+    // Synthetic nodes (collapsed zones) carry their own display text; a device
+    // is titled by its name.
+    label.textContent = typeof node.label === "string" ? node.label : node.name;
     g.appendChild(label);
 
-    if (node.type) {
+    const subtitle = typeof node.sublabel === "string" ? node.sublabel : node.type ? String(node.type) : "";
+    if (subtitle !== "") {
       const typeLabel = svgEl("text", {
         "class": "topo-node-type",
         x: String(pos.cx),
         y: String(pos.cy + 10),
       });
-      typeLabel.textContent = String(node.type);
+      typeLabel.textContent = subtitle;
       g.appendChild(typeLabel);
     }
 
@@ -631,7 +750,7 @@ export function renderTopologySVG(
     // upcoming click — otherwise tiny-jitter clicks would feel like
     // they dropped events.
     let dragOccurred = false;
-    if (opts.onNodeMoved) {
+    if (opts.onNodeMoved && !isZone) {
       const onNodeMoved = opts.onNodeMoved;
       const startCx = pos.cx;
       const startCy = pos.cy;
@@ -692,6 +811,8 @@ export function renderTopologySVG(
         dragOccurred = false;
         return;
       }
+      const folded = isZone ? zoneOfNodeId(node.name) : null;
+      if (folded !== null && onZoneToggle) { onZoneToggle(folded); return; }
       opts.onNodeClick(node.name, e);
     });
     g.addEventListener("contextmenu", (e) => {
@@ -711,7 +832,7 @@ export function renderTopologySVG(
 
     // Phase 2: substrate-agnostic status badge. Color matches state via CSS
     // (topo-status-dot--{state}); tooltip carries substrate detail.
-    if (status) {
+    if (status && !isZone) {
       const sx = pos.cx - NODE_W / 2 + 8;
       const sy = pos.cy + NODE_H / 2 - 8;
       const dot = svgEl("g", { "class": "topo-status-badge", "data-status-badge": node.name });
@@ -727,7 +848,7 @@ export function renderTopologySVG(
 
     // Pending-changes badge (small dot in the bottom-right; drift is top-right,
     // delete is top-left, so we avoid overlap.)
-    if (pendingCount > 0) {
+    if (pendingCount > 0 && !isZone) {
       const pBadge = svgEl("g", { "class": "topo-pending-badge" });
       const pcx = pos.cx + NODE_W / 2 - 8;
       const pcy = pos.cy + NODE_H / 2 - 8;
@@ -747,7 +868,7 @@ export function renderTopologySVG(
     // Drift badge: small dot in the top-right when the device has drift.
     // driftCount + driftClass were computed up top alongside the other
     // node-level state classes; reuse that value here.
-    if (driftCount > 0) {
+    if (driftCount > 0 && !isZone) {
       const badge = svgEl("g", { "class": "topo-drift-badge" });
       const cx = pos.cx + NODE_W / 2 - 8;
       const cy = pos.cy - NODE_H / 2 + 8;

@@ -118,7 +118,7 @@ function renderIfaceTable(host: HTMLElement, device: string, rows: InterfaceRow[
   populateBtn.addEventListener("click", () => void openPopulateDefaultPorts(populateHost, device, reload));
 
   // Table.
-  const table = el("table", { className: "table table--2xs iface-table" });
+  const table = el("table", { className: "table table--2xs table--sticky-head iface-table" });
   const thead = el("thead");
   const hr = el("tr");
   for (const h of ["Port", "Role", "Speed/MTU", "VLAN / VRF / IP", "Service", "Link"]) hr.appendChild(el("th", {}, h));

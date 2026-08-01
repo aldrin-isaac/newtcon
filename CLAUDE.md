@@ -132,6 +132,7 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     form-error-binding.ts     → extractFieldFromValidationError + attachServerValidationToForm + clearFieldErrors (per-field server-error display; slice #172.B)
     topology-viewport.ts      → fitToBounds / zoomAt / panBy / viewBoxStr — pure SVG-viewBox pan/zoom math (Topology view; slice #174.A)
     topology-positions.ts     → loadPositions / savePosition / clearPositions — per-network node-position persistence in localStorage (Topology view; slice #174.B)
+    topology-zones.ts         → collapseZones + zoneNodeId/zoneOfNodeId + loadCollapsedZones/saveCollapsedZones — pure zone-fold graph transform for the Topology canvas: a collapsed zone's members leave the graph and become ONE synthetic card, crossing links re-terminate on it (parallel ones merging with an `aggregate` count), intra-zone links vanish. The density affordance for large fabrics; choice persists per network
     permission-catalog.ts     → describePermission + groupFor + groupPermissions — curated per-permission human descriptions + operator-domain grouping (Permissions tab; slice #170.A)
     permission-derivations.ts → normalizeGrant + summarizeUser + summarizePermission + allUsers — forward + inverse member-of derivations on AuthorizationDetail (Permissions tab lookup; slice #170.B)
     permission-search.ts      → filterAuthorization — single-query substring filter for the Permissions tab (super-users + groups + permissions; matches wire-name / title / body / grant members; slice #170.C)
