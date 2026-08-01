@@ -399,10 +399,16 @@ func (c *Client) CreateNetwork(ctx context.Context, id, description string) (inf
 }
 
 // Posture probes which optional engine layers are present (uplift 6.4):
-// the L2c auth surface (credential-less login POST: 401/400 ⇒ enabled,
-// 404 ⇒ absent) and the L6 audit log (first network's audit read: 200 ⇒
-// enabled, an error naming "disabled" ⇒ disabled). Probe failures are
-// "unknown" — the console never guesses posture.
+// the L2c auth surface and the L6 audit log. Probe failures are "unknown" —
+// the console never guesses posture, because claiming "audit is off" when we
+// simply could not ask would be worse than admitting we don't know.
+//
+// The probe is UNAUTHENTICATED by design: it backs the public /api/health,
+// which renders before the operator signs in. That is also its limit — an
+// engine started with --auth-pam-service 401s every route, so the audit read
+// below never resolves and posture stays "unknown". Filed as newtron#476
+// (no unauthenticated liveness/posture surface); nothing to work around here,
+// the honest answer is "unknown" until the engine can be asked.
 func (c *Client) Posture(ctx context.Context) (authSurface, auditLog string) {
 	authSurface, auditLog = "unknown", "unknown"
 
@@ -435,11 +441,24 @@ func (c *Client) Posture(ctx context.Context) (authSurface, auditLog string) {
 				url := fmt.Sprintf("%s/networks/%s/audit/events?limit=1", c.newtronBase(), nets[0].ID)
 				if req2, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil); err == nil {
 					if resp2, err := c.httpClient.Do(req2); err == nil {
-						body2, _ := io.ReadAll(resp2.Body)
+						io.Copy(io.Discard, resp2.Body)
 						resp2.Body.Close()
-						if resp2.StatusCode == http.StatusOK {
+						// Status code is the contract, not the prose. newtron's
+						// docs/newtron/api.md §audit: "When --audit is unset on
+						// cmd/newt-server, all three endpoints return 404 — there
+						// is no audit log to inspect." The network itself exists
+						// (we just listed it), so a 404 HERE means the audit log
+						// is off, not that the network is missing.
+						//
+						// This used to sniff the body for the word "disabled",
+						// which newtron never emits — so a genuinely audit-less
+						// engine reported "unknown" instead of "disabled".
+						// Anything else (403 without audit.read, a 5xx) is a
+						// real "we could not tell".
+						switch resp2.StatusCode {
+						case http.StatusOK:
 							auditLog = "enabled"
-						} else if bytes.Contains(body2, []byte("disabled")) {
+						case http.StatusNotFound:
 							auditLog = "disabled"
 						}
 					}
