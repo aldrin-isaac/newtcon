@@ -80,7 +80,13 @@
  * against the grown row and can exceed the window — which is exactly how the
  * topology canvas used to push its status strip off-screen. app-content already
  * carries overflow:auto, so views that are genuinely taller scroll inside it. */
-.app-main { display: grid; grid-template-rows: var(--header-height) 1fr; height: 100vh; min-height: 0; }
+/* min-width:0 is load-bearing, not tidiness: a grid item defaults to
+ * min-width:auto, so the 1fr workspace track refuses to shrink below its
+ * CONTENT's minimum. Dragging the docked drawer wide then pushed the row past
+ * the window (measured 232+545+648 = 1425px in a 1300px viewport, with the page
+ * scrolling sideways) instead of the workspace giving way. With this, the track
+ * yields and .app-content's own overflow:auto handles anything too narrow. */
+.app-main { display: grid; grid-template-rows: var(--header-height) 1fr; height: 100vh; min-height: 0; min-width: 0; }
 
 .app-header {
   display: flex; align-items: center; gap: var(--space-md);
@@ -501,7 +507,17 @@
  * MutationObserver + canvas padding-right). */
 .drawer { position: fixed; top: 0; right: 0; width: var(--drawer-user-width, min(640px, 92vw)); max-width: 92vw; height: 100vh; background: var(--color-surface); border-left: 1px solid var(--color-border-subtle); box-shadow: var(--shadow-overlay); transform: translateX(100%); transition: transform var(--duration-drawer) var(--ease-spring); z-index: 20; display: flex; flex-direction: column; }
 .drawer.open { transform: translateX(0); }
-@media (min-width: 1400px) {
+/* Dock threshold. 1400px was too high: between ~1100 and 1400 — an ordinary
+ * laptop, and exactly the width the sidebar rail was added for — the drawer fell
+ * back to a flat 640px OVERLAY covering most of the canvas, instead of taking a
+ * column and letting the middle shrink (and be resized by the grab handle).
+ *
+ * Docking from 1100px keeps one coherent set of breakpoints with the sidebar
+ * rail rather than two unrelated ones, and the docked width is already
+ * viewport-relative — min(560px, 38vw) — so it narrows itself as the window
+ * does instead of bullying the canvas. Below 1100 there is genuinely not room
+ * for three columns, so the overlay remains. */
+@media (min-width: 1100px) {
   .app-shell { grid-template-columns: var(--sidebar-width) 1fr auto; }
   .drawer {
     position: static;
@@ -2910,7 +2926,9 @@
    control also carries a title so a sighted operator gets a tooltip. */
 
 @media (max-width: 1100px) {
-  .app-shell { grid-template-columns: var(--sidebar-width-collapsed) 1fr; }
+  /* auto third column so the docked drawer still gets its track at exactly
+     1100px, where this rule and the dock rule above both apply. */
+  .app-shell { grid-template-columns: var(--sidebar-width-collapsed) 1fr auto; }
 
   .app-sidebar {
     padding: var(--space-md) var(--space-2xs);
