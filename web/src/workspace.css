@@ -191,6 +191,12 @@
    eye reads it as a bundle. The exact count is on hover. */
 .topo-link--aggregate { stroke-width: 2.5; opacity: 0.9; }
 
+/* Quiet running count beside the fold controls — "2 of 5 folded". */
+.topology-zone-fold-count {
+  font-family: var(--font-mono); font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
 /* vni lens, port level: member-port pills under member cards + endpoint
    dots on links where a member port terminates. A link dotted on ONE end
    is the missing tagged join — the RCA-051 hole, visible. */

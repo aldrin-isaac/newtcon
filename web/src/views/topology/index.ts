@@ -360,7 +360,69 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     // single-zone topology has nothing to filter by, so the row stays
     // out of the way. The mount target is captured so toggling can
     // re-render the row without disturbing other DOM.
+    // Collapsed zones — the density affordance. A folded zone renders as ONE
+    // card standing in for its members (topology-zones.ts does the graph
+    // transform); the choice persists per network like pinned positions do.
+    //
+    // Declared HERE, above the zone chrome, because renderZoneFoldRow() runs at
+    // mount to paint the initial button state and reads this — leaving it down
+    // with the viewport state put it in the temporal dead zone and threw during
+    // mount (surfacing, unhelpfully, as "Failed to load topology").
+    let collapsedZones = loadCollapsedZones(activeNetName);
+    // applyZoneFold — the one commit path for a fold change (single toggle or
+    // the bulk buttons). Folding changes the graph SHAPE, so the cached auto
+    // layout no longer describes it: drop the cache and refit the viewport.
+    const applyZoneFold = (next: Set<string>): void => {
+      collapsedZones = next;
+      saveCollapsedZones(activeNetName, collapsedZones);
+      resetLayoutCache();
+      viewState = undefined;
+      renderZoneFoldRow();
+      renderGraph();
+    };
+    const toggleZone = (zone: string): void => {
+      const next = new Set(collapsedZones);
+      if (next.has(zone)) next.delete(zone); else next.add(zone);
+      applyZoneFold(next);
+    };
+
     const zones = uniqueZones(deviceMetadata);
+
+    // Zone fold controls. Deliberately NOT in `toolbar`: that group is gated by
+    // view mode (Add link in Spec, the lab lifecycle in Lab), and folding is a
+    // way of LOOKING at the canvas — it has to work in every view. So it sits in
+    // the command bar beside the zone filter, which is the other zone control.
+    const zoneFoldRow = el("div", { className: "topology-filter-row topology-zone-fold-row" });
+    const renderZoneFoldRow = (): void => {
+      zoneFoldRow.textContent = "";
+      if (zones.length === 0) { zoneFoldRow.hidden = true; return; }
+      zoneFoldRow.hidden = false;
+      zoneFoldRow.appendChild(el("span", { className: "topology-filter-label" }, "Zones:"));
+      const folded = zones.filter((z) => collapsedZones.has(z)).length;
+      const mk = (label: string, enabled: boolean, title: string, next: () => Set<string>): void => {
+        const btn = el("button", {
+          type: "button",
+          className: "chip chip--md chip--clickable",
+          title,
+        }, label) as HTMLButtonElement;
+        if (!enabled) btn.disabled = true;
+        else btn.addEventListener("click", () => applyZoneFold(next()));
+        zoneFoldRow.appendChild(btn);
+      };
+      mk(`Collapse all${zones.length > 1 ? ` (${zones.length})` : ""}`, folded < zones.length,
+        folded < zones.length
+          ? "Fold every zone into a single card — the compact view for a large fabric"
+          : "Every zone is already collapsed",
+        () => new Set(zones));
+      mk("Expand all", folded > 0,
+        folded > 0 ? "Unfold every zone back to its devices" : "No zones are collapsed",
+        () => new Set<string>());
+      if (folded > 0) {
+        zoneFoldRow.appendChild(el("span", { className: "topology-zone-fold-count" },
+          `${folded} of ${zones.length} folded`));
+      }
+    };
+
     const filterRow = el("div", { className: "topology-filter-row" });
     const renderFilterRow = (): void => {
       filterRow.textContent = "";
@@ -402,6 +464,7 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const lensRow = el("div", { className: "topology-filter-row topology-lens-row" });
     headerBar.append(viewRow, lensRow);
     if (zones.length > 1) headerBar.appendChild(filterRow);
+    if (zones.length > 0) { renderZoneFoldRow(); headerBar.appendChild(zoneFoldRow); }
     headerBar.append(healthStrip, toolbar);
     root.appendChild(headerBar);
     const renderLensRow = (): void => {
@@ -469,21 +532,6 @@ export async function mountTopologyTab(root: HTMLElement): Promise<void> {
     const activeNet = activeNetName;
     const pinnedPositions = loadPositions(activeNet);
 
-    // Collapsed zones — the density affordance. A folded zone renders as ONE
-    // card standing in for its members (topology-zones.ts does the graph
-    // transform); the choice persists per network like pinned positions do.
-    let collapsedZones = loadCollapsedZones(activeNet);
-    const toggleZone = (zone: string): void => {
-      const next = new Set(collapsedZones);
-      if (next.has(zone)) next.delete(zone); else next.add(zone);
-      collapsedZones = next;
-      saveCollapsedZones(activeNet, collapsedZones);
-      // Folding changes the graph shape, so the cached auto-layout no longer
-      // describes it — drop it and refit.
-      resetLayoutCache();
-      viewState = undefined;
-      renderGraph();
-    };
 
     // Topology view: layout is a split — left = SVG diagram + toolbar,
     // right = docked action panel.

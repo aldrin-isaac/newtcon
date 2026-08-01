@@ -327,6 +327,11 @@ a:hover { color: var(--color-accent-hover); text-decoration: underline; }
 .chip--clickable { cursor: pointer; transition: all var(--duration-fast) var(--ease-standard); }
 .chip--clickable:hover { border-color: var(--color-accent); color: var(--color-text-primary); background: var(--color-surface-hover); }
 .chip--clickable:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+/* A clickable chip that currently has nothing to do — "Expand all" with nothing
+   folded. Reads as present-but-inert rather than disappearing, so the control
+   set doesn't reflow as state changes. */
+.chip--clickable:disabled { opacity: 0.45; cursor: default; }
+.chip--clickable:disabled:hover { border-color: var(--color-border-subtle); background: transparent; color: inherit; }
 .chip--ref::after { content: "→"; margin-left: 6px; opacity: 0.5; font-family: var(--font-system); }
 
 
