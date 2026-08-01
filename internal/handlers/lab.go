@@ -208,7 +208,6 @@ func RegisterLabRoutes(mux *http.ServeMux, deps LabDeps) {
 	}))
 }
 
-
 // writeLabValidation writes a 400 validation-failure error envelope.
 func writeLabValidation(w http.ResponseWriter, corrID, msg string) {
 	types.WriteError(w, http.StatusBadRequest, types.KindValidationFailure, msg,

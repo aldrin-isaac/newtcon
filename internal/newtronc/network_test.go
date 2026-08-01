@@ -194,10 +194,10 @@ func TestAddFilterRule_Success(t *testing.T) {
 
 	c := newtronc.New(srv.URL)
 	raw, err := c.AddFilterRule(context.Background(), "default", map[string]any{
-		"filter":   "my-filter",
-		"seq":      10,
-		"action":   "permit",
-		"src_ip":   "10.0.0.0/8",
+		"filter": "my-filter",
+		"seq":    10,
+		"action": "permit",
+		"src_ip": "10.0.0.0/8",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -250,9 +250,9 @@ func TestAddRoutePolicyRule_Success(t *testing.T) {
 
 	c := newtronc.New(srv.URL)
 	raw, err := c.AddRoutePolicyRule(context.Background(), "default", map[string]any{
-		"policy":   "my-policy",
-		"seq":      10,
-		"action":   "permit",
+		"policy": "my-policy",
+		"seq":    10,
+		"action": "permit",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

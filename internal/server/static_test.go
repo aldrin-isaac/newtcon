@@ -178,8 +178,8 @@ func TestRegisterDocsAssets_ServesRootFiles(t *testing.T) {
 	server.RegisterDocsAssets(mux, docsDir, rootDir)
 
 	for _, tc := range []struct {
-		path    string
-		want    string
+		path string
+		want string
 	}{
 		{"/CLAUDE.md", "CLAUDE.md newtcon"},
 		{"/API_CONTRACT.md", "API_CONTRACT.md newtcon"},

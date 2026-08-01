@@ -508,4 +508,3 @@ func RegisterNodesRoutes(mux *http.ServeMux, deps NodesDeps) {
 func normalizeIfaceName(name string) string {
 	return strings.ReplaceAll(name, "%2F", "/")
 }
-

@@ -43,7 +43,7 @@ type OutboundTLSOptions struct {
 //   - All fields zero            → nil (Go's default: system roots, no client cert)
 //   - CAPath != ""               → Config{RootCAs: <pool from PEM>}
 //   - SkipVerify == true         → Config{InsecureSkipVerify: true}
-//                                  (CA cert wins when both are set)
+//     (CA cert wins when both are set)
 //   - CertPath + KeyPath != ""   → Config{Certificates: [<pair>]} merged with above
 //
 // Returns an error if exactly one of CertPath / KeyPath is set, or if any

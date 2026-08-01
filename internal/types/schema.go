@@ -28,13 +28,13 @@ type SchemaKindsResponse struct {
 // extension also exposes paths + identifier + parent_ref so clients
 // drive CRUD URLs from the schema rather than hardcoded mappings.
 type SchemaMeta struct {
-	Kind        string             `json:"kind"`
-	Label       string             `json:"label"`
-	Description string             `json:"description"`
-	Fields      []SchemaFieldMeta  `json:"fields"`
-	Identifier  string             `json:"identifier,omitempty"`
-	ParentRef   string             `json:"parent_ref,omitempty"`
-	Paths       SchemaPaths        `json:"paths,omitempty"`
+	Kind        string            `json:"kind"`
+	Label       string            `json:"label"`
+	Description string            `json:"description"`
+	Fields      []SchemaFieldMeta `json:"fields"`
+	Identifier  string            `json:"identifier,omitempty"`
+	ParentRef   string            `json:"parent_ref,omitempty"`
+	Paths       SchemaPaths       `json:"paths,omitempty"`
 }
 
 // SchemaPaths declares the HTTP path templates per CRUD verb. All

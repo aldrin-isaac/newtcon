@@ -489,7 +489,9 @@ func (c *Client) nodePost(ctx context.Context, path string) (json.RawMessage, er
 // NodeRPC POSTs an arbitrary node-level newtron action with an optional JSON
 // body. subpath is the path segment after /nodes/{device}/ (for example
 // "create-vlan", "save-config", "add-static-route"). The full URL is
-//   /newtron/v1/networks/{network}/nodes/{device}/{subpath}?{rawQuery}
+//
+//	/newtron/v1/networks/{network}/nodes/{device}/{subpath}?{rawQuery}
+//
 // rawQuery is forwarded verbatim so caller-supplied options like
 // ?mode=topology and ?execute=false reach newtron unchanged.
 func (c *Client) NodeRPC(ctx context.Context, network, device, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
@@ -501,7 +503,9 @@ func (c *Client) NodeRPC(ctx context.Context, network, device, subpath, rawQuery
 }
 
 // InterfaceRPC POSTs an arbitrary per-interface newtron action. The full URL is
-//   /newtron/v1/networks/{network}/nodes/{device}/interfaces/{iface}/{subpath}?{rawQuery}
+//
+//	/newtron/v1/networks/{network}/nodes/{device}/interfaces/{iface}/{subpath}?{rawQuery}
+//
 // rawQuery is forwarded verbatim (see NodeRPC).
 func (c *Client) InterfaceRPC(ctx context.Context, network, device, iface, subpath, rawQuery string, body []byte) (json.RawMessage, error) {
 	path := fmt.Sprintf("/networks/%s/nodes/%s/interfaces/%s/%s", network, device, iface, subpath)

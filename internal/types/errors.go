@@ -93,10 +93,10 @@ type ErrorBody struct {
 // emission. No stack trace, exception type, or file/line is included — those
 // stay in logs (API_CONTRACT.md §internal, "No stack trace, no exception type").
 type InternalDetails struct {
-	CorrelationID  string     `json:"correlation_id"`
-	At             time.Time  `json:"at"`
-	Phase          string     `json:"phase"`
-	PartialResults any        `json:"partial_results"`
+	CorrelationID  string    `json:"correlation_id"`
+	At             time.Time `json:"at"`
+	Phase          string    `json:"phase"`
+	PartialResults any       `json:"partial_results"`
 }
 
 // WriteError serialises an [ErrorEnvelope] and writes it as JSON to w.
