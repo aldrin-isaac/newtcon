@@ -261,7 +261,7 @@ function makeFilterField(
 }
 
 export function renderEventsTable(events: AuditEvent[]): HTMLElement {
-  const table = el("table", { className: "table table--sm table--mono-all table--headband audit-table" });
+  const table = el("table", { className: "table table--sm table--mono-all table--headband table--sticky-head audit-table" });
   const head = el("thead");
   const headRow = el("tr");
   for (const h of ["Time", "User", "Device", "Operation", "Status"]) {

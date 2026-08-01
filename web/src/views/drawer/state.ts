@@ -201,7 +201,7 @@ function renderResourceTable(body: HTMLElement, data: unknown, columns: Resource
     body.appendChild(el("p", { className: "node-summary-stat-clean" }, "(none)"));
     return;
   }
-  const table = el("table", { className: "table table--dense table--2xs table--mono resource-table" });
+  const table = el("table", { className: "table table--dense table--2xs table--mono table--sticky-head resource-table" });
   const hr = el("tr");
   for (const h of headers) hr.appendChild(el("th", {}, h));
   table.appendChild(hr);
