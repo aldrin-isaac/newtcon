@@ -67,12 +67,25 @@ export async function authenticatePage(page, base = DEFAULT_BASE) {
 // hard-coding fixture-specific values — the key to being network-agnostic. The
 // session cookie is fetched once per process and reused.
 let _agnosticCookie;
-export async function apiGET(net, path, base = DEFAULT_BASE) {
+// Authenticated GET of any /api path — the network-agnostic form (/api/networks,
+// /api/labs/...). Use this rather than a bare fetch(): under --auth-required a
+// bare fetch gets a 401 whose JSON envelope parses fine, so the caller silently
+// reads an empty list instead of failing. That cost a 20s timeout in cmdk-verbs
+// (SVC came out undefined and the smoke waited for "apply undefined on ...").
+//
+// Returns the parsed JSON; throws on non-2xx so a auth/permission problem
+// surfaces as itself instead of as absent data.
+export async function apiGetPath(path, base = DEFAULT_BASE) {
   if (_agnosticCookie === undefined) _agnosticCookie = await loginCookie(base);
   const H = _agnosticCookie ? { Cookie: `${_agnosticCookie.name}=${_agnosticCookie.value}` } : {};
-  const r = await fetch(`${base}/api/networks/${net}/${path}`, { headers: H });
-  if (!r.ok) throw new Error(`GET /api/networks/${net}/${path}: HTTP ${r.status}`);
+  const r = await fetch(`${base}${path}`, { headers: H });
+  if (!r.ok) throw new Error(`GET ${path}: HTTP ${r.status}`);
   return r.json();
+}
+
+// Authenticated GET of a network-scoped resource. The common case.
+export async function apiGET(net, path, base = DEFAULT_BASE) {
+  return apiGetPath(`/api/networks/${net}/${path}`, base);
 }
 
 // True when a device has live state to read (a deployed VM). The staged smoke
