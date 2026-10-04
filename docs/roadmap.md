@@ -344,3 +344,47 @@ Not started because the local history + audit log covers the operator
 loop today; promote when multi-operator teams need shared batch-level
 history (the demand signal: "who applied this?" answered from another
 browser).
+
+### 4. Rehearsal compare (by-hand vs. automation)
+
+**Status:** future
+
+**Why it matters:** Operator-philosophy invariant 6 makes the lab the
+rehearsal sandbox, and invariant 2 says the operator must be able to do
+by hand anything the automation does. A rehearsal is only useful if the
+operator can tell whether they got it right: "I configured this VLAN by
+hand on the lab switch; does the device now hold what newtron would
+have written?"
+
+**What it is:** a way to read a lab device's state against newtron's
+projection that is framed as practice, not as fault. Most of the data
+already exists. Drift detection compares the device's CONFIG_DB with
+the projection entry by entry. What this would add:
+
+- A starting point: the operator picks the intent they want to practise
+  (e.g. "apply service X on Ethernet4"). The projection shows the
+  expected entries *before* they start, without applying anything
+  (newtron's `dry_run=true`).
+- A finish line: after working by hand, the operator sees the device
+  set against the expected entries. A match is the success state, and
+  the remaining differences are labelled as rehearsal gaps, not drift
+  to reconcile.
+- A teaching step: for each remaining difference, show the CONFIG_DB
+  key and fields so the operator can finish the job by hand
+  (invariants 2 and 7).
+
+**What it is NOT:** not a mode toggle, not a simulated device, not an
+embedded terminal. The operator works in their own ssh session; newtcon
+only reads and compares. Production devices are out of scope: a by-hand
+change there is drift and is handled by Reconcile.
+
+**Open questions:**
+- Does newtron's dry-run preview carry enough to show the expected
+  entries for a single intent, or would a new read be needed? (Survey
+  before filing anything, per CLAUDE.md §2.)
+- Once the operator matches the projection by hand, should newtcon
+  offer to record the intent so newtron's intent tree agrees with the
+  device, or should the lab be reprovisioned instead?
+
+**Triggers for promotion to `scoped`:** the operator asks for drills or
+training on a lab network, or a manual-takeover exercise is planned.

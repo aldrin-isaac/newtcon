@@ -144,17 +144,28 @@ links to the substrate-level cause and to the principle (in
 `DESIGN_PRINCIPLES_NEWTRON`, this document, or `CLAUDE.md`) that
 governs it.
 
-### 6. Rehearsal mode is real
+### 6. Rehearsal happens in the lab
 
-A safe sandbox where the operator can practice manual control without
-affecting reality. Operations in rehearsal mode are explicitly
-marked, no real device is touched, and the operator's actions are
-shown alongside what the automation would have done. Used for
-training, drills, and pre-flight before high-stakes changes.
+The operator needs a safe place to practise manual control without
+affecting production: training, drills, and dry runs of a high-stakes
+change by hand before it is done for real. That place is a **lab
+network**: the same topology, deployed by newtlab as real SONiC VMs. It
+has the same CONFIG_DB and the same tools the operator would use on a
+production device, and no production device is touched.
+
+newtcon does not build a separate "rehearsal mode." A lab device is
+operated exactly like a physical one (see `docs/DIRECTIVE.md` §Settled
+product decisions), so practice in the lab is practice on the real
+thing. The operator rehearses with their own tools (ssh, redis-cli,
+vendor CLI), as invariant 2 requires. newtcon's part is to keep the
+lab one click away: deploy, provision, and compare the device with
+intent.
 
 Rehearsal is non-negotiable. Manual-takeover-readiness without
 rehearsal is theoretical, and theoretical readiness is exactly the
-autopilot whose pilots cannot fly when it fails.
+autopilot whose pilots cannot fly when it fails. Comparing a by-hand
+result with what newtron would have done is tracked in
+`docs/roadmap.md` §4.
 
 ### 7. Errors carry the substrate
 
