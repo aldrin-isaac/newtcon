@@ -45,7 +45,7 @@ Each dormant prompt carries a banner instructing the agent to return immediately
    - Live smoke test against newtron at `:18080`.
    - Vocabulary scan: `grep -irE 'substrate|surface|service-first|pipeline-stage' web/dist/` and source comments — both clean.
    - PR title + body accurately describe what changed.
-6. Squash-merge directly; pull main; start next slice.
+6. Merge when the operator says so (merge commit, not squash); pull main; rebuild and restart the live :8095 instance; start the next slice.
 
 ## Authoritative governance
 

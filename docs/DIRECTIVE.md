@@ -153,7 +153,7 @@ Full discipline in `~/.claude/projects/-home-aldrin-src-newtcon/memory/feedback_
 - `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — the principles all three tools derive from.
 - `../newtron/docs/editing-guidelines.md` — documentation craft.
 - `../newtron/docs/ai-instructions.md` — universal behavioral directives.
-- `docs/adr/0001-scope-justification-vs-newtrun.md` — the 3-tool rebalance.
+- `docs/adr/0001-scope-justification-vs-newtrun.md` — the 3-tool rebalance (its verdict: don't duplicate newtrun). Its "what stays in newtcon" list (observation-history store, Report Bug, Rehearsal catalogs, operations log) predates this directive and is **not** a build list.
 - `docs/adr/0002-frontend-framework.md` — vanilla HTML + TypeScript-as-typed-ES-modules (no bundler).
 - The "newtron API Consumption Rule" in `CLAUDE.md` — all newtron HTTP traffic via `internal/newtronc/`, no Go imports of newtron, no subprocess.
 - The build convention: `go build -o bin/newtcon-server ./cmd/newtcon-server`.

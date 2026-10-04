@@ -72,7 +72,7 @@ filed.
 
 ### 1. Spec authoring
 
-**Status:** future
+**Status:** scoped — shipped (DIRECTIVE slice 6; schema-driven forms since newtron #240). Kept for traceability.
 
 **Why it matters:** Operators who can extend the service catalog
 become **co-developers of the automation** — the strongest form of
@@ -190,7 +190,7 @@ edit assumes the physical device is present").
 
 ### 2. Graphical topology visualization / change
 
-**Status:** future
+**Status:** scoped — shipped (DIRECTIVE slices 3, 7, 8; Spec / Lab / Physical views). Kept for traceability.
 
 **Why it matters:** The physical network shape — which devices
 exist, which links connect them, which tier each device belongs to,
