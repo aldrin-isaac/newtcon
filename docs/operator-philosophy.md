@@ -322,13 +322,18 @@ This document is the foundation. It is the **why** behind:
 
 - The design principles in `CLAUDE.md` §Design Principles (which
   operationalize this philosophy at the implementation level).
-- The non-goals in `docs/architecture.md` (no topology editor, no
-  per-device configurator, no status-dashboard primary surface — all
-  derive from this philosophy's rejections).
-- The operator surfaces in `API_CONTRACT.md` (Service Composer,
-  Operator Inbox, Change Workbench — and the Provenance and
-  Rehearsal surfaces that this philosophy demands and that future
-  Contract PRs will add).
+- The operator workflow loop and settled product decisions in
+  `docs/DIRECTIVE.md`.
+
+The 2026-05 framing this section used to cite (the `docs/architecture.md`
+non-goals "no topology editor, no per-device configurator, no
+status-dashboard primary surface", and the `API_CONTRACT.md` Composer /
+Inbox / Workbench surfaces) was superseded by the operator's 2026-05-31
+directive. newtcon now has a topology editor, per-device actions and a
+coloured status palette, and each of them is held to these invariants:
+status colours lead to the underlying data (CONFIG_DB, projection,
+drift) one click away. They are not a dashboard that stops at
+green/red.
 
 When this philosophy and a derivative principle disagree, the
 philosophy wins, and the derivative is updated to match.

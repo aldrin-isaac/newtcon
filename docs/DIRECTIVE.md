@@ -17,7 +17,7 @@ newtcon's UI is one integrated workspace around the operator's network-lifecycle
 1. **Author specs** — services, IP VPNs, MAC VPNs, QoS policies, filters, route policies, prefix lists, device profiles, zones, platforms.
 2. **Define topology + bind authored intent** — add nodes, draw links, bind services to interfaces.
 3. **Visualize the topology + mapped intent** — see the network you've composed.
-4. **Deploy topology** (whole or in parts) — spawn the actual VMs / wire the links. *Requires newtlab-server, gap filed as newtron#53.*
+4. **Deploy topology** (whole or in parts) — spawn the actual VMs / wire the links (newtlab, reached through `bin/newt-server`).
 5. **Detect drift** — actual device CONFIG_DB vs device-local intent and topology-level intent.
 6. **Reconcile drift** — restore device to intent.
 
@@ -31,13 +31,45 @@ Everything else newtcon could surface (per-device CONFIG_DB browser, BGP/EVPN st
 | 1 | Multi-spec workspace at `/` (read all 10 spec types) | 1 | ✅ PR #116 |
 | 2 | Per-spec detail drawer (full newtron payload) | 1 | ✅ PR #117 |
 | 3 | Topology view + node inspector (every per-device read) | 2, 3 | ✅ PR #118 |
-| 4 | Drift indicator + drift detail panel | 5 | ✅ drift counts on topology SVG (PR #131); detail-panel iteration ongoing |
-| 5 | Reconcile flow (preview → atomic apply) | 6 | next |
-| 6 | Spec authoring + editing (POST/PUT/DELETE for each kind) | 1 → write | ✅ PR #131 (staging queue + workspace Save/Discard) |
+| 4 | Drift indicator + drift detail panel | 5 | ✅ drift counts on topology SVG (PR #131); device drawer Drift tab |
+| 5 | Reconcile flow (preview → atomic apply) | 6 | ✅ device drawer Drift tab: Reconcile preview → apply |
+| 6 | Spec authoring + editing (POST/PUT/DELETE for each kind) | 1 → write | ✅ PR #131 (pending-changes queue + Apply All / Discard); schema-driven forms since newtron #240 |
 | 7 | Topology editor + interface→service binding | 2 → write | ✅ PRs #131 / #140 / #141 (port-mode + service binding; primitive composition kept in Specs tab) |
 | 8 | Deploy from UI (newtlab-server lifecycle + SSE phases) | 4 | ✅ unified-substrate phases 1–4: PRs #136 (deploy modal) / #137 (status badges) / #138 (lifecycle inspector) / #139 (Lab tab retired, Provision moves to toolbar) |
 
 The 6-step loop closes end-to-end through the Topology tab today: operator authors specs in Specs → adds devices + links in Topology → binds services to interfaces → brings up as lab → watches booting → running badges → reconciles drift per-device.
+
+## Settled product decisions
+
+Operator decisions made after the loop shipped. Each is binding until the operator changes it; a later decision overrides an earlier one.
+
+**Where things are authored**
+- Specs are authored in **Specs**; Topology only *applies* them. Services are composed in Specs and applied to interfaces in Topology. Topology never authors primitives (prefix lists, route policies, …).
+- Nodes are created in Specs and *added* to the topology from a drop-down of defined nodes. The canvas does not create or delete node specs.
+- A port's mode (routed / bridged access / bridged trunk) is set in Topology. Routed ports take a predefined service. Bridged ports take predefined VLANs.
+- Scope (network / zone / node) is picked first on a form, and the scope instance comes from a drop-down. Zone and node overrides nest under their network-level record. "Add override" starts from the parent's values.
+- References to other specs (prefix lists, route policies, VPNs, filters, …) are drop-downs of defined specs, never free-form text.
+
+**How changes happen**
+- **Every change queues.** That includes spec edits, sub-rules, topology changes, port configuration and SSH login. Apply All runs the queue in order after an "are you sure?" confirmation. Discard only clears the browser-side queue and never touches newtron. A partial failure leaves the failed items queued and reports per item. Each queued item shows its request URL, scope included, alongside its body.
+- **Do no harm.** Undo is a roll *forward* to a past state, made from the inverse each change carries with it. It is never a rollback to a savepoint. Server-side history is not newtron's job.
+- Offer only meaningful transitions. Actions that make no sense in the current state are disabled: no Destroy before Deploy, no Provision before Deploy, no delete while bindings exist.
+
+**Topology views**
+- Three views over one topology spec: **Spec** (the only place to add or remove nodes and links), **Lab** (newtlab Deploy / Provision / Destroy, using newtlab's own verbs), and **Physical** (Provision only).
+- Colours: blue = in the spec but not actuated, green = actuated and matching the spec, red = actuated and down, violet = drift. Lab drift and physical drift are independent of each other.
+- newtlab only bootstraps devices. Once a lab VM is running it is operated exactly like a physical device.
+- A network's name is its single identity, for lab and physical alike. Newtron needs only the name, never a directory path.
+
+**Engine fidelity**
+- Spec forms render from newtron's schema. newtcon carries no per-kind knowledge of what a spec means. Report limitations rather than silently dropping a capability.
+- Use each engine's own vocabulary: newtron's "user groups" (not "roles") and newtlab's lifecycle verbs.
+- When newtron is missing something, write the request and wait for it. Don't add temporary bridges in newtcon.
+
+**UX bar**
+- Delight the operator: simple yet powerful, never a tedious graphical CLI. No gimmicks: every visual element must earn its place with an operator reason.
+- Dark is the default theme.
+- A fresh clone must work with default settings and no security setup. Auth, TLS and audit are optional for newcomers. The operator's own dev environment still runs with all of them enabled.
 
 ## Capability discipline
 
@@ -105,8 +137,8 @@ Full discipline in `~/.claude/projects/-home-aldrin-src-newtcon/memory/feedback_
 |---------|--------------|
 | `newtron-server` | `127.0.0.1:18080` |
 | `newtrun-server` | `127.0.0.1:18081` |
-| `newtcon-server` | `127.0.0.1:8082` (this project) |
-| `newtlab-server` | not yet — proposed `127.0.0.1:8083` (newtron#53) |
+| `newtcon-server` | `--addr` default `127.0.0.1:8080`; the live dev instance runs on `0.0.0.0:8095` (HTTPS, `--auth-required`) and the smoke suite targets it |
+| newtlab | served by the aggregated `bin/newt-server` (newtron#53, closed) |
 
 ## What's archived / superseded
 
@@ -121,7 +153,7 @@ Full discipline in `~/.claude/projects/-home-aldrin-src-newtcon/memory/feedback_
 - `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` — the principles all three tools derive from.
 - `../newtron/docs/editing-guidelines.md` — documentation craft.
 - `../newtron/docs/ai-instructions.md` — universal behavioral directives.
-- `docs/adr/0001-scope-justification-vs-newtrun.md` — the 3-tool rebalance.
+- `docs/adr/0001-scope-justification-vs-newtrun.md` — the 3-tool rebalance (its verdict: don't duplicate newtrun). Its "what stays in newtcon" list (observation-history store, Report Bug, Rehearsal catalogs, operations log) predates this directive and is **not** a build list.
 - `docs/adr/0002-frontend-framework.md` — vanilla HTML + TypeScript-as-typed-ES-modules (no bundler).
 - The "newtron API Consumption Rule" in `CLAUDE.md` — all newtron HTTP traffic via `internal/newtronc/`, no Go imports of newtron, no subprocess.
 - The build convention: `go build -o bin/newtcon-server ./cmd/newtcon-server`.

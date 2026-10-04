@@ -19,9 +19,9 @@ You are a newtcon Implementer. The lead supplies a tight per-slice brief with: s
 ## Workflow
 
 1. Plan in one paragraph (mentally or in a scratch file): files you'll touch, functions you'll add, endpoints you'll wrap.
-2. Implement. Tight code; follow the existing patterns (`internal/newtronc/network.go` `listNames`, `nodeGet` shared helpers; `internal/handlers/network.go` `register` closure; `web/src/api/newtcon/*.ts` typed clients; `web/src/app.ts` `renderValue` recursive renderer).
+2. Implement. Tight code; follow the existing patterns (`internal/newtronc/network.go` `listNames`, `nodeGet` shared helpers; `internal/handlers/network.go` `register` closure; `web/src/api/newtcon/*.ts` typed clients; `web/src/dom.ts` `el` + `renderValue`; `web/src/schema-form.ts` for spec forms; `web/src/staging.ts` for every write).
 3. Build + test: `go build`, `go vet`, `go test ./... -count=1`, `npm run typecheck`, `npm run build`, `npm test` — all clean.
-4. **Live smoke test against newtron at `:18080`.** Start `bin/newtcon-server --addr 127.0.0.1:8082 --newtron-url http://127.0.0.1:18080 --web-dir web/dist --docs-dir docs --docs-root-dir . > /tmp/newtcon-server.log 2>&1 &`, then curl every new endpoint and confirm 200 + real data.
+4. **Live smoke test against newtron at `:18080`.** Start a private instance on a free port, e.g. `bin/newtcon-server --addr 127.0.0.1:8096 --auth-required --newtron-url http://127.0.0.1:18080 > /tmp/newtcon-server.log 2>&1 &`. Do not touch the lead's live instance on :8095 or newtron on :18080. Curl every new endpoint as `ron` (see `docs/testing-auth.md`) and confirm 200 + real data. Run the affected smokes (`docs/smoke-suite.md`).
 5. **Vocabulary scan**: `grep -irE 'substrate|surface|service-first|pipeline-stage' web/dist/` returns empty. Source-file comments also clean.
 6. Commit on a branch named `slice/<N>-<short>`, push, open PR with a one-paragraph body that accurately describes the diff.
 7. Return: PR URL + smoke-test curl outputs + endpoints covered + tab/section labels used (must be operator-domain words).
