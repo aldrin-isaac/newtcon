@@ -61,6 +61,8 @@ internal/handlers/            → one file per resource family
   services.go                 → /api/networks/{netID}/services
   network.go                  → /api/networks/{netID}/{ipvpns,macvpns,qos-policies,filters,prefix-lists,route-policies,nodes,zones,platforms} (list+detail+create+delete+sub-rules; "nodes" = newtron NodeSpec, formerly "profiles")
   nodes.go                    → /api/networks/{netID}/topology + /api/networks/{netID}/nodes/{device}/...
+  schema.go                   → /api/schema, /api/schema/all, /api/schema/{kind} (newtron's spec-authoring schema metadata; network-agnostic)
+  kind_resolver.go            → URL slug → newtron kind + per-verb paths for spec CRUD forwarding (schema-driven, cached for the process lifetime)
   lab.go                      → /api/labs (newtlab lifecycle: list / status / deploy / destroy / provision / events / per-node start/stop)
 internal/newtronc/            → THE ONLY HTTP client of newtron-server
   client.go                   → http.Client, base URL, engine-base helpers
@@ -74,6 +76,7 @@ internal/newtronc/            → THE ONLY HTTP client of newtron-server
   services.go                 → service-related newtron calls
   network.go                  → network-level spec list + ShowSpec + writes
   nodes.go                    → topology + per-device + per-interface calls (incl. NodeProjectionDiff for slice #171.B)
+  schema.go                   → FetchSchemaKinds + FetchSchema + FetchAllSchemas (+ ETag-conditional variants) — global /newtron/v1/schema reads
   newtlab.go                  → newtlab-engine calls (labs list/status/deploy/destroy/provision/events/node-lifecycle)
 internal/hygiene/             → repo-wide quality gates that belong to no single package — the Go counterpart to web/scripts/ratchet.mjs. format_test.go fails when any Go source is not gofmt-formatted (there is no CI/Makefile; `go test ./...` is the one gate every change passes through)
 internal/session/             → operator session store + cookie helpers + middleware (cookie ↔ {bearer,user,expires_at})
@@ -126,6 +129,20 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     network-switcher.ts       → active-network dropdown (PR #133)
     device-status.ts          → unified-substrate state resolver (PR #137)
     staging.ts                → workspace-level pending-changes queue
+    toast.ts                  → showToast — the inline feedback channel (replaces window.alert): success/info auto-dismiss, errors sticky; owns the toast live region
+    confirm-inline.ts         → confirmInline — promise-returning in-app modal (replaces window.confirm)
+    announce.ts               → polite screen-reader live region for state changes with no visible text of their own (e.g. the pending-changes count)
+    focus-scope.ts            → keyboard focus management: trap (modals: palette, sign-in) vs. move-and-restore (drawers)
+    verb-parser.ts            → pure Cmd-K verb grammar (apply <service> on <device>:<iface>, create vlan …, deploy → navigate); the palette stages, never applies
+    schema-form.ts            → THE schema-driven form renderer: labels/tooltips/types/required-ness from newtron's schema metadata; callers layer UX via `overrides`
+    required-when.ts          → pure evaluator + tooltip pretty-printer for the schema's `required_when` condition trees
+    secret-field.ts           → pure ${secret:KEY} reference helpers (secret:true fields never carry plaintext)
+    service-params.ts         → pure: which apply-service parameters a service spec marks "request" (operator supplies them at bind time)
+    service-bindings.ts       → derive a service's interface bindings from topology steps (no extra HTTP)
+    service-references.ts     → reverse index: which services reference a given IP-VPN / MAC-VPN / filter / policy / prefix list, and through which field
+    node-references.ts        → pure: what still references a node (delete force-cascade) + which interfaces are free to wire (add-link pickers)
+    topology-layout.ts        → layered (Sugiyama-style) auto-layout for DC fabrics: rank by hops from hosts (hosts on the bottom line), pod grouping, crossing-minimizing sweeps
+    topology-view-mode.ts     → Spec / Lab / Physical view-mode selection + per-network persistence
     topology-actions.ts       → declarative action specs (per-port: mode + service; NODE_ACTIONS empty post-#210) + INTERFACE_ACTIONS used by the drawer Interfaces tab
     topology-actions-ui.ts    → floating right-click context menu (Inspect / delete)
     icons.ts                  → inline-SVG icon set (Lucide)
@@ -171,6 +188,10 @@ web/                          → frontend (vanilla HTML + TypeScript-as-tsc per
     authorization.ts          → Permissions tab (read-only view of newtron's super_users + user_groups + permissions; slice 2.2)
     design-system/            → color, typography, spacing, motion CSS + README
     api/newtcon/              → typed clients for newtcon-server endpoints
+      _transport.ts           → THE shared fetch + error-envelope helper every client uses
+      schema.ts               → /api/schema[/all|/{kind}] (spec-authoring schema metadata, in-session cache)
+      secrets.ts              → /api/networks/{netID}/secrets (names only — values are write-only)
+      ssh-credentials.ts      → /api/networks/{netID}/ssh-credentials (read side; writes stage through the pending queue)
       services.ts             → /api/networks/{netID}/services
       network.ts              → /api/networks/{netID}/{kind}/...
       nodes.ts                → /api/networks/{netID}/{topology,nodes/...}
