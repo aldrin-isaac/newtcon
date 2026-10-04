@@ -8,7 +8,7 @@ Set by operator 2026-05-30 → 2026-05-31. Will evolve as the operator further d
 
 ## Mission
 
-Ship features useful to a real network operator quickly. Conform to `../newtron/docs/editing-guidelines.md` and `../newtron/docs/ai-instructions.md`. Stay faithful to `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md`.
+Ship features useful to a real network operator quickly. Conform to `../newtron/docs/editing-guidelines.md` and `../newtron/docs/ai-instructions.md`. Stay faithful to how newtron works. `../newtron/docs/DESIGN_PRINCIPLES_NEWTRON.md` explains that behaviour; it governs newtron's development, not newtcon's.
 
 ## The operator workflow loop (the basics)
 
@@ -71,15 +71,21 @@ Operator decisions made after the loop shipped. Each is binding until the operat
 - Dark is the default theme.
 - A fresh clone must work with default settings and no security setup. Auth, TLS and audit are optional for newcomers. The operator's own dev environment still runs with all of them enabled.
 
-## Capability discipline
+## Scope: service provisioning
 
-**Maximize what newtron / newtrun / newtlab offers. Leave no capability inaccessible.**
+**newtcon is focused on service provisioning** (operator decision, 2026-10-04; replaces the earlier "leave no capability inaccessible" rule).
 
-For every newtron HTTP endpoint exposed in `pkg/newtron/api/handler.go` (and the sibling engines' handlers), surface either:
-- A direct affordance in the UI (read or write), or
-- A click-through reachable from a parent affordance.
+In scope is everything an operator needs to take a service from definition to a working, drift-free deployment, which is the workflow loop above:
+- authoring a service and the specs it references (VPNs, filters, QoS, route policies, prefix lists), plus the nodes, zones, platforms and SSH login a deployment needs
+- placing nodes and links in the topology, and setting port modes
+- applying, removing and refreshing services on interfaces (physical, LAG, IRB)
+- deploying and provisioning (newtlab or physical devices)
+- verifying the result (device state, BGP/EVPN health, interface status), and detecting and reconciling drift
+- the audit trail and authorization view around those changes
 
-Drilling deep is allowed; hiding is not.
+Out of scope unless the operator brings it in: per-device building-block operations that a service otherwise assembles itself (standalone VRFs, IP-VPN binds, ACL tables and rules, PortChannels, static routes, EVPN peers, IRB configuration, ACL/QoS binds, BGP peers, port properties), device lifecycle commands (config reload/save, daemon restart, ssh-command), and newtrun.
+
+A newtron capability that isn't in scope is not a gap to fill. When unsure whether something serves service provisioning, ask.
 
 ## Lead discipline
 
